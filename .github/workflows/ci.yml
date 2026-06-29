@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install lint tooling
+        run: pip install pre-commit holoscan-cli
+      - name: Run repository checks
+        run: pre-commit run --show-diff-on-failure --all-files
+  unit-tests:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test tools
+        run: pip install cmake ninja pytest pytest-timeout
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFINANCE_BUILD_TESTING=ON \
+            -DBUILD_ALL=ON
+          cmake --build build --parallel
+      - name: Run CPU test suite
+        run: ctest --test-dir build --output-on-failure
+
+  wheel:
+    name: Build universal wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+      - name: Verify wheel tag and SDK-independent models import
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          wheels = list(Path("dist").glob("*-py3-none-any.whl"))
+          assert len(wheels) == 1, wheels
+          PY
+          pip install --no-deps dist/*-py3-none-any.whl
+          python -c "from holoscan.finance import MarketTick; print(MarketTick)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holoscan-finance-wheel
+          path: dist/*.whl
+
+  build-and-test:
+    name: Build and Test (Holoscan 4.3.0)
+    # Requires a self-hosted GPU runner and the Holoscan container image.
+    # Define the repository variable ENABLE_GPU_CI=true after provisioning one.
+    # To set up a self-hosted runner see:
+    #   https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners
+    if: ${{ vars.ENABLE_GPU_CI == 'true' }}
+    runs-on: [self-hosted, linux, x86_64, gpu]
+
+    container:
+      image: nvcr.io/nvidia/clara-holoscan/holoscan:v4.3.0-cuda13
+      options: --gpus all
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFINANCE_BUILD_TESTING=ON \
+            -DBUILD_ALL=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Python tests (pytest)
+        run: |
+          FINANCE_BUILD_DIR=build \
+          PYTHONPATH=build/python/lib${PYTHONPATH:+:$PYTHONPATH} \
+          python -m pytest tests/python/ -v --tb=short
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: build/Testing/
