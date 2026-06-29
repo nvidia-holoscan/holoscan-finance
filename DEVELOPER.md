@@ -215,7 +215,7 @@ or set `HOLOSCAN_CLI_SOURCE` to a local CLI checkout.
 ### Build the reference application
 
 ```bash
-./holohub build intraday_risk_pipeline --language python
+./holohub build intraday_risk_pipeline
 ```
 
 `BUILD_ALL` defaults to `ON` for a standalone build and `OFF` when this project is nested

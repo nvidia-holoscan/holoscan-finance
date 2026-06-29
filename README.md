@@ -40,7 +40,7 @@ or CUDA build on the consumer's behalf.
 From the repository root, run the reference application:
 
 ```bash
-./holohub run intraday_risk_pipeline --language python
+./holohub run intraday_risk_pipeline
 ```
 
 The application replays
@@ -240,7 +240,7 @@ HoloHub CLI.
 ### Container build
 
 ```bash
-./holohub build intraday_risk_pipeline --language python
+./holohub build intraday_risk_pipeline
 ```
 
 ### Local CMake build

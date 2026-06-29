@@ -43,7 +43,7 @@ breaches.
 From the module root, run:
 
 ```bash
-./holohub run intraday_risk_pipeline --language python
+./holohub run intraday_risk_pipeline
 ```
 
 The console sink logs whether each snapshot is complete or partial and emits a
