@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install lint tooling
-        run: pip install pre-commit holoscan-cli
+        run: pip install pre-commit
       - name: Run repository checks
         run: pre-commit run --show-diff-on-failure --all-files
   unit-tests:

@@ -66,7 +66,8 @@ repos:
       - id: holoscan-metadata-validate
         name: validate metadata.json against the Holoscan CLI schema
         entry: python3 .github/workflows/scripts/validate_metadata.py
-        language: system
+        language: python
+        additional_dependencies: ["holoscan-cli", "jsonschema>=4.26.0", "referencing"]
         files: '(^|/)metadata\.json$'
         pass_filenames: false
 
