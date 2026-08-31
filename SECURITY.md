@@ -130,12 +130,12 @@ auxiliary build and tooling paths:
    multi-tenant environment can leak confidential position and performance data into logs with
    broader read access than the pipeline itself.
 
-6. **Untrusted contributor code on self-hosted GPU CI:** `.github/workflows/ci.yml` runs on
-   `pull_request`, and its optional GPU job (enabled by the `ENABLE_GPU_CI` repository variable)
-   targets a self-hosted runner with all GPUs passed into the container. Since build and test
-   commands come from the checked-out branch, pull requests from untrusted forks could execute
-   contributor-controlled code on persistent, NVIDIA-managed hardware unless fork runs are gated
-   by approval.
+6. **Untrusted contributor code on self-hosted GPU CI:** `.github/workflows/ci.yml` GitHub-hosted
+   jobs still run on `pull_request`. The optional GPU job (enabled by the `ENABLE_GPU_CI`
+   repository variable) targets a self-hosted runner with all GPUs passed into the container, but
+   is restricted to `push` events so it runs only after merge to `main`. Do not reintroduce a
+   `pull_request` trigger for that job: build and test commands come from the checked-out branch
+   and would otherwise execute contributor-controlled code on persistent, NVIDIA-managed hardware.
 
 7. **Shell interpolation in repository maintenance scripts:** `gitutils.py` executes commands
    through `subprocess.check_output(cmd, shell=True)`, and `check_copyright.py` builds git

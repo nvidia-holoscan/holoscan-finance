@@ -78,9 +78,11 @@ jobs:
     name: Build and Test (Holoscan 4.3.0)
     # Requires a self-hosted GPU runner and the Holoscan container image.
     # Define the repository variable ENABLE_GPU_CI=true after provisioning one.
+    # Run only on push (after merge), never on pull_request: untrusted PR code
+    # must not execute on persistent self-hosted GPU runners.
     # To set up a self-hosted runner see:
     #   https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners
-    if: ${{ vars.ENABLE_GPU_CI == 'true' }}
+    if: ${{ github.event_name == 'push' && vars.ENABLE_GPU_CI == 'true' }}
     runs-on: [self-hosted, linux, x86_64, gpu]
 
     container:
