@@ -109,12 +109,13 @@ auxiliary build and tooling paths:
    in memory before replay, so input size directly determines resident memory in a long-running
    pipeline.
 
-3. **Supply-chain compromise of the developer and build bootstrap:** the `./holohub` wrapper and
-   the `Dockerfile` install `holoscan-cli>4.2.0` with `--pre` from an additional package index,
-   and the container base image is referenced by a mutable tag rather than a digest. The build
-   also installs unpinned `build`, `scikit-build-core`, and test tooling. A compromised or
-   substituted package or image tag would execute attacker-controlled code in developer, CI, and
-   packaging environments, and could affect the published wheel or Debian package.
+3. **Supply-chain compromise of the developer and build bootstrap:** the `./holohub` wrapper still
+   defaults to a version-ranged `holoscan-cli` install (including `--pre`) so developers can pick
+   up CLI RCs; the `Dockerfile` pins `holoscan-cli==4.5.0`, `pytest-timeout==2.4.0`, `build==1.6.0`,
+   and `scikit-build-core==1.0.3`, and accepts a digest via `--build-arg BASE_IMAGE=...@sha256:...`.
+   The published default still names the Holoscan SDK image by tag because NGC digest resolution
+   requires registry authentication. A substituted tag, extra index, or unpinned override would
+   still execute attacker-controlled code in developer and packaging environments.
 
 4. **Environment-driven injection in the developer CLI wrapper:** `./holohub` treats
    `HOLOSCAN_CLI_INSTALL_ARGS` and `HOLOSCAN_CLI_SOURCE` as trusted local overrides. Install
@@ -209,7 +210,7 @@ Out of scope here (report to the owning project instead):
 The runtime package declares no third-party dependencies: it uses the Python standard library and
 the separately installed Holoscan SDK. Development and CI tooling — pre-commit hooks, `ruff`,
 `codespell`, `markdownlint`, `cmakelint`, `pytest`, and the Python build backend — is pinned by
-revision in `.pre-commit-config.yaml` where the hook framework supports it. The Holoscan CLI
-bootstrap in `./holohub` and the `Dockerfile` are version-ranged rather than pinned; deployments
-that require reproducible builds should pin those versions and reference the container base image
-by digest.
+revision in `.pre-commit-config.yaml` where the hook framework supports it. The `Dockerfile` pins
+`holoscan-cli` and Python build/test packages to exact versions. The Holoscan CLI bootstrap in
+`./holohub` remains version-ranged for local convenience; pass a digest as `BASE_IMAGE` when a
+reproducible container base is required.
