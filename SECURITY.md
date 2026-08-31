@@ -116,12 +116,12 @@ auxiliary build and tooling paths:
    substituted package or image tag would execute attacker-controlled code in developer, CI, and
    packaging environments, and could affect the published wheel or Debian package.
 
-4. **Environment-driven injection in the developer CLI wrapper:** `./holohub` expands
-   `HOLOSCAN_CLI_INSTALL_ARGS` unquoted into its `pip install` invocation and prepends
-   `HOLOSCAN_CLI_SOURCE` to `PYTHONPATH`. In an environment where those variables can be set by
-   another party — a shared shell profile, a devcontainer definition, or a CI variable — the
-   wrapper can be steered into installing unintended packages or importing a substituted
-   `holoscan_cli` module before the intended one.
+4. **Environment-driven injection in the developer CLI wrapper:** `./holohub` treats
+   `HOLOSCAN_CLI_INSTALL_ARGS` and `HOLOSCAN_CLI_SOURCE` as trusted local overrides. Install
+   arguments are word-split into an argv array (no globbing) before `pip install`;
+   `HOLOSCAN_CLI_SOURCE` is accepted only if it contains `src/holoscan_cli`. Anyone who can set
+   those variables for the wrapper's process can already run pip as that user — do not pass
+   untrusted CI inputs into them.
 
 5. **Disclosure of portfolio detail through application logs:** the reference
    `ConsoleRiskSinkOp` logs entire `PortfolioSnapshot` values at `INFO` and every `RiskBreach` at
