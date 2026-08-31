@@ -137,11 +137,10 @@ auxiliary build and tooling paths:
    `pull_request` trigger for that job: build and test commands come from the checked-out branch
    and would otherwise execute contributor-controlled code on persistent, NVIDIA-managed hardware.
 
-7. **Shell interpolation in repository maintenance scripts:** `gitutils.py` executes commands
-   through `subprocess.check_output(cmd, shell=True)`, and `check_copyright.py` builds git
-   commands from branch and path values before running them in pre-commit and CI. Repository
-   content or reference names that reach those command strings are interpreted by the shell rather
-   than passed as argument vectors.
+7. **Shell interpolation in repository maintenance scripts:** `gitutils.py` invokes git with an
+   argument vector (`subprocess.check_output(cmd)` without `shell=True`). Keep that pattern: do
+   not concatenate git references or paths into a shell string. `check_copyright.py` passes branch
+   and path values into those helpers; they must remain argv elements, not shell metacharacters.
 
 ### Critical Security Assumptions
 
