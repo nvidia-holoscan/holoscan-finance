@@ -28,8 +28,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 # a pinned release (no --pre) from NVIDIA PyPI.
 ARG HOLOSCAN_CLI_INSTALL_ARGS="--extra-index-url https://pypi.nvidia.com holoscan-cli==4.5.0"
 RUN if ! python3 -m holoscan_cli --help 2>/dev/null | grep -qw build; then \
-        python3 -c "import shlex, subprocess, sys; \
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + shlex.split('''${HOLOSCAN_CLI_INSTALL_ARGS}'''))" \
+        python3 -c "import os, shlex, subprocess, sys; \
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + \
+            shlex.split(os.environ['HOLOSCAN_CLI_INSTALL_ARGS']))" \
     ; fi
 
 # The module itself uses only the Python standard library beyond Holoscan SDK.
