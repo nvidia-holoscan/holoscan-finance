@@ -109,19 +109,20 @@ auxiliary build and tooling paths:
    in memory before replay, so input size directly determines resident memory in a long-running
    pipeline.
 
-3. **Supply-chain compromise of the developer and build bootstrap:** the `./holohub` wrapper and
-   the `Dockerfile` install `holoscan-cli>4.2.0` with `--pre` from an additional package index,
-   and the container base image is referenced by a mutable tag rather than a digest. The build
-   also installs unpinned `build`, `scikit-build-core`, and test tooling. A compromised or
-   substituted package or image tag would execute attacker-controlled code in developer, CI, and
-   packaging environments, and could affect the published wheel or Debian package.
+3. **Supply-chain compromise of the developer and build bootstrap:** the `./holohub` wrapper still
+   defaults to a version-ranged `holoscan-cli` install (including `--pre`) so developers can pick
+   up CLI RCs; the `Dockerfile` pins `holoscan-cli==4.5.0`, `pytest-timeout==2.4.0`, `build==1.6.0`,
+   and `scikit-build-core==1.0.3`, and accepts a digest via `--build-arg BASE_IMAGE=...@sha256:...`.
+   The published default still names the Holoscan SDK image by tag because NGC digest resolution
+   requires registry authentication. A substituted tag, extra index, or unpinned override would
+   still execute attacker-controlled code in developer and packaging environments.
 
-4. **Environment-driven injection in the developer CLI wrapper:** `./holohub` expands
-   `HOLOSCAN_CLI_INSTALL_ARGS` unquoted into its `pip install` invocation and prepends
-   `HOLOSCAN_CLI_SOURCE` to `PYTHONPATH`. In an environment where those variables can be set by
-   another party — a shared shell profile, a devcontainer definition, or a CI variable — the
-   wrapper can be steered into installing unintended packages or importing a substituted
-   `holoscan_cli` module before the intended one.
+4. **Environment-driven injection in the developer CLI wrapper:** `./holohub` treats
+   `HOLOSCAN_CLI_INSTALL_ARGS` and `HOLOSCAN_CLI_SOURCE` as trusted local overrides. Install
+   arguments are word-split into an argv array (no globbing) before `pip install`;
+   `HOLOSCAN_CLI_SOURCE` is accepted only if it contains `src/holoscan_cli`. Anyone who can set
+   those variables for the wrapper's process can already run pip as that user — do not pass
+   untrusted CI inputs into them.
 
 5. **Disclosure of portfolio detail through application logs:** the reference
    `ConsoleRiskSinkOp` logs entire `PortfolioSnapshot` values at `INFO` and every `RiskBreach` at
@@ -130,18 +131,17 @@ auxiliary build and tooling paths:
    multi-tenant environment can leak confidential position and performance data into logs with
    broader read access than the pipeline itself.
 
-6. **Untrusted contributor code on self-hosted GPU CI:** `.github/workflows/ci.yml` runs on
-   `pull_request`, and its optional GPU job (enabled by the `ENABLE_GPU_CI` repository variable)
-   targets a self-hosted runner with all GPUs passed into the container. Since build and test
-   commands come from the checked-out branch, pull requests from untrusted forks could execute
-   contributor-controlled code on persistent, NVIDIA-managed hardware unless fork runs are gated
-   by approval.
+6. **Untrusted contributor code on self-hosted GPU CI:** `.github/workflows/ci.yml` GitHub-hosted
+   jobs still run on `pull_request`. The optional GPU job (enabled by the `ENABLE_GPU_CI`
+   repository variable) targets a self-hosted runner with all GPUs passed into the container, but
+   is restricted to `push` events so it runs only after merge to `main`. Do not reintroduce a
+   `pull_request` trigger for that job: build and test commands come from the checked-out branch
+   and would otherwise execute contributor-controlled code on persistent, NVIDIA-managed hardware.
 
-7. **Shell interpolation in repository maintenance scripts:** `gitutils.py` executes commands
-   through `subprocess.check_output(cmd, shell=True)`, and `check_copyright.py` builds git
-   commands from branch and path values before running them in pre-commit and CI. Repository
-   content or reference names that reach those command strings are interpreted by the shell rather
-   than passed as argument vectors.
+7. **Shell interpolation in repository maintenance scripts:** `gitutils.py` invokes git with an
+   argument vector (`subprocess.check_output(cmd)` without `shell=True`). Keep that pattern: do
+   not concatenate git references or paths into a shell string. `check_copyright.py` passes branch
+   and path values into those helpers; they must remain argv elements, not shell metacharacters.
 
 ### Critical Security Assumptions
 
@@ -210,7 +210,7 @@ Out of scope here (report to the owning project instead):
 The runtime package declares no third-party dependencies: it uses the Python standard library and
 the separately installed Holoscan SDK. Development and CI tooling — pre-commit hooks, `ruff`,
 `codespell`, `markdownlint`, `cmakelint`, `pytest`, and the Python build backend — is pinned by
-revision in `.pre-commit-config.yaml` where the hook framework supports it. The Holoscan CLI
-bootstrap in `./holohub` and the `Dockerfile` are version-ranged rather than pinned; deployments
-that require reproducible builds should pin those versions and reference the container base image
-by digest.
+revision in `.pre-commit-config.yaml` where the hook framework supports it. The `Dockerfile` pins
+`holoscan-cli` and Python build/test packages to exact versions. The Holoscan CLI bootstrap in
+`./holohub` remains version-ranged for local convenience; pass a digest as `BASE_IMAGE` when a
+reproducible container base is required.

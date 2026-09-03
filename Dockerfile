@@ -15,20 +15,26 @@
 #
 # Manual build (without the CLI):
 #   docker build -t holoscan-finance .
+#
+# For a digest-pinned base image (NGC login required to resolve the digest):
+#   docker build --build-arg BASE_IMAGE=nvcr.io/nvidia/clara-holoscan/holoscan@sha256:<digest> .
 
 ARG BASE_IMAGE=nvcr.io/nvidia/clara-holoscan/holoscan:v4.3.0-cuda13
 FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install holoscan-cli developer tools
-ARG HOLOSCAN_CLI_INSTALL_ARGS="--pre --extra-index-url https://pypi.nvidia.com holoscan-cli>4.2.0"
+# Install holoscan-cli developer tools. Override with --build-arg; default is
+# a pinned release (no --pre) from NVIDIA PyPI.
+ARG HOLOSCAN_CLI_INSTALL_ARGS="--extra-index-url https://pypi.nvidia.com holoscan-cli==4.5.0"
 RUN if ! python3 -m holoscan_cli --help 2>/dev/null | grep -qw build; then \
-        python3 -m pip install ${HOLOSCAN_CLI_INSTALL_ARGS} \
+        python3 -c "import os, shlex, subprocess, sys; \
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + \
+            shlex.split(os.environ['HOLOSCAN_CLI_INSTALL_ARGS']))" \
     ; fi
 
 # The module itself uses only the Python standard library beyond Holoscan SDK.
 
 # Python tooling: pytest-timeout for tests, build + scikit-build-core for
 # `./holohub package --pkg-generator WHEEL` (drives `python -m build`).
-RUN pip install --no-cache-dir pytest-timeout build scikit-build-core
+RUN pip install --no-cache-dir pytest-timeout==2.4.0 build==1.6.0 scikit-build-core==1.0.3
