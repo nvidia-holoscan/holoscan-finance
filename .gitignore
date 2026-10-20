@@ -3,6 +3,13 @@ __pycache__/
 .ruff_cache/
 .venv/
 dist/
+*.egg-info/
+
+# Container caches (pip --user, CuPy kernels) and run outputs
+.cache/
+.local/
+.cupy/
+out/
 
 # CMake build trees and the holohub CLI download
 build*/
