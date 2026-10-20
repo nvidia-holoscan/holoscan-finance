@@ -1,0 +1,53 @@
+{
+    "$schema": "urn:holohub:application:v1",
+    "application": {
+        "name": "equity_analytics",
+        "authors": [
+            {
+                "name": "Jake Goldberg",
+                "affiliation": "NVIDIA"
+            }
+        ],
+        "language": [
+            "Python"
+        ],
+        "version": "0.1.0",
+        "changelog": {
+            "0.1.0": "NYQ trade/quote UDP replay into rolling price, volatility and correlation analytics with matched CPU/GPU measurements"
+        },
+        "holoscan_sdk": {
+            "minimum_required_version": "4.3.0",
+            "tested_versions": [
+                "4.3.0"
+            ]
+        },
+        "platforms": [
+            "x86_64",
+            "aarch64"
+        ],
+        "tags": [
+            "Financial Services",
+            "GPU",
+            "Market Data",
+            "Risk Analytics"
+        ],
+        "ranking": 2,
+        "requirements": {
+            "operators": [
+                "gpu_mitch_source_op",
+                "gpu_quote_bars_op",
+                "gpu_rolling_risk_op"
+            ]
+        },
+        "default_mode": "default",
+        "modes": {
+            "default": {
+                "description": "NYQ historical MITCH replay, CuPy/cuBLAS covariance, concurrent validation, separate CPU/GPU benchmark modes and timeline scrubbing",
+                "run": {
+                    "command": "python3 applications/equity_analytics/equity_demo.py",
+                    "workdir": "holohub_app_source"
+                }
+            }
+        }
+    }
+}

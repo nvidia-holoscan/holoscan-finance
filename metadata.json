@@ -1,50 +1,67 @@
 {
-  "$schema": "urn:holohub:module:v2",
-  "module": {
-    "name": "holoscan-finance",
-    "version": "0.1.0",
-    "description": "Pure Python Holoscan operators and reference applications for real-time financial services workloads.",
-    "authors": [
-      {
-        "name": "Bruce Hashemian",
-        "affiliation": "NVIDIA"
-      }
-    ],
-    "license": "Apache-2.0",
-    "language": ["Python"],
-    "namespace": {
-      "python": "holoscan.finance"
-    },
-    "holoscan_sdk": {
-      "minimum_required_version": "4.3.0",
-      "tested_versions": ["4.3.0"]
-    },
-    "platforms": ["x86_64", "aarch64"],
-    "tags": ["Finance", "Streaming", "Market Data", "Risk Analytics", "Python"],
-    "subprojects": {
-      "operators": [
-        "market_data_replay_op",
-        "rolling_statistics_op",
-        "portfolio_risk_op"
-      ],
-      "applications": ["intraday_risk_pipeline"]
-    },
-    "operator_names": [
-      "MarketDataReplayOp",
-      "RollingStatisticsOp",
-      "PortfolioRiskOp"
-    ],
-    "dockerfile": "Dockerfile",
-    "binary_packages": {
-      "debian": "holoscan-finance",
-      "pypi": "holoscan-finance",
-      "install_commands": ["pip install holoscan-finance"]
-    },
-    "documentation": {
-      "readme": "README.md"
-    },
-    "testing": {
-      "python": "pytest"
+    "$schema": "urn:holohub:module:v2",
+    "module": {
+        "name": "holoscan-finance",
+        "version": "0.1.0",
+        "description": "Streaming NYQ equity analytics on Holoscan: GPU operators for MITCH receive, quote bars and rolling risk, and the equity_analytics application.",
+        "authors": [
+            {
+                "name": "Bruce Hashemian",
+                "affiliation": "NVIDIA"
+            }
+        ],
+        "license": "Apache-2.0",
+        "language": [
+            "Python"
+        ],
+        "namespace": {
+            "python": "holoscan.marketdata"
+        },
+        "holoscan_sdk": {
+            "minimum_required_version": "4.3.0",
+            "tested_versions": [
+                "4.3.0"
+            ]
+        },
+        "platforms": [
+            "x86_64",
+            "aarch64"
+        ],
+        "tags": [
+            "Finance",
+            "Streaming",
+            "Market Data",
+            "Risk Analytics",
+            "Python"
+        ],
+        "subprojects": {
+            "operators": [
+                "gpu_mitch_source_op",
+                "gpu_quote_bars_op",
+                "gpu_rolling_risk_op"
+            ],
+            "applications": [
+                "equity_analytics"
+            ]
+        },
+        "operator_names": [
+            "GpuMitchSourceOp",
+            "GpuQuoteBarsOp",
+            "GpuRollingRiskOp"
+        ],
+        "dockerfile": "Dockerfile",
+        "binary_packages": {
+            "debian": "holoscan-finance",
+            "pypi": "holoscan-finance",
+            "install_commands": [
+                "pip install holoscan-finance"
+            ]
+        },
+        "documentation": {
+            "readme": "README.md"
+        },
+        "testing": {
+            "python": "pytest"
+        }
     }
-  }
 }

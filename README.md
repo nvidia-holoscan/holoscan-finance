@@ -1,371 +1,183 @@
-# Holoscan for Financial Services Industry
+# Streaming NYQ equity analytics with Holoscan
 
-`holoscan-finance` is a self-contained
-[Holoscan Module](https://github.com/nvidia-holoscan/holohub/tree/main/modules) for
-building streaming financial-services applications. It provides immutable market and
-portfolio messages, deterministic CSV replay, per-symbol rolling statistics, and
-portfolio-limit evaluation under the `holoscan.finance` namespace.
+Replays one recorded trading day of LSEG NYQ trades and quotes as MITCH over UDP and
+continuously computes five-second quote returns, historical volatility and
+cross-instrument correlation. NVIDIA Holoscan runs the receiver, quote bars and
+analytics as one graph; CuPy/cuBLAS computes the rolling statistics on the GPU, and a
+NumPy/SciPy worker computes the same windows on the CPU for comparison. With
+`--ingest gpu`, packets go from the NIC straight into GPU memory and CUDA kernels
+decode them and build the quote bars.
 
-> [!IMPORTANT]
-> This project is a technical reference implementation. It is not investment, trading,
-> accounting, regulatory, or risk-management advice, and it is not a production risk
-> engine. Validate the calculations, controls, and data sources for your use case.
+**Data: historical LSEG/Refinitiv equity data — NYQ dataset** (April 1, 2025;
+licensed, not in Git). See [methodology](docs/METHODOLOGY.md) for the data, wire
+format and calculation conventions.
 
-## What is included
+## Results
 
-| Component | Purpose |
-| --- | --- |
-| `MarketDataReplayOp` | Emit a finite, validated sequence of market ticks in deterministic order. |
-| `RollingStatisticsOp` | Maintain independent per-symbol windows and emit returns, a moving average, and return deviation. |
-| `PortfolioRiskOp` | Mark configured long and short positions with the latest observed prices and evaluate portfolio limits. |
-| Immutable data models | Define explicit contracts for ticks, features, positions, marks, breaches, and snapshots. |
-| `load_market_ticks_csv` | Load the module's canonical CSV market-data format using the standard library. |
-| `intraday_risk_pipeline` | Demonstrate an end-to-end offline replay with checked-in synthetic data. |
+Measured on IGX Thor (14 Arm64 cores), RTX PRO 6000 Blackwell Max-Q and ConnectX-7 in
+PHY local loopback, with DAQIRI/DPDK receive.
 
-## Requirements
+**GPUDirect ingest (`--ingest gpu`): 200,000 packets/s — 6.6M MITCH messages/s —
+received, decoded, barred and analyzed in real time, with zero loss in 242 of 250
+full-day runs and market data never leaving GPU memory.** The whole recorded day
+(92,178,039 observations, 2,880,565 packets) arrives in 14.4 s, about 1,620× real time.
+Five lossy runs dropped 2–4% of packets during rare ~1 s receiver stalls; one rejected
+35 packets the replay tool sent with a stale source port; in two, every packet arrived
+but 26–41 arrived out of order and were discarded. Those stalls were Python threads
+holding the interpreter lock, which stopped the receive drain. The drain now runs in a
+native thread that never takes the lock: with injected lock holds of 1.1 s and 3 s, 11
+of 12 runs delivered every packet, where the Python drain lost ~3.8% in 3 of 3
+([details](docs/GPU_INGEST.md#native-drain)). The
+host-memory path (`--ingest ano`) keeps up in real time only to 4,500 packets/s (~149k
+messages/s), about 44× lower; at 6,000–7,500 packets/s it loses nothing within 15 s
+but falls 4–7 s behind, and it starts dropping near 10,000. GPU decode and bars are bit-identical to the CPU
+implementation over the full day (returns within 1 ULP). Method and caveats:
+[GPUDirect ingest](docs/GPU_INGEST.md).
 
-| Requirement | Supported version |
-| --- | --- |
-| Holoscan SDK | 4.3.0 or later |
-| Python | 3.10 through 3.13 |
-| CMake | 3.24 or later |
-| Platform | `x86_64` or `aarch64` |
+**Analytics: 9.55× by median calculation time** in separate CPU-only and GPU-only
+streaming runs at 75,000 observations/s (host-memory ingest), over all 362 shared
+full-window updates. It covers the rolling analytics block, not the whole pipeline.
 
-Install the Holoscan SDK separately using the package and CUDA variant appropriate for
-the target system. The `holoscan-finance` wheel deliberately does not select a Holoscan
-or CUDA build on the consumer's behalf.
-
-## Quick start
-
-From the repository root, run the reference application:
-
-```bash
-./holohub run intraday_risk_pipeline
-```
-
-The application replays
-`applications/intraday_risk_pipeline/data/synthetic_market_data.csv`, calculates a
-three-observation rolling window, marks a small long/short portfolio, and logs every
-partial or complete snapshot and limit breach. It is finite and requires no network
-access or external market-data service.
-
-## Pipeline flow
-
-```mermaid
-flowchart LR
-    CSV["Validated CSV rows"] --> Loader["load_market_ticks_csv"]
-    Loader -->|"tuple[MarketTick, ...]"| Replay["MarketDataReplayOp"]
-    Replay -->|"tick"| Statistics["RollingStatisticsOp"]
-    Statistics -->|"features"| Risk["PortfolioRiskOp"]
-    Risk -->|"snapshot"| Sink["ConsoleRiskSinkOp"]
-```
-
-`RollingStatisticsOp` owns one bounded history per symbol. `PortfolioRiskOp` owns the
-latest mark per configured symbol and emits a new portfolio view whenever it receives
-features. These stateful operators are intentionally independent so applications can
-replace replay, persistence, alerting, or execution components without changing the
-financial message contracts.
-
-## Python API
-
-The public API is exported from `holoscan.finance`:
-
-```python
-from decimal import Decimal
-
-from holoscan.core import Application
-from holoscan.finance import (
-    MarketDataReplayOp,
-    PortfolioRiskOp,
-    Position,
-    RiskLimits,
-    RollingStatisticsOp,
-    load_market_ticks_csv,
-)
-
-
-class RiskApplication(Application):
-    def compose(self) -> None:
-        ticks = load_market_ticks_csv("market_ticks.csv")
-
-        replay = MarketDataReplayOp(self, ticks=ticks, name="market_data_replay")
-        statistics = RollingStatisticsOp(
-            self,
-            window_size=20,
-            min_periods=5,
-            name="rolling_statistics",
-        )
-        risk = PortfolioRiskOp(
-            self,
-            positions=(
-                Position(
-                    symbol="NVDA",
-                    quantity=Decimal("100"),
-                    average_price=Decimal("150.00"),
-                ),
-            ),
-            limits=RiskLimits(
-                max_gross_exposure=Decimal("25000"),
-                max_abs_net_exposure=Decimal("25000"),
-                max_unrealized_loss=Decimal("1000"),
-            ),
-            name="portfolio_risk",
-        )
-
-        self.add_flow(replay, statistics, {("tick", "tick")})
-        self.add_flow(statistics, risk, {("features", "features")})
-        # Connect risk's "snapshot" output to an application-specific sink.
-```
-
-Prices, quantities, position values, exposures, and P&L use `decimal.Decimal`.
-Construct them from strings when exact decimal input matters; avoid constructing them
-from binary floating-point values. Simple returns, log returns, and return deviation are
-finite Python `float` values because the standard-library logarithm and statistics
-functions operate on floats.
-
-### Data models
-
-Every public model is a frozen dataclass. Instances can be passed safely between
-operators without defensive copying, and tuple-valued collections cannot be mutated by
-downstream consumers.
-
-| Model | Fields | Contract |
+| Same 362 windows | p50 | p99 |
 | --- | --- | --- |
-| `MarketTick` | `timestamp`, `sequence`, `symbol`, `price`, `currency="USD"` | One positive-price observation. `timestamp` must be timezone-aware and is normalized to UTC; `sequence` is a non-negative integer; symbols and currencies are normalized to uppercase. |
-| `MarketFeatures` | `tick`, `simple_return`, `log_return`, `moving_average`, `return_deviation`, `price_observations`, `return_observations` | The original tick plus the state of that symbol's current rolling window. Simple/log returns are `float` values after the first symbol observation; moving average is a `Decimal`; warm-up values may be `None`. |
-| `Position` | `symbol`, `quantity`, `average_price`, `currency="USD"` | A non-zero signed quantity and positive average entry price. Positive quantities are long; negative quantities are short. |
-| `PositionMark` | `position`, `market_price`, `market_value`, `unrealized_pnl` | A configured position valued with the latest available price for its symbol. |
-| `RiskLimits` | `max_gross_exposure`, `max_abs_net_exposure`, `max_unrealized_loss` | Independently optional positive limits. `None` disables a limit. |
-| `RiskBreach` | `code`, `observed`, `limit`, `message` | A machine-readable breach code plus the observed value, threshold, and human-readable explanation. |
-| `PortfolioSnapshot` | `timestamp`, `sequence`, `currency`, `marks`, `gross_exposure`, `net_exposure`, `unrealized_pnl`, `unpriced_symbols`, `breaches` | An immutable portfolio view as of the tick that triggered it. The `complete` property is true when `unpriced_symbols` is empty. |
+| Packet arrival → published GPU result (GPU-only run) | 34.22 ms | 49.83 ms |
+| Packet arrival → published CPU result (CPU-only run) | 66.91 ms | 100.30 ms |
+| GPU analytics calculation | 3.89 ms | 6.44 ms |
+| CPU analytics calculation (8 BLAS threads) | 37.13 ms | 65.30 ms |
 
-Validation occurs when a model is constructed. Invalid timestamps, identifiers,
-currencies, non-finite values, impossible prices, zero positions, and non-positive risk
-limits fail early with `TypeError` or `ValueError` instead of entering the graph.
+Each run captured 120 s at ~75,002 observations/s (CPU run 9,000,192 observations,
+GPU run 9,000,256) with no sequence gaps, ring drops or malformed packets. The windows
+are every update in 14:05:40–14:35:50 UTC; input hashes match and numerical agreement
+passes. CPU BLAS threads were chosen from 1, 2, 4, 8 and 14.
 
-### CSV data contract
+## Host-memory path vs GPUDirect path
 
-`load_market_ticks_csv(path)` reads a header-based UTF-8 CSV file and returns validated
-ticks in file order. The required schema is:
-
-| Column | Value |
-| --- | --- |
-| `timestamp` | ISO 8601 timestamp with a UTC offset, for example `2026-01-05T14:30:00+00:00`; `Z` is also accepted. |
-| `sequence` | Non-negative integer identifying the observation's source order. Sequences must be strictly increasing. |
-| `symbol` | Non-empty instrument identifier. |
-| `price` | Positive finite decimal value. |
-| `currency` | Three-letter currency code normalized to uppercase, such as `usd` becoming `USD`. |
-
-Example:
-
-```csv
-timestamp,sequence,symbol,price,currency
-2026-01-05T14:30:00+00:00,1,ALPHA,100.00,USD
-2026-01-05T14:30:01+00:00,2,BETA,200.00,USD
-```
-
-The loader requires all five named columns, ignores additional columns, normalizes
-timestamps to UTC, and requires non-decreasing timestamps across the file. Empty files,
-malformed rows, non-increasing sequences, and time regressions are reported at the
-ingestion boundary. Normalize vendor-specific feeds into this contract before creating
-the application graph.
-
-### Operators
-
-#### `MarketDataReplayOp`
-
-| Direction | Port | Message |
+| Step | `--ingest ano` (host memory) | `--ingest gpu` (GPUDirect) |
 | --- | --- | --- |
-| Output | `tick` | `MarketTick` |
+| NIC delivers packets to | pinned CPU memory | GPU memory (dma-buf; no `nvidia_peermem`) |
+| Packet handling | Python copies each packet into a ring | CUDA kernel gathers payloads into slots |
+| MITCH decode | Python, one message at a time | CUDA kernel, one thread per packet |
+| Five-second quote bars | NumPy on the CPU | CUDA kernels |
+| Rolling covariance / correlation | CuPy + cuBLAS in a separate process, fed host arrays | CuPy + cuBLAS in-process on the device-resident window (`GpuRollingRiskOp`) |
+| Market data on the CPU | every packet, observation and bar | none (control metadata and dashboard results only) |
+| Highest rate kept up in real time | 4,500 packets/s (149k msgs/s) | 200,000 packets/s (6.6M msgs/s) |
 
-| Parameter | Meaning |
-| --- | --- |
-| `ticks` | Finite sequence of validated `MarketTick` objects, emitted once in the supplied order. |
-| `name` | Holoscan operator name; defaults to `market_data_replay`. |
+**Where the gain comes from — mostly not the GPU.** The host path is limited by
+interpreted Python decoding each message. On the same packets a compiled CPU decoder
+(numba, bit-identical) is ~100× faster than Python on one core (27M vs 0.28M
+messages/s) and, at 16k-message batches, faster than the GPU decoder (43.5M). The
+GPU's advantage appears at scale: with large batches GPU decode reaches 303M
+messages/s (compiled CPU, 8 cores: 104M) and decode + bars 76M (CPU with NumPy bars:
+5.3M). The live 6.6M messages/s is above what compiled CPU decode plus NumPy bars
+reach even offline; a CPU path with compiled multi-core bars was not built. See
+[Is it the GPU, or is it removing Python?](docs/GPU_INGEST.md#is-it-the-gpu-or-is-it-removing-python)
 
-Replay is deterministic and unpaced. Source timestamps remain data; the operator does
-not sleep to reproduce wall-clock timing. It installs a Holoscan `CountCondition` for
-the number of records; callers may supply additional scheduling conditions positionally.
-The `record_count` property reports the immutable replay size.
-
-#### `RollingStatisticsOp`
-
-| Direction | Port | Message |
-| --- | --- | --- |
-| Input | `tick` | `MarketTick` |
-| Output | `features` | `MarketFeatures` |
-
-| Parameter | Meaning |
-| --- | --- |
-| `window_size` | Maximum number of price and return observations retained independently for each symbol; integer at least 2, default `20`. |
-| `min_periods` | Warm-up count used independently for moving average prices and return deviation; integer from 2 through `window_size`, default `window_size`. |
-| `name` | Holoscan operator name; defaults to `rolling_statistics`. |
-
-The operator emits one features message for every tick. It computes consecutive simple
-and logarithmic returns after the first observation for a symbol. `moving_average`
-becomes available after `min_periods` price observations; `return_deviation` becomes
-available after `min_periods` log-return observations and uses the sample standard
-deviation. The deviation is a descriptive window statistic; it is not annualized
-volatility or Value at Risk (VaR). Duplicate sequences, global timestamp regressions,
-and currency changes for an existing symbol are rejected before state is updated.
-
-#### `PortfolioRiskOp`
-
-| Direction | Port | Message |
-| --- | --- | --- |
-| Input | `features` | `MarketFeatures` |
-| Output | `snapshot` | `PortfolioSnapshot` |
-
-| Parameter | Meaning |
-| --- | --- |
-| `positions` | Non-empty sequence of unique-symbol `Position` objects. |
-| `limits` | Optional `RiskLimits`; `None` disables all limits. Limits are evaluated only for complete snapshots. |
-| `name` | Holoscan operator name; defaults to `portfolio_risk`. |
-
-The operator maintains the latest price received for every configured symbol. It emits
-a snapshot after each features message, including partial snapshots while one or more
-positions remain unpriced. Gross exposure is the sum of absolute market values; net
-exposure is their signed sum; unrealized P&L is the sum of position-level unrealized
-P&L. Partial snapshots have no breaches because limits are evaluated only after every
-position is priced. Equal-to-limit values are allowed; only a strict exceedance creates
-a `RiskBreach`. Breaches are emitted as data in `snapshot.breaches` rather than raised
-as runtime errors. Duplicate or late feature messages are rejected so an older mark
-cannot silently replace a newer one.
-
-## Build, test, and install
-
-The repository-local `holohub` wrapper supplies the module defaults expected by the
-HoloHub CLI.
-
-### Container build
-
-```bash
-./holohub build intraday_risk_pipeline
-```
-
-### Local CMake build
-
-Use an environment where the Holoscan SDK is already importable:
-
-```bash
-cmake -S . -B build -DBUILD_ALL=ON -DFINANCE_BUILD_TESTING=ON
-cmake --build build --parallel
-```
-
-CMake stages the namespace package at `build/python/lib/holoscan/finance` and the
-application under the build tree.
-
-### Tests
-
-```bash
-./holohub test
-```
-
-Without the wrapper:
-
-```bash
-ctest --test-dir build --output-on-failure
-PYTHONPATH=build/python/lib${PYTHONPATH:+:$PYTHONPATH} \
-    FINANCE_BUILD_DIR=build \
-    python3 -m pytest tests/python -v
-```
-
-The conditional `PYTHONPATH` append preserves an existing Holoscan SDK path without
-introducing an empty path entry when the variable is unset.
-
-Before committing, run the repository's required lint gate:
-
-```bash
-./holohub run-container -- "./holohub lint --install-dependencies; ./holohub lint"
-```
-
-### Development install
-
-After building, install a user-site development hook that points to the live build
-tree:
-
-```bash
-./holohub install --dev
-```
-
-Remove it when it is no longer needed:
-
-```bash
-./holohub install --dev --uninstall
-```
-
-### Packages
-
-Build both supported package formats:
-
-```bash
-./holohub package holoscan-finance --pkg-generator DEB,WHEEL
-```
-
-Wheel artifacts are written under `build/dist/`; Debian artifacts are written under
-the package build directory. A wheel can also be built directly:
-
-```bash
-python3 -m pip install build
-python3 -m build --wheel
-```
-
-Install the correct Holoscan SDK distribution first, then install the generated
-`holoscan_finance-*.whl`. See [DEVELOPER.md](DEVELOPER.md) for selective CMake options,
-packaging invariants, and the release checklist.
-
-## Project layout
+Holoscan's contribution is structure: receiver, bars and analytics are operators on
+one graph run concurrently, which is why the ingest mode is a single flag with no
+change downstream. The GPU path ships as three reusable operators
+([overview](operators/README.md)):
 
 ```text
-holoscan-finance/
-├── applications/
-│   └── intraday_risk_pipeline/
-│       ├── data/synthetic_market_data.csv
-│       └── python/intraday_risk_pipeline.py
-├── operators/
-│   ├── market_data_replay_op/
-│   ├── portfolio_risk_op/
-│   └── rolling_statistics_op/
-├── python/holoscan/finance/
-│   ├── __init__.py
-│   ├── io.py
-│   ├── models.py
-│   └── py.typed
-├── tests/python/
-├── pkg/holoscan-finance/
-├── CMakeLists.txt
-├── metadata.json
-└── pyproject.toml
+GpuMitchSourceOp → GpuQuoteBarsOp → GpuRollingRiskOp
+NIC → GPU memory,   5 s quote bars,   volatility, covariance and
+MITCH decode        on the GPU        correlation on the GPU (cuBLAS)
 ```
 
-Each application and operator has its own `metadata.json` and `CMakeLists.txt`, as
-required by the HoloHub module conventions. The top-level package re-exports the
-supported public API; consumers should import from `holoscan.finance` rather than from
-operator source directories.
+The host-memory receivers, with their own bars and analytics, stay in the application
+as the baseline.
 
-## Scope and limitations
+## What runs where
 
-- This is a reference implementation, not investment advice or a production control.
-- `return_deviation` is a rolling descriptive deviation. It is not annualized
-  volatility, VaR, expected shortfall, or a forecast.
-- Portfolio marks are the latest asynchronously observed prices. The module has no
-  staleness threshold, synchronized market-data barrier, or consolidated snapshot time.
-- A portfolio uses one currency. The module performs no foreign-exchange conversion,
-  hedging, or cross-currency aggregation.
-- Replay assumes already normalized observations. It does not apply corrections,
-  exchange calendars, session boundaries, splits, dividends, or other corporate
-  actions.
-- Operator state is held in memory. There is no checkpointing, recovery, durable event
-  log, or exactly-once processing guarantee.
-- Messages are in-process Python objects. Distributed or cross-process graphs require an
-  explicit, versioned serialization and transport layer.
+| Stage | Library | Device |
+| --- | --- | --- |
+| Prepare the day (Parquet → sorted replay tape) | DuckDB, PyArrow | CPU, before playback |
+| Replay sender (MITCH over UDP) | NumPy memory map, project codec | CPU |
+| Receive | `GpuMitchSourceOp` (DAQIRI GPUDirect), or the host-memory baselines (kernel UDP, DAQIRI into pinned memory) | NIC → GPU memory, or CPU |
+| MITCH decode, quote bars | Python + NumPy, or CUDA kernels with `--ingest gpu` | CPU or GPU |
+| Volatility, covariance, correlation | CuPy + cuBLAS (`gemm`) | GPU |
+| CPU comparator | NumPy + SciPy BLAS (`dgemm`), threadpoolctl | CPU, separate process |
+| Dashboard and controls | FastAPI / Uvicorn, JavaScript | CPU / browser |
 
-## License
+The custom CUDA kernels are in [gpu_mitch.py](python/holoscan/marketdata/gpu_mitch.py)
+and [gpu_bars.py](python/holoscan/marketdata/gpu_bars.py); the analytics use CuPy and
+cuBLAS only ([covariance.py](python/holoscan/marketdata/covariance.py)). The graph is
+[stream.py](python/holoscan/equities/stream.py).
 
-Apache-2.0. See [LICENSE](LICENSE).
+## Data
 
-## Further reading
+| Measure | Amount |
+| --- | --- |
+| Source | 24 NYQ Parquet files; 95,746,717 records; 3,350,638,952 bytes |
+| Instrument directory | 2,886 RICs (shares, units, warrants, preferred) |
+| Regular-session replay | 92,178,038 observations, 09:30–16:00 America/New_York |
+| Replay tape | 6,083,750,508 bytes, memory mapped on the sender |
 
-- [Holoscan SDK User Guide](https://docs.nvidia.com/holoscan/sdk-user-guide/introduction/overview)
-- [HoloHub contribution guide](https://github.com/nvidia-holoscan/holohub/blob/main/CONTRIBUTING.md)
-- [Create a Holoscan Module](https://github.com/nvidia-holoscan/holohub/tree/main/tutorials/holoscan-modules/create-a-module)
+## Run
+
+Python 3.10+, Holoscan 4.3+ and a CuPy build for your CUDA runtime:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install holoscan cupy-cuda13x   # match your CUDA version
+.venv/bin/pip install '.[equities]'
+
+# Prepare the licensed day once
+./scripts/runenv -m holoscan.equities.data \
+    --data '/licensed/nyq/2025-04-01/*.parquet' --output data/nyq-equities-2025-04-01
+
+# Receiver and dashboard, then the sender in a second terminal
+./scripts/runenv -m holoscan.equities.stream --port 8080 --udp-port 26400
+./scripts/runenv -m holoscan.equities.replay --data data/nyq-equities-2025-04-01 \
+    --port 26400 --control-url http://127.0.0.1:8080
+```
+
+Open <http://localhost:8080/>: scrub the timeline, pause, and set the replay speed or a
+fixed observation rate. A seek, loop or sender restart resets the rolling history; the
+first estimate needs 20 return bars and the window grows to 60 (five minutes).
+`scripts/runenv` uses `.venv`; set `PY=/usr/bin/python3` inside a prepared container.
+
+DAQIRI/ConnectX, GPUDirect and the full-day button run on Thor through the launchers
+in [deploy/igx_thor](deploy/igx_thor/README.md).
+
+## Layout and build
+
+The repository is a HoloHub module:
+
+| Path | Contents |
+| --- | --- |
+| `operators/<name>/` | The shipped operators, `GpuMitchSourceOp`, `GpuQuoteBarsOp` and `GpuRollingRiskOp`: module, `metadata.json`, `CMakeLists.txt`, README ([overview](operators/README.md)) |
+| `applications/equity_analytics/` | The application: entry point and `metadata.json` |
+| `python/holoscan/equities/` | Application package: graph and dashboard, MITCH-to-NYQ mapping, host-memory receivers and analytics workers, replay and measurement tools |
+| `python/holoscan/marketdata/` | What the operators use: MITCH codec and GPU kernels, DAQIRI helpers, observation records, quote bars, covariance engine; the operators resolve into this package |
+| `CMakeLists.txt`, `cmake/`, `pkg/`, `metadata.json`, `holohub` | HoloHub build, packaging and CLI |
+| `deploy/igx_thor/`, `docs/` | Thor launchers and benchmarks; GPU ingest and methodology docs |
+
+```bash
+./holohub build equity_analytics            # or with CMake directly:
+cmake -S . -B build -DBUILD_ALL=ON -DFINANCE_BUILD_TESTING=ON
+cmake --build build && ctest --test-dir build
+```
+
+## Reproduce
+
+```bash
+./scripts/runenv -m pytest                       # GPU tests skip without a GPU
+./scripts/runenv -m holoscan.equities.gpu_validate --pcap capture.pcap --tape <tape dir>
+./scripts/runenv -m holoscan.equities.gpu_validate --bars --pcap capture.pcap --tape <tape dir>
+./scripts/runenv -m holoscan.equities.decode_bench --help
+```
+
+Ingest rates: [gpu_ingest_bench](deploy/igx_thor/gpu_ingest_bench/README.md).
+Separate CPU/GPU analytics runs: [methodology](docs/METHODOLOGY.md#separate-cpu-only-and-gpu-only-benchmark).
+The dashboard's default `compare` mode runs both analytics workers at once for live
+validation; its timing ratio is not the headline benchmark.
+
+## Limits
+
+This is historical replay with live computation, not a production risk model. A full
+window has 60 returns, so the covariance matrix has rank at most 59; correlations are
+descriptive and noisy, and annualized volatility is not a forecast. The demo uses the
+supplied NYQ quote fields and does not reconstruct NBBO. Throughput is measured on
+one host in PHY loopback with uniform `tcpreplay` traffic, not an external feed.
+
+[Apache-2.0 license](LICENSE)

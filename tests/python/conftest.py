@@ -2,101 +2,75 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared fixtures for the pure-Python finance module.
+"""Shared fixtures for the equity demo's Python tests.
 
-The finance algorithms do not need CUDA.  These tests therefore provide a
-small Holoscan API compatibility layer when the SDK is unavailable (notably on
-developer macOS hosts).  When the SDK is installed, the real classes are used.
-In both cases the source tree and CMake build tree are added to
-``holoscan.__path__`` so ``holoscan.finance`` can be tested without installing
-the wheel.
+The CPU paths do not need CUDA.  These tests therefore provide a small Holoscan
+API compatibility layer when the SDK is unavailable (notably on developer macOS
+hosts).  When the SDK is installed, the real classes are used.  The source tree is
+added to ``holoscan.__path__`` so ``holoscan.equities`` and ``holoscan.marketdata``
+can be tested without installing the package; under CTest (``FINANCE_BUILD_DIR``)
+the staged build tree comes first, so the packaged layout is what gets tested.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 import types
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SOURCE_HOLOSCAN = PROJECT_ROOT / "python" / "holoscan"
-SOURCE_FINANCE = SOURCE_HOLOSCAN / "finance"
-SOURCE_OPERATORS = PROJECT_ROOT / "operators"
-BUILD_ROOT = Path(os.environ.get("FINANCE_BUILD_DIR", PROJECT_ROOT / "build")).resolve()
-BUILD_HOLOSCAN = BUILD_ROOT / "python" / "lib" / "holoscan"
-BUILD_FINANCE = BUILD_HOLOSCAN / "finance"
-USE_BUILD_TREE = "FINANCE_BUILD_DIR" in os.environ
-
-
-def _existing_paths(*paths: Path) -> list[str]:
-    return [str(path) for path in paths if path.is_dir()]
-
-
-def _holoscan_search_paths() -> list[str]:
-    if USE_BUILD_TREE:
-        return _existing_paths(BUILD_HOLOSCAN, SOURCE_HOLOSCAN)
-    return _existing_paths(SOURCE_HOLOSCAN)
+SOURCE_HOLOSCAN = str(Path(__file__).resolve().parents[2] / "python" / "holoscan")
+SEARCH_PATHS = [SOURCE_HOLOSCAN]
+if "FINANCE_BUILD_DIR" in os.environ:
+    build = Path(os.environ["FINANCE_BUILD_DIR"]).resolve() / "python" / "lib" / "holoscan"
+    SEARCH_PATHS.insert(0, str(build))
 
 
 def _install_holoscan_stub() -> types.ModuleType:
-    """Install the minimal SDK surface needed by the Python operators."""
+    """Install the minimal SDK surface the receive operators need."""
 
     holoscan = types.ModuleType("holoscan")
-    holoscan.__path__ = _holoscan_search_paths()  # type: ignore[attr-defined]
-    holoscan.__package__ = "holoscan"
-
+    holoscan.__path__ = list(SEARCH_PATHS)  # type: ignore[attr-defined]
     core = types.ModuleType("holoscan.core")
     conditions = types.ModuleType("holoscan.conditions")
 
     class IOSpec:
-        def __init__(self, name: str):
-            self.name = name
+        class QueuePolicy:
+            POP, REJECT, FAULT = range(3)
+
+        class IOSize:
+            def __init__(self, size: int):
+                self.size = size
+
+        def condition(self, kind: Any, **kwargs: Any) -> IOSpec:
+            del kind, kwargs
+            return self
+
+    class ConditionType:
+        NONE, MESSAGE_AVAILABLE, DOWNSTREAM_MESSAGE_AFFORDABLE = range(3)
 
     class OperatorSpec:
         def __init__(self):
-            self.inputs: dict[str, IOSpec] = {}
-            self.outputs: dict[str, IOSpec] = {}
+            self.inputs: list[str] = []
+            self.outputs: list[str] = []
 
-        def input(self, name: str) -> IOSpec:
-            port = IOSpec(name)
-            self.inputs[name] = port
-            return port
+        def input(self, name: str, **kwargs: Any) -> IOSpec:
+            del kwargs
+            self.inputs.append(name)
+            return IOSpec()
 
         def output(self, name: str) -> IOSpec:
-            port = IOSpec(name)
-            self.outputs[name] = port
-            return port
+            self.outputs.append(name)
+            return IOSpec()
 
     class Fragment:
         pass
 
-    class Application(Fragment):
-        def add_flow(self, *args: Any, **kwargs: Any) -> None:
-            del args, kwargs
-
-    class ExecutionContext:
-        pass
-
-    class InputContext:
-        pass
-
-    class OutputContext:
-        pass
-
     class Operator:
-        def __init__(
-            self,
-            fragment: Fragment | None = None,
-            *args: Any,
-            name: str | None = None,
-            **kwargs: Any,
-        ) -> None:
+        def __init__(self, fragment=None, *args: Any, name: str | None = None, **kwargs: Any):
             del args, kwargs
             self.fragment = fragment
             self.name = name or type(self).__name__
@@ -106,95 +80,56 @@ def _install_holoscan_stub() -> types.ModuleType:
         def setup(self, spec: OperatorSpec) -> None:
             del spec
 
-    class CountCondition:
-        def __init__(self, fragment: Fragment | None = None, count: int = 1, **kwargs: Any):
-            del kwargs
-            self.fragment = fragment
-            self.count = count
+    class BooleanCondition:
+        def __init__(self, fragment=None, enable_tick: bool = True, **kwargs: Any):
+            del fragment, kwargs
+            self.tick_enabled = enable_tick
 
-    core.Application = Application
-    core.ExecutionContext = ExecutionContext
-    core.Fragment = Fragment
-    core.InputContext = InputContext
-    core.IOSpec = IOSpec
-    core.Operator = Operator
-    core.OperatorSpec = OperatorSpec
-    core.OutputContext = OutputContext
-    conditions.CountCondition = CountCondition
+        def disable_tick(self) -> None:
+            self.tick_enabled = False
 
-    holoscan.core = core
-    holoscan.conditions = conditions
-    sys.modules["holoscan"] = holoscan
-    sys.modules["holoscan.core"] = core
-    sys.modules["holoscan.conditions"] = conditions
+    class PeriodicCondition:
+        def __init__(self, fragment=None, recess_period: int = 0, **kwargs: Any):
+            del fragment, kwargs
+            self.recess_period = recess_period
+
+    for cls in (ConditionType, Fragment, IOSpec, Operator, OperatorSpec):
+        setattr(core, cls.__name__, cls)
+    for name in ("ExecutionContext", "InputContext", "OutputContext"):
+        setattr(core, name, type(name, (), {}))
+    conditions.BooleanCondition = BooleanCondition
+    conditions.PeriodicCondition = PeriodicCondition
+    holoscan.core, holoscan.conditions = core, conditions
+    sys.modules.update(
+        {"holoscan": holoscan, "holoscan.core": core, "holoscan.conditions": conditions}
+    )
     return holoscan
 
 
-USING_HOLOSCAN_STUB = False
 try:
     import holoscan
     import holoscan.core  # noqa: F401
 except ImportError:
     holoscan = _install_holoscan_stub()
-    USING_HOLOSCAN_STUB = True
 
-existing_holoscan_paths = list(holoscan.__path__)
 holoscan.__path__ = list(  # type: ignore[attr-defined]
-    dict.fromkeys(_holoscan_search_paths() + existing_holoscan_paths)
+    dict.fromkeys([*SEARCH_PATHS, *holoscan.__path__])
 )
 
 
-def _load_finance_from_source_layout() -> None:
-    """Load one logical package from shared and per-operator source trees.
-
-    CMake assembles these directories into ``build/python/lib/holoscan/finance``.
-    Source-only pytest runs need equivalent package search locations without
-    copying or mutating generated files.
-    """
-
-    if USE_BUILD_TREE:
-        search_locations = _existing_paths(BUILD_FINANCE, SOURCE_FINANCE, SOURCE_OPERATORS)
-    else:
-        search_locations = _existing_paths(SOURCE_FINANCE, SOURCE_OPERATORS)
-    existing = sys.modules.get("holoscan.finance")
-    if existing is not None:
-        existing.__path__ = list(  # type: ignore[attr-defined]
-            dict.fromkeys(search_locations + list(existing.__path__))
-        )
-        return
-
-    spec = importlib.util.spec_from_file_location(
-        "holoscan.finance",
-        SOURCE_FINANCE / "__init__.py",
-        submodule_search_locations=search_locations,
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("unable to construct the holoscan.finance source package")
-    finance = importlib.util.module_from_spec(spec)
-    sys.modules["holoscan.finance"] = finance
-    setattr(holoscan, "finance", finance)
-    try:
-        spec.loader.exec_module(finance)
-    except Exception:
-        sys.modules.pop("holoscan.finance", None)
-        raise
-
-
-_load_finance_from_source_layout()
-
-
 class MockOpInput:
-    """Holoscan-like input context containing one value per named port."""
+    """Serve queued values to ``receive(port)``; ``None`` once a port is empty."""
 
-    def __init__(self, values: Mapping[str, Any]):
-        self._values = dict(values)
-        self.received_ports: list[str] = []
+    def __init__(self, **ports: list[Any]) -> None:
+        self.ports = {k: list(v) for k, v in ports.items()}
+        self.received = 0
 
     def receive(self, port: str) -> Any:
-        self.received_ports.append(port)
-        if port not in self._values:
-            raise AssertionError(f"operator received from undeclared test port {port!r}")
-        return self._values[port]
+        queue = self.ports.get(port) or []
+        if not queue:
+            return None
+        self.received += 1
+        return queue.pop(0)
 
 
 class MockOpOutput:
@@ -219,22 +154,10 @@ def fragment():
 
 
 @pytest.fixture
-def op_input_factory():
-    def make(port: str, value: Any) -> MockOpInput:
-        return MockOpInput({port: value})
-
-    return make
-
-
-@pytest.fixture
 def op_output_factory():
     return MockOpOutput
 
 
-def invoke(op: Any, *, port: str | None = None, value: Any = None) -> MockOpOutput:
-    """Invoke an operator once and return its captured output context."""
-
-    op_input = MockOpInput({} if port is None else {port: value})
-    op_output = MockOpOutput()
-    op.compute(op_input, op_output, None)
-    return op_output
+@pytest.fixture
+def op_input_factory():
+    return MockOpInput

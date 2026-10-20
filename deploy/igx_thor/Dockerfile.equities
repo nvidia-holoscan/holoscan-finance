@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Base supplies Holoscan, compatible CuPy/CUDA and NVIDIA DAQIRI/DPDK bindings.
+ARG ANO_BASE_IMAGE=holoscan-finance:ano
+FROM ${ANO_BASE_IMAGE}
+RUN python3 -m pip install --no-cache-dir scipy threadpoolctl fastapi uvicorn \
+    && python3 -c 'import importlib.util, numpy, scipy, threadpoolctl, fastapi, uvicorn; assert all(importlib.util.find_spec(n) for n in ("holoscan", "cupy", "daqiri"))'
+# DAQIRI needs the GPU driver at import, so the full import check runs in the
+# launcher's preflight. igx_ano_run.sh mounts the source and tape read-only.

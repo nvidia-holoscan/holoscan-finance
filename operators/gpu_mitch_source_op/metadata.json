@@ -1,0 +1,38 @@
+{
+    "$schema": "urn:holohub:operator:v1",
+    "operator": {
+        "name": "GpuMitchSourceOp",
+        "authors": [
+            {
+                "name": "Jake Goldberg",
+                "affiliation": "NVIDIA"
+            }
+        ],
+        "language": [
+            "Python"
+        ],
+        "version": "0.1.0",
+        "changelog": {
+            "0.1.0": "GPUDirect MITCH receive: DAQIRI places packets in GPU memory (dma-buf), CUDA kernels gather the UDP payloads and check MITCH framing, and a pluggable GPU decoder emits device-resident batches; host-side receive accounting and stall diagnostics."
+        },
+        "holoscan_sdk": {
+            "minimum_required_version": "4.3.0",
+            "tested_versions": [
+                "4.3.0"
+            ]
+        },
+        "platforms": [
+            "aarch64"
+        ],
+        "tags": [
+            "Finance",
+            "Networking",
+            "Market Data",
+            "High Throughput",
+            "DPDK",
+            "GPUDirect"
+        ],
+        "ranking": 2,
+        "requirements": {}
+    }
+}

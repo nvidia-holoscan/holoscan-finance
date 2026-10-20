@@ -20,7 +20,7 @@
 #      value when their own helpers run option().
 add_holohub_package(holoscan-finance
                     OPERATORS
-                        market_data_replay_op
-                        rolling_statistics_op
-                        portfolio_risk_op
-                    APPLICATIONS intraday_risk_pipeline)
+                        gpu_mitch_source_op
+                        gpu_quote_bars_op
+                        gpu_rolling_risk_op
+                    APPLICATIONS equity_analytics)

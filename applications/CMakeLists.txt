@@ -3,9 +3,5 @@
 
 # Each application is gated on its own APP_<name> option, defaulting to ${BUILD_ALL}.
 # Operator dependencies are force-enabled when the application is selected.
-add_holohub_application(intraday_risk_pipeline
-    DEPENDS OPERATORS
-        market_data_replay_op
-        rolling_statistics_op
-        portfolio_risk_op
-)
+add_holohub_application(equity_analytics
+    DEPENDS OPERATORS gpu_mitch_source_op gpu_quote_bars_op gpu_rolling_risk_op)

@@ -9,14 +9,13 @@
 #
 # Usage:
 #   ./holohub run-container
-#   ./holohub build intraday_risk_pipeline
-#   ./holohub run   intraday_risk_pipeline --language python
+#   ./holohub build equity_analytics
+#   ./holohub run   equity_analytics --language python
 #   ./holohub --help
 #
-# Optional overrides (rarely needed; treated as trusted local configuration):
+# Optional overrides (rarely needed):
 #   HOLOSCAN_CLI_SOURCE   Local checkout — wins over the package install.
-#                         Must contain src/holoscan_cli.
-#   HOLOSCAN_CLI_INSTALL_ARGS  Pip install arguments (word-split into argv).
+#   HOLOSCAN_CLI_INSTALL_ARGS  Pip install arguments.
 #   HOLOSCAN_CLI_PYTHON_BIN  Python interpreter (default: python3).
 #   HOLOHUB_PYTHON_BIN       Legacy fallback for HOLOSCAN_CLI_PYTHON_BIN.
 
@@ -76,12 +75,7 @@ export HOLOSCAN_CLI_INSTALL_ARGS="${HOLOSCAN_CLI_INSTALL_ARGS:---pre --extra-ind
 export HOLOSCAN_CLI_BASE_SDK_VERSION="${HOLOSCAN_CLI_BASE_SDK_VERSION:-4.3.0}"
 
 if [[ -n "${HOLOSCAN_CLI_SOURCE:-}" ]]; then
-    CLI_SOURCE="${HOLOSCAN_CLI_SOURCE%/}"
-    if [[ ! -d "${CLI_SOURCE}/src/holoscan_cli" ]]; then
-        echo "[finance] Invalid HOLOSCAN_CLI_SOURCE: ${HOLOSCAN_CLI_SOURCE}" >&2
-        exit 1
-    fi
-    export PYTHONPATH="${CLI_SOURCE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+    export PYTHONPATH="${HOLOSCAN_CLI_SOURCE%/}/src${PYTHONPATH:+:${PYTHONPATH}}"
 fi
 
 # Install holoscan-cli unless a source-project-capable one is already present.
@@ -103,9 +97,7 @@ if ! "${PYTHON_BIN}" -m holoscan_cli --help 2>/dev/null | grep -qw build; then
         "${PYTHON_BIN}" -m pip install --upgrade "${HOLOSCAN_CLI_SOURCE}"
     else
         echo "[finance] installing with args: ${HOLOSCAN_CLI_INSTALL_ARGS}" >&2
-        # Word-split the trusted override; quote the array so globbing is off.
-        read -r -a CLI_INSTALL_ARGS <<< "${HOLOSCAN_CLI_INSTALL_ARGS}"
-        "${PYTHON_BIN}" -m pip install "${CLI_INSTALL_ARGS[@]}"
+        "${PYTHON_BIN}" -m pip install ${HOLOSCAN_CLI_INSTALL_ARGS}
     fi
 fi
 
