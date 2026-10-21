@@ -102,11 +102,16 @@ def git_show(path: str) -> bytes:
         cwd=repo, capture_output=True, text=True,
     )  # fmt: skip
     added = found.stdout.split()
-    if found.returncode or not added:
+    # In a shallow clone (CI checks out depth 1) the only commit present seems to add every
+    # file and has no parent, so the 4.3 file must actually resolve before it is compared.
+    shown = (
+        subprocess.run(["git", "show", f"{added[-1]}^:{path}"], cwd=repo, capture_output=True)
+        if found.returncode == 0 and added
+        else None
+    )
+    if shown is None or shown.returncode:
         pytest.skip("the 4.3 history is not in this checkout")
-    return subprocess.run(
-        ["git", "show", f"{added[-1]}^:{path}"], cwd=repo, capture_output=True, check=True
-    ).stdout
+    return shown.stdout
 
 
 def test_sources_match_git_history_when_available():
