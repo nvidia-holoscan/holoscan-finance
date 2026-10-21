@@ -273,6 +273,7 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
             rx_batch_size=self.rx_batch_size,
             rx_timeout_us=self.rx_timeout_us,
             memory_kind="device",
+            gpu_device=self.gpu_device,
             interface_name=self.interface_name,
             queue_id=self.queue_id,
             log_level=self.daqiri_log_level,

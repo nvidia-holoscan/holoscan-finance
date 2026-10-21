@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``FakeNativeDrain``: the native ``Drain`` of ``daqiri_drain.cpp`` (43bf4e1) in Python.
+"""``FakeNativeDrain``: the native ``Drain`` of ``daqiri_drain.cpp`` (4.3) in Python.
 
 Same constructor keywords, methods, record fields and ``stats()`` keys, ``poll_gaps_*``
 included. Used by hand (no thread), a test fills the ring itself and calls ``publish`` for

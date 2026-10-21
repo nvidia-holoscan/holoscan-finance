@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """The CUDA kernels, their compile flags and the native drain are byte-identical to 4.3.
 
-The digests are of the 43bf4e1 originals, committed here so the check needs no git history
-(CI checks out at depth 1, and a squash merge drops the commit). When the commit is
-available, the sources are also compared with ``git show 43bf4e1:...`` directly.
+The digests are of the 4.3 originals, committed here so the check needs no git history
+(CI checks out at depth 1, and a squash merge drops the 4.3 commit). When the history is
+available, the sources are also compared with the 4.3 files directly: the 4.3 version is the
+parent of the commit that added ``python/holoscan_finance``.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import pytest
 import holoscan_finance
 from holoscan_finance.marketdata import gpu_bars, gpu_mitch
 
-BASE = "43bf4e1"
+NEW_MARKER = "python/holoscan_finance/__init__.py"  # added by the 5.0 port
 PACKAGE = Path(holoscan_finance.__file__).parent
 DRAIN = PACKAGE / "ingest" / "native" / "daqiri_drain.cpp"
 
@@ -92,14 +93,19 @@ def test_native_drain_matches_the_4_3_digest():
 
 
 def git_show(path: str) -> bytes:
-    """``git show 43bf4e1:path``; skips when git or the commit is unavailable."""
+    """``path`` as of 4.3; skips when git or that history is unavailable."""
     repo = PACKAGE.parents[1]
     if shutil.which("git") is None:
         pytest.skip("git is not installed")
-    if subprocess.run(["git", "cat-file", "-e", BASE], cwd=repo, capture_output=True).returncode:
-        pytest.skip(f"commit {BASE} is not in this checkout")
+    found = subprocess.run(
+        ["git", "log", "--diff-filter=A", "--format=%H", "--", NEW_MARKER],
+        cwd=repo, capture_output=True, text=True,
+    )  # fmt: skip
+    added = found.stdout.split()
+    if found.returncode or not added:
+        pytest.skip("the 4.3 history is not in this checkout")
     return subprocess.run(
-        ["git", "show", f"{BASE}:{path}"], cwd=repo, capture_output=True, check=True
+        ["git", "show", f"{added[-1]}^:{path}"], cwd=repo, capture_output=True, check=True
     ).stdout
 
 

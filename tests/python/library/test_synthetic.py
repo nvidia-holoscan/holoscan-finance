@@ -26,7 +26,7 @@ from holoscan_finance.nyq.tape import open_tape
 from holoscan_finance.tools import synth
 
 MIDNIGHT = day_start_ns("2025-04-01")
-# Outputs of the 43bf4e1 ``gpu_validate`` generators for these arguments (computed once from
+# Outputs of the 4.3 ``gpu_validate`` generators for these arguments (computed once from
 # the 4.3 sources): the moved functions must reproduce them byte for byte.
 STREAM_43 = "5210bc2f12d578a3ac2e9df8e605d4c6d1a477c38d51c929ab152e90340e4063"
 FUZZ_43 = "3c2bbf7814c5089d01dae0c23817c039727143db9e59ea778379d524febb1e27"

@@ -56,13 +56,15 @@ def build_daqiri_config(
     rx_batch_size: int,
     rx_timeout_us: int,
     memory_kind: str,
+    gpu_device: int = 0,
     interface_name: str = "rx_port",
     queue_id: int = 0,
     log_level: str = "warn",
 ) -> dict:
     """Single-port RX-only DAQIRI config: flow-isolated, one queue, steering every UDP
     datagram for ``udp_port`` into it. ``host_pinned`` receives into CPU-accessible memory;
-    ``device`` (GPUDirect) into GPU memory.
+    ``device`` (GPUDirect) into GPU memory. ``gpu_device`` is the region's ``affinity``, the
+    process-local CUDA ordinal the buffers belong to: the device the decode runs on.
     """
     return {
         "version": 1,
@@ -74,7 +76,7 @@ def build_daqiri_config(
             {
                 "name": "rx_pool",
                 "kind": memory_kind,
-                "affinity": 0,
+                "affinity": gpu_device,
                 "num_bufs": num_bufs,
                 "buf_size": buf_size,
             }

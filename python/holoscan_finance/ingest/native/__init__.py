@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The GIL-free native drain, built on first use into a writable cache directory.
 
-``load_daqiri_drain()`` compiles ``daqiri_drain.cpp`` (byte-identical to 4.3 at 43bf4e1)
+``load_daqiri_drain()`` compiles ``daqiri_drain.cpp`` (byte-identical to 4.3)
 against the installed DAQIRI (``DAQIRI_ROOT``, default ``/opt/daqiri``), the CUDA driver API
 (linked against the stub; CuPy loads the driver) and pybind11, then imports it. The headers
 must match ``_daqiri``'s pybind11 internals, so the system headers (apt ``pybind11-dev``)

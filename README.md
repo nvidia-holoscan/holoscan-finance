@@ -176,7 +176,7 @@ in [deploy/igx_thor](deploy/igx_thor/README.md).
 ## Results (Holoscan 4.3)
 
 The numbers in this section were measured with the Holoscan SDK 4.3 version of this code
-(commit `43bf4e1` and earlier). The 5.0 port keeps the kernels and the native drain byte
+(the first commit of this branch and earlier). The 5.0 port keeps the kernels and the native drain byte
 for byte, and the GPU path's batch, burst, buffer and ring sizes; its NIC-free results are in
 [docs/VALIDATION.md](docs/VALIDATION.md), and the NIC series has not been repeated on 5.0
 yet ([status](docs/GPU_INGEST.md#holoscan-50-revalidation)).

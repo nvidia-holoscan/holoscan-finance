@@ -55,6 +55,13 @@ def test_build_daqiri_config_device_queue_and_names():
     assert iface["rx"]["flows"][0]["action"]["id"] == 2
 
 
+def test_the_buffer_pool_lives_on_the_decode_gpu():
+    # A region's affinity is the CUDA ordinal of its buffers; GPUDirect decodes them in place.
+    assert build_daqiri_config(**NIC, memory_kind="device")["memory_regions"][0]["affinity"] == 0
+    cfg = build_daqiri_config(**NIC, memory_kind="device", gpu_device=1)
+    assert cfg["memory_regions"][0]["affinity"] == 1
+
+
 def test_missing_or_incompatible_bindings_fail_explicitly(monkeypatch):
     monkeypatch.setitem(sys.modules, "daqiri", None)
     with pytest.raises(RuntimeError, match="requires DAQIRI"):

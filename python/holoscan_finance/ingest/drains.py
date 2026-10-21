@@ -47,7 +47,7 @@ DRAIN_FIELDS = (
     "t_free",
     "wait_ns",
 )
-# The 43bf4e1 native Drain.stats() keys.
+# The 4.3 native Drain.stats() keys.
 DRAIN_STATS_KEYS = (
     "running",
     "bursts",

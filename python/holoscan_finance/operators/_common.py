@@ -35,7 +35,13 @@ def ref_obj[T](ref: Ref, factory: Callable[[], T] | None = None, *, required: st
 
 
 class PendingEmits:
-    """Hold-and-retry queue for BLOCKING outputs."""
+    """Hold-and-retry queue for BLOCKING outputs.
+
+    Retrying is safe on a fan-out edge too: the runtime checks every BLOCKING recipient's capacity
+    before storing, so a ``BackpressuredError`` means no recipient got the item.
+    ``PublicationPartialError`` (some recipients stored it) follows only a failed store, which
+    already fails the run, so it is not retried.
+    """
 
     def __init__(self) -> None:
         self._items: deque[tuple[hs.OperatorPort, object, Callable[[], None] | None]] = deque()

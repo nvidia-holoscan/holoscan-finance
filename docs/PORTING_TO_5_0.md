@@ -1,6 +1,6 @@
 # Porting from Holoscan SDK 4.3 to 5.0
 
-What changed between the Holoscan 4.3 version of this repository (commit `43bf4e1`) and the
+What changed between the Holoscan 4.3 version of this repository (the first commit of this branch) and the
 5.0 port, and every place where the running system behaves differently. The design goal
 was to keep every published 4.3 number reproducible and every invariant intact: the CUDA
 kernels, their compile flags and the native drain are byte-identical, the GPU path keeps
