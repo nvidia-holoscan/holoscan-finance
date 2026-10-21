@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ctypes
 import time
+import weakref
 
 import cupy as cp
 import holoscan as hs
@@ -257,6 +258,31 @@ def test_setup_rejects_a_missing_capture_and_oversized_bursts():
         g.op(GpuMitchReplaySourceOp, "replay")
     with pytest.raises(hs.errors.HoloscanError, match="burst_packets"):
         g.op(GpuMitchReplaySourceOp, "replay2", pcap_path="x", ring_size=4096, burst_packets=8192)
+
+
+def test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts(capture, monkeypatch):
+    """Freeing a full day's host copy (3.4 GB) holds the GIL for about 240 ms. Freed after
+    ``drain.start()``, it made the first bursts that late: paced lag p99 86 ms against the
+    5 ms gate of ``market_data_bench paced``."""
+    from holoscan_finance.ingest import drains
+    from holoscan_finance.operators import gpu_mitch_source
+
+    read, start, seen = gpu_mitch_source.PcapFrames.read, drains.DeviceReplayDrain.start, {}
+
+    def tracked_read(path, limit=0):
+        frames = read(path, limit)
+        seen["data"] = weakref.ref(frames.data)
+        return frames
+
+    def checked_start(self):
+        seen["host_copy_alive"] = seen["data"]() is not None
+        start(self)
+
+    monkeypatch.setattr(gpu_mitch_source.PcapFrames, "read", staticmethod(tracked_read))
+    monkeypatch.setattr(drains.DeviceReplayDrain, "start", checked_start)
+    _, stats = replay(capture[0])
+    assert stats.packets == 2000
+    assert seen["host_copy_alive"] is False
 
 
 def test_an_unreadable_capture_fails_start(tmp_path):

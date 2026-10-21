@@ -323,6 +323,10 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
         device_frames = DeviceFrames.upload(
             frames, self.gpu_device, sender_port=first.sender_port if first is not None else None
         )
+        n_frames = len(frames)
+        # Free the host copy before the drain's schedule starts: for a full day (3.4 GB) that
+        # takes about 240 ms with the GIL held, and the first bursts would be gathered that late.
+        del frames
         ring = DeviceRing.allocate(self.ring_size, self.gpu_device)
         ingest = self._new_ingest()
         with thread_mask(self._helper_mask()):
@@ -346,7 +350,7 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
         self._open(ingest, "device frame pool")
         logger.info(
             "GPU replay source: %d frames of %s on GPU %d (pps=%d, loops=%d, bursts of %d)",
-            len(frames),
+            n_frames,
             self.pcap_path,
             self.gpu_device,
             self.pps,

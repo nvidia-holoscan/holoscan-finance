@@ -8,8 +8,10 @@ touches the NIC, hugepages, IRQs or the demo containers.
 
 > **Status.** The functional steps 1, 2 and 4 ran on 2026-10-20 and pass ([results
 > below](#functional-results-2026-10-20)), and step 9 passed in the integration pass the same
-> day. Steps 3, 5, 6, 7, 8 and 10 run in the serial timing pass. Nothing on this page is a
-> measured 5.0 result until its row is filled in.
+> day. The serial timing pass (steps 3, 5, 6, 7, 8 and 10 and `pytest -m timing`) ran the same
+> evening and passes ([results below](#timing-results-2026-10-20)). Step 5 passed only after a
+> fix to the replay source: freeing the capture's host copy after the replay had started
+> delayed the first bursts by about 200 ms.
 
 ## What runs where
 
@@ -21,9 +23,17 @@ touches the NIC, hugepages, IRQs or the demo containers.
 - **Data.** `data/` and `out/` under the repository root (both gitignored).
 - **Shared GPU.** The live 4.3 demo may share the GPU, so timing compares **medians only**,
   and each run records the host state (below).
+- **IGX Thor iGPU power.** The Thor iGPU (`0000:01:00.0`) runtime-suspends after about 5 s
+  idle, and the next new CUDA allocation in the process wakes it, which blocks every CUDA
+  call of the process for about 130 ms. The NIC launcher keeps the iGPU powered for
+  `INGEST=gpu`; `scripts/dev5.sh` does not. In the paced runs this shows up as a replay lag
+  of about 110 ms once per wake-up (see [anomalies](#anomalies-and-findings)). To time
+  without it, keep a CUDA context open on the iGPU for the length of the run (an idle
+  non-root container with `CUDA_VISIBLE_DEVICES=<iGPU UUID>`), or set its
+  `power/control` to `on` as the launcher does.
 - **Functional steps** (1, 2, 4, 9) are part of the acceptance of the validation work
   package. **Timing steps** (3, 5, 6, 7, 8, 10) run only in the serial timing pass, after
-  the integration pass, with no other agent container running.
+  the integration pass, with no other container running.
 
 ## Host state
 
@@ -34,8 +44,9 @@ Recorded before and after each session.
 | functional runs, before (2026-10-20 19:49 EDT) | `nervous_morse`, `ano-igx` | RTX PRO 6000: 0 %, 47 MiB | `nervous_morse` is an auto-named container, not a demo container; `ano-igx` was not touched |
 | functional runs, after (2026-10-20 20:17 EDT) | `ano-igx` | RTX PRO 6000: 0 %, 47 MiB | steps 2 and 4 overlapped each other and the `synth-drops` generation: functional results only |
 | step 9, before and after (2026-10-20 20:30 and 20:31 EDT) | `ano-igx` | RTX PRO 6000: 0 %, 47 MiB | integration pass |
-| timing pass, before | _pending_ | _pending_ | |
-| timing pass, after | _pending_ | _pending_ | |
+| timing pass, before (2026-10-20 21:55 EDT) | `ano-igx` | RTX PRO 6000: 0 %, 47 MiB | load average 2.08; no docker build; `ano-igx` was not touched |
+| timing pass, every step (21:55-22:58 EDT, 139 records) | `ano-igx` only for steps 3, 5, 6, 7 and 10 | 0 %, 47 MiB at every step start and end | load average 1.88-6.28; no docker build at any check; the diagnostic runs with the iGPU kept awake also had a sidecar container keeping the iGPU awake |
+| timing pass, after (2026-10-20 23:00 EDT) | `ano-igx` | RTX PRO 6000: 0 %, 47 MiB | load average 3.23 |
 
 Commands: `docker ps --format '{{.Names}}'` and
 `nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used --format=csv`.
@@ -71,13 +82,16 @@ Pass: decode `bit_identical`, including the fuzz pass's rejection decisions; bar
 ### 3. Offline kernels (timing pass)
 
 ```bash
-python3 -m holoscan_finance.tools.decode_bench --pcap data/synth-day/day.pcap --tape data/synth-day/tape --group-msgs 16384 --out out/decode_bench_16k.json
-python3 -m holoscan_finance.tools.decode_bench --pcap data/synth-day/day.pcap --tape data/synth-day/tape --group-msgs 131072 --out out/decode_bench_131k.json
+python3 -m holoscan_finance.tools.decode_bench --pcap data/synth-day/day.pcap --tape data/synth-day/tape --group-msgs 16384 --threads 1,4,8,12 --out out/decode_bench_16k.json
+python3 -m holoscan_finance.tools.decode_bench --pcap data/synth-day/day.pcap --tape data/synth-day/tape --group-msgs 131072 --threads 1,4,8,12 --out out/decode_bench_131k.json
 ```
 
 Report only (shared GPU). Reference (Holoscan 4.3): 17.7M msgs/s at 16k-message groups,
 76M msgs/s at 131k and up (decode + bars). The compiled CPU rows need numba>=0.68, which
 `scripts/dev5.sh` installs: the 5.0 image ships numba 0.64, which refuses its NumPy 2.5.
+Pass `--threads` with at most 12 threads: `scripts/dev5.sh` gives the container 12 CPUs, numba
+refuses more, and the default `--threads 1,2,4,8,14` (4.3's, for a 14-core host without a
+CPU set) stops with `ValueError: The number of threads must be between 1 and 12`.
 
 ### 4. Graph bit identity (`market_data_bench --check`)
 
@@ -160,14 +174,14 @@ byte-identical); the 5.0 graph overhead is reported in absolute terms.
 | --- | --- | --- | --- |
 | 1 Data | `synth` (`data/synth-day/synth.json`) | 2,880,001 packets, 95,062,715 messages; drops: 576 packets missing | pass |
 | 2 Library bit identity | `gpu_validate` (`out/gpu_validate*.json`) | decode and fuzz bit-identical; bars identical, 41 and 39 returns differ by 1 ULP | pass |
-| 3 Offline kernels | `decode_bench` (`out/decode_bench_*.json`) | _pending (timing pass)_ | report |
+| 3 Offline kernels | `decode_bench` (`out/decode_bench_*.json`) | GPU decode / decode + bars: 43.1 / 17.6M msgs/s at 16k-message groups, 306 / 66.4M at 131k | report |
 | 4 Graph bit identity | `market_data_bench --check` (`out/check*.json`) | both `ok`; 701 and 700 window pairs, 4,679 bars against the host decode, `max_ulps` 1; drops: 19,011 gaps on every side | pass |
-| 5 Paced lossless | `market_data_bench` paced (`out/paced_*.json`) | _pending (timing pass)_ | _pending_ |
-| 6 Throughput headroom | `market_data_bench` unpaced (`out/tput_*.json`) | _pending (timing pass)_ | _pending_ |
-| 7 Full chain with compare | `equity_analytics --ingest replay` (`out/chain.json`) | _pending (timing pass)_ | _pending_ |
-| 8 Analytics speedup | step 7 `rolling_timing.speedup` | _pending (timing pass)_ | report |
+| 5 Paced lossless | `market_data_bench` paced (`out/paced_*.json`) | 3 of 3 `ok` (after the replay-source fix): 2,880,001 packets, no loss, no retry or ring wait, lag p99 0.61-1.22 ms; before the fix 0 of 3 (lag p99 86-89 ms) | pass |
+| 6 Throughput headroom | `market_data_bench` unpaced (`out/tput_*.json`) | median 62.1M msgs/s (61.2-64.5M, 5 runs), 4.7× the 13.2M gate, lossless | pass |
+| 7 Full chain with compare | `equity_analytics --ingest replay` (`out/chain.json`) | exit 0; 41 windows, 41 comparisons, all agree with matched work; receive-to-result p50 25.2 ms, p99 143.9 ms | pass |
+| 8 Analytics speedup | step 7 `rolling_timing.speedup` | 18.3× (CPU 97.3 ms, GPU 5.31 ms, 40 windows) on the synthetic day, where all 2,886 symbols are eligible; 4.7× (6.3× with the iGPU kept awake) on the recorded day | report |
 | 9 Dashboard contract | `e2e/test_dashboard_live.py` | 1 passed in 28.5 s (integration pass, 2026-10-20) | pass |
-| 10 4.3 vs 5.0 A/B | `decode_bench`, `gpu_validate` in both images | _pending (timing pass)_ | report |
+| 10 4.3 vs 5.0 A/B | `decode_bench`, `gpu_validate` in both images | identical correctness; GPU decode within 4 %; steady-state decode + bars equal (113 vs 113M msgs/s); the single-pass 131k figure is 20 % lower on 5.0 (66.4 vs 83.4M) because of a one-time first-pass cost of the 5.0 runtime | report |
 
 The timing tests of the test suite (`pytest -m timing`) also run in the timing pass:
 
@@ -177,7 +191,7 @@ RUN5_TIMEOUT=3600 scripts/dev5.sh 'python3 -m pytest -q -m timing tests/python'
 
 | Timing tests | Result |
 | --- | --- |
-| `pytest -m timing` | _pending (timing pass)_ |
+| `pytest -m timing` | 3 passed (risk pickup latency, paced replay drain, paced replay source), before and after the replay-source fix |
 
 ## Functional results (2026-10-20)
 
@@ -222,6 +236,130 @@ and stop reason `drained`.
   compared.
 - Each run took about 200 s: about 50 s of graph (paced by the CPU twin: 2.1M and 1.7M
   messages/s) and about 2 minutes of host decode for the reference.
+
+## Timing results (2026-10-20)
+
+The serial timing pass, 21:55-22:58 EDT, on the same host and image as the functional runs,
+with the replay-source fix below for steps 5-7. Only `ano-igx` was running at every step
+start and end (139 host-state records), the GPU was idle at each of them and no docker build
+ran. Steps 5-7 ran with the iGPU in its default runtime power management (see
+[What runs where](#what-runs-where)).
+
+**Timing tests.** `RUN5_TIMEOUT=3600 scripts/dev5.sh 'python3 -m pytest -q -m timing
+tests/python'`: 3 passed in 7.4 s, and again after the fix.
+
+**Step 3, offline kernels** (`--threads 1,4,8,12`; 200,000 packets = 6,601,587 messages of
+`synth-day`, M msgs/s, one run each):
+
+| Path | 16k decode | 16k decode + bars | 131k decode | 131k decode + bars |
+| --- | --- | --- | --- | --- |
+| Python, 1 core | 0.27 | 0.25 | 0.27 | 0.24 |
+| numba, 1 / 4 / 8 / 12 threads | 36.1 / 94.0 / 140.1 / 26.7 | 5.8 / 5.6 / 5.9 / 5.7 | 33.7 / 103.5 / 151.4 / 97.8 | 5.7 / 6.0 / 6.3 / 6.2 |
+| GPU | 43.1 | 17.6 | 306.1 | 66.4 |
+
+The numba multi-thread rows are noisy (timed steps of 40-250 ms): the 12-thread 16k figure
+was 26.7, 49.0 and 38.1M msgs/s in three runs. The other rows are stable.
+
+**Step 5, paced at 200,000 packets/s** (`--nic-bufs 114688 --risk gpu --require-lossless
+--require-realtime --max-lag-p99-ms 5`):
+
+| Run | `ok` | Packets | Loss (gaps, ring, NIC, stale, malformed) | Bars span | Achieved pps | Retries, ring waits | Ring peak | Lag p50 / p99 / max (ms) | Receive to result p50 / p99 (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | true | 2,880,001 | 0 | 14.380 s | 200,282 | 0, 0 | 28,007 | 0.11 / 0.73 / 112.0 | 20.9 / 75.6 |
+| 2 | true | 2,880,001 | 0 | 14.379 s | 200,288 | 0, 0 | 24,006 | 0.11 / 1.22 / 109.8 | 21.1 / 71.8 |
+| 3 | true | 2,880,001 | 0 | 14.379 s | 200,294 | 0, 0 | 28,007 | 0.10 / 0.61 / 112.9 | 21.6 / 70.3 |
+
+Before the fix, the same three runs were lossless and real time but not `ok`: lag p99 86.4,
+88.5 and 88.3 ms (max 194-204 ms), ring peak 48,012 each time. The remaining lag maximum of
+about 110 ms is one iGPU wake-up at the first risk window; with the iGPU kept awake it is
+20.8 ms (p99 0.85 ms).
+
+**Step 6, unpaced** (5 runs): 64.45, 61.15, 62.08, 64.49 and 61.26M msgs/s, median
+**62.08M msgs/s** (1.53 s for the day's 95,062,715 messages), all lossless. The 1M-slot ring
+is full most of the time (447 ring waits, 0.93-0.98 s waited), as intended; the replay drain
+used 0.11-0.16 s of CPU per run. The fallback of a separate `bars` lane was not needed.
+
+**Steps 7 and 8, full chain with compare** (`out/chain.json`): exit 0, termination `STOPPED`,
+stop reason `drained`, no error, no unmet expectation. 2,880,001 packets in 720 batches,
+nothing lost; 717 windows emitted, 712 received by risk, 671 superseded (latest-only); 41
+analyzed, 41 comparisons, `agreement` true. Receive to result: p50 **25.2 ms**, p99 **143.9
+ms**, max 158.3 ms (41 samples, so p99 is the slowest window). Replay lag p50 / p99 / max
+0.10 / 2.74 / 7.71 ms. `rolling_timing`: 40 samples, CPU median 97.3 ms, GPU median 5.31 ms,
+**speedup 18.3×**. On the synthetic day every one of the 2,886 symbols becomes eligible, so
+the CPU window is larger than on the recorded day (below), where the same run gives 4.7×.
+
+**Step 10, Holoscan 4.3 vs 5.0** (`synth-day`; the 4.3 side is `holoscan-finance:nyq-20260911`
+running `git archive 43bf4e1` in a throwaway non-root container with private IPC,
+`--shm-size=2g`, the same CPU set and GPU; 3 runs each, interleaved; M msgs/s medians):
+
+| Measurement | 4.3 | 5.0 |
+| --- | --- | --- |
+| GPU decode, 16k / 131k groups | 44.8 / 315.3 | 42.9 / 305.6 |
+| GPU decode + bars, 16k / 131k groups (`decode_bench`, one pass per process) | 18.5 / 83.4 | 17.6 / 66.4 |
+| Same 5.0 code in each image, GPU decode + bars, passes 2-5: 16k / 131k | 20.3 / 112.8 | 19.9 / 113.3 |
+| Same 5.0 code in each image, GPU decode + bars, first pass at 131k | 81.0 (81.5 ms) | 64.9 (101.7 ms) |
+| numba decode, 1 thread, 16k / 131k | 27.3 / 29.7 | 36.1 / 37.3 |
+| CPU decode + NumPy bars, 1 thread, 16k / 131k | 4.2 / 4.2 | 5.8 / 5.7 |
+| `gpu_validate` decode, full day | bit-identical; fuzz 60,518 / 60,036 / 119,446; GPU 0.237 s | identical results; GPU 0.268 s |
+| `gpu_validate --bars`, full day | state identical; 4,680 bars; 41 of 13,414,033 returns at 1 ULP; GPU 6.2 s | identical results; GPU 6.2 s |
+
+- The kernels are byte-identical and so are their results. In steady state the GPU decode +
+  bars throughput is the same in both images (within 2 %); the decode alone is about 3 % slower in the 5.0
+  image (CuPy 14.2 and NVRTC 13.2 vs CuPy 14.1 and NVRTC 13.0, same CUDA 13.2 runtime and
+  580 driver).
+- `decode_bench` times one pass per process, so its decode + bars figure includes a one-time
+  cost of the first pass: about 43 ms in the 5.0 image against 23 ms in the 4.3 image. At
+  131k groups (a 58 ms pass) that is the whole 20 % difference. The applications pay it in
+  the operators' `start()` warm-up, before data.
+- The first 4.3 run at 16k measured 1.94M msgs/s: its kernel cache was empty, and kernels
+  that 4.3's warm-up does not cover compiled inside the timed pass. The 5.0 cache was warm.
+  The median of three leaves that run out.
+- Graph overhead, in absolute terms: steady-state decode + bars take 8.8 ns per message
+  (0.84 s for the full day), and the unpaced graph 16.1 ns (1.53 s). The graph adds 0.69 s
+  per day: gather, ring and accounting, header copies, per-batch Python and scheduling, about
+  0.95 ms per 131,072-message batch. Measured against `decode_bench`'s single-pass figure, the
+  graph adds 0.10 s.
+- The numba multi-thread rows of `decode_bench` vary by up to 10× between runs in both images
+  and are not compared.
+
+**The recorded day, NIC-free** (the licensed capture of 2,880,565 packets, mounted read-only;
+same commands as steps 3, 5, 6 and 7, for comparison with the 4.3 NIC baseline):
+
+| Measurement | Holoscan 5.0, replay (no NIC) | Holoscan 4.3, NIC, same host and day |
+| --- | --- | --- |
+| `decode_bench` GPU decode / decode + bars, 16k | 44.1 / 17.7 | 46.0 / 18.8 |
+| `decode_bench` GPU decode / decode + bars, 131k | 304.3 / 66.6 | 314.3 / 85.6 |
+| Full day at 200,000 packets/s | 3 of 3 lossless and real time, 14.38 s | 10 of 10 lossless, 14.42 s |
+| The same with `--max-lag-p99-ms 5` | 0 of 3 (lag p99 45-49 ms, two iGPU wake-ups per run); with the iGPU kept awake 3 of 3 (p99 0.69-0.73 ms, max 11-15 ms) | (no such metric) |
+| Unpaced | 60.0M msgs/s median (59.5-61.9M) | (no NIC-free graph) |
+| Compare mode at 200,000 packets/s: receive to result p50 / p99 | 26.9 / 150.7 ms; iGPU kept awake 25.2 / 50.5 ms | GPU-only at 75,000 obs/s: 28.9-33.2 / 43.5-45.9 ms |
+| Compare mode: rolling CPU / GPU median, speedup | 31.7 / 6.69 ms, 4.7×; iGPU kept awake 35.4 / 5.62 ms, 6.3× | compare mode at 10× speed: 28.6 / 8.0 ms, 3.6×; separate runs: 6.6-11.5× |
+
+### Anomalies and findings
+
+- **Fixed: the replay source freed the capture's host copy after starting the replay.**
+  `GpuMitchReplaySourceOp.start()` started the drain thread and then returned, which freed
+  the 3.4 GB host copy of the capture: about 240 ms with the interpreter lock held (measured
+  in isolation: 238.8 ms). The drain, already on its schedule, gathered its first bursts up to
+  200 ms late, so step 5 failed its 5 ms lag gate in 3 of 3 runs, and the ring peaked at 12
+  bursts (48,012 packets). A GIL watchdog (a heartbeat thread plus `faulthandler`) showed a
+  255 ms hold by the Holoscan thread right after `start()`. The fix frees the host copy before
+  the drain starts (`del frames`), with a regression test
+  (`test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts`, which fails without
+  the fix). After it, step 5 passes 3 of 3.
+- **iGPU runtime power management.** The remaining lag spikes of about 110-130 ms happen at the
+  exact times the Thor iGPU resumes from runtime suspend (sysfs `runtime_status` logged
+  against the drain's per-burst timestamps: the drain's host-to-device copy was blocked from
+  6,901.7 to 7,032.0 ms while the iGPU was resuming from 6,902.9 to 7,031.5 ms, and the same at
+  13.2 s). New CUDA allocations of the risk engine, when the number of eligible symbols grows,
+  trigger them. On the synthetic day it happens once, at the first window; on the recorded
+  day twice more, which breaks the 5 ms lag gate there. With an idle CUDA context holding the
+  iGPU awake, no transition occurs and every run passes. It is a host setting the NIC launcher
+  already handles, not a code change; 4.3 allocated the same way.
+- **The step 3 command needed `--threads`.** See [step 3](#3-offline-kernels-timing-pass).
+- **Compare-mode speedups are not the 9.55× headline.** The published 9.55× compared separate
+  CPU-only and GPU-only runs; compare mode runs both on the same host at once. On the
+  synthetic day the CPU side analyzes all 2,886 symbols.
 
 ## What this does not show
 
