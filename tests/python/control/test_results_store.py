@@ -260,10 +260,14 @@ def test_an_exception_in_on_risk_never_reaches_the_operator():
     gate.try_claim()
     store.on_risk(broken)
     assert store.error.startswith("Analytics failed: ") and "annual_vol" in store.error
-    assert store.disabled and gate.ready() and store.received_risk == 1
+    assert store.disabled and store.received_risk == 1
     assert store.live is None and store.published == 0  # nothing half-published
+    # The claim lasts until this update's comparison, its only release: risk cannot start a
+    # second validated window while this comparison is still in flight.
+    assert not gate.ready() and not gate.try_claim()
     store.on_comparison(comparison(gpu_update(w, validated=True)))
     assert store.comparison is None and store.received_comparisons == 1
+    assert gate.ready() and (gate.claims, gate.releases) == (1, 1)
 
 
 def test_reset_generation_clears_the_published_state_only():
@@ -302,6 +306,37 @@ def test_compare_mode_records_gpu_results_and_cpu_comparisons_into_the_capture()
     assert capture.gpu[0]["receive_to_result_ms"] == store.live["receive_to_result_ms"]
     assert capture.cpu[0]["valid"] and capture.cpu[0]["generation"] == 1
     assert capture.status()["calculations"] == 1
+
+
+@pytest.mark.parametrize("backend", ["compare", "cpu"])
+def test_results_are_recorded_into_the_capture_after_the_store_lock(backend):
+    # record_single copies the window to the host and hashes it: /snapshot (view(), on the
+    # event loop) must not wait behind that on the store lock.
+    w = window()
+    capture = LatencyCapture(60, 1, start_ns=w.recv_ns - 1, backend=backend)
+    store, _ = make_store(backend=backend, capture=capture)
+    name = "record_gpu" if backend == "compare" else "record_single"
+    record, seen = getattr(capture, name), []
+
+    def lock_is_free():
+        free = store.lock.acquire(blocking=False)
+        if free:
+            store.lock.release()
+        seen.append((store.published, free))
+
+    def checked(*args):
+        t = threading.Thread(target=lock_is_free)  # the store lock is an RLock: ask a thread
+        t.start()
+        t.join()
+        record(*args)
+
+    setattr(capture, name, checked)
+    if backend == "compare":
+        store.on_risk(gpu_update(w, validated=True))
+    else:
+        store.on_risk(RiskUpdate(w, cpu_result(w), None, "cpu", False))
+    assert seen == [(1, True)]  # published first, then recorded with the lock free
+    assert capture.status()["calculations"] == 1 and store.error is None
 
 
 def test_single_backend_runs_record_hashed_inputs_into_the_capture():

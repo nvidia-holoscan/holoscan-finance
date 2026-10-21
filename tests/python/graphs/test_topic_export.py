@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """``--topics``: an external reader gets the risk summaries, and a stalled one costs the graph
-nothing (the c5 regression, with the production pieces).
+nothing, with the production pieces.
 
 A 20 Hz test-local ``RiskUpdate`` source feeds the real ``RiskSummaryOp`` (lane ``topics``),
 which exports to ``holomq://finance.risk`` over ``LATEST`` with ``topic_export_kwargs()``,
 exactly as ``equity_analytics`` wires it; ``runner.compile_plan`` writes the endpoint
 catalog into a directory that does not exist yet. A child process subscribes with a 10 s
 timeout, first reading, then attaching and not reading for 5 s. With the former ``BLOCKING``
-export edge, the stalled reader failed the run with ``HOLOMQ_BACKPRESSURED`` (c5).
+export edge, the stalled reader failed the run with ``HOLOMQ_BACKPRESSURED``.
 """
 
 from __future__ import annotations

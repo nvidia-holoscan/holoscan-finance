@@ -4,7 +4,7 @@
 
 Every thread of the process stays off the DPDK master and RX lcores (4.3 ``_isolate_cores``
 and the analytics worker initializer). The Holoscan 5 runtime never re-applies a lane's
-placement, so a mask change made in ``start()`` persists for the whole lane (c3): around
+placement, so a mask change made in ``start()`` persists for the whole lane: around
 ``daqiri_init``, ``thread_mask`` always restores and checks the caller's mask, and drain
 and receiver threads are created under ``helper_mask``, which defaults to the process
 (main-thread) mask rather than a narrowed or busy-polled lane mask. Stdlib only, so every
@@ -77,7 +77,7 @@ class CpuSets:
 
 def process_mask() -> frozenset[int]:
     """The main thread's mask: ``sched_getaffinity(getpid())`` is that thread's on Linux, also
-    when called from a lane thread (c3), never the caller's own mask."""
+    when called from a lane thread, never the caller's own mask."""
     return frozenset(os.sched_getaffinity(os.getpid()))
 
 

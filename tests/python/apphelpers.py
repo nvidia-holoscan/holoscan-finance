@@ -20,6 +20,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 from holoscan_finance.app import cli
+from holoscan_finance.app.drained import DrainedCondition
 from holoscan_finance.app.runner import cpu_sets
 from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.ref import Knob
@@ -54,18 +55,20 @@ def equity_args(*argv: str) -> argparse.Namespace:
 def dry_equity_context(args: argparse.Namespace) -> SimpleNamespace:
     """What ``compose()`` and ``rules()`` read from an ``EquityContext``; the results store
     is two no-op callbacks and there is no replay registration."""
+    ingest, bars = IngestStats(), BarsStats()
     return SimpleNamespace(
         args=args,
         cpus=cpu_sets(args),
         settings=cli.bar_settings(args),
         directory_knob=Knob(),
-        ingest_stats=IngestStats(),
-        bars_stats=BarsStats(),
+        ingest_stats=ingest,
+        bars_stats=bars,
         risk_stats=RiskStats(),
         tap=CaptureTap(),
         gate=CrossCheckGate(),
         results=SimpleNamespace(on_risk=_ignore, on_comparison=_ignore),
         replay_generations=None,
+        drained=DrainedCondition(ingest=ingest, bars=[bars]),
     )
 
 

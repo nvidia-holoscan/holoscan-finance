@@ -132,28 +132,44 @@ class DeviceFrames:
         self._data = data  # device uint8: the capture buffer
         self._ptrs = ptrs  # host uint64: frame device addresses
         self._lengths = lengths  # host uint64
-        self._port_at = port_at  # device int64: byte index of each UDP frame's source port
+        self._port_at = port_at  # device int64: byte index of each feed frame's source port
         self.n = len(ptrs)
 
     @classmethod
-    def upload(cls, frames: PcapFrames, gpu_device: int) -> DeviceFrames:
-        """One host-to-device copy of the whole capture."""
+    def upload(
+        cls, frames: PcapFrames, gpu_device: int, sender_port: int | None = None
+    ) -> DeviceFrames:
+        """One host-to-device copy of the whole capture, its feed sent from ``sender_port``.
+
+        The feed is the frames from ``sender_port`` when the capture carries that port, else
+        those from its most common UDP source port, rewritten to ``sender_port`` here.
+        ``set_src_port`` re-sources the feed only, as 4.3's ``tcprewrite --portmap
+        feed:new``: frames of another sender stay stale in every pass."""
         import cupy as cp
 
         rel = frames.udp_src_port_offsets()
         udp = rel >= 0
+        at = frames.offsets[udp] + rel[udp]
+        ports = frames.data[at].astype(np.int64) << 8 | frames.data[at + 1]
+        carried = sender_port is not None and bool((ports == sender_port).any())
+        feed = sender_port if carried else frames.dominant_src_port()
         with cp.cuda.Device(gpu_device):
             data = cp.asarray(frames.data)
-            port_at = cp.asarray(frames.offsets[udp] + rel[udp])
+            port_at = cp.asarray(at[ports == feed] if feed is not None else at[:0])
         ptrs = np.uint64(data.data.ptr) + frames.offsets.astype(np.uint64)
-        return cls(data, ptrs, frames.lengths.astype(np.uint64), port_at)
+        device_frames = cls(data, ptrs, frames.lengths.astype(np.uint64), port_at)
+        if sender_port is not None and not carried:
+            device_frames.set_src_port(sender_port)  # pass 0 comes from the published port
+        cp.cuda.Device(gpu_device).synchronize()  # before a drain's non-blocking stream reads
+        return device_frames
 
     def addresses(self, lo: int, hi: int) -> np.ndarray:
         """Frames ``[lo, hi)`` in the gather kernel's layout: addresses, then lengths."""
         return np.concatenate((self._ptrs[lo:hi], self._lengths[lo:hi]))
 
     def set_src_port(self, port: int) -> None:
-        """Rewrite every UDP frame's source port (a new sender, as a replay loop's)."""
+        """Rewrite the feed frames' UDP source port (a new sender, as a replay loop's); other
+        senders' frames keep theirs."""
         with self._data.device:
             self._data[self._port_at] = port >> 8
             self._data[self._port_at + 1] = port & 0xFF
@@ -173,9 +189,10 @@ class DeviceReplayDrain:
     most of the time, and a polling Python thread would tax the ingest lane's GIL (one cut a
     1 kHz pipeline to 38-43 Hz).
 
-    Before pass ``k >= 1`` the thread waits until the consumer released everything gathered,
-    calls ``on_loop(k)`` (a returned port is written into every frame's UDP source port) and
-    re-bases the schedule, so no packet of pass ``k - 1`` is decoded under pass ``k``'s
+    Before pass ``k >= 1`` the thread waits until the consumer released everything gathered
+    and ``settled()`` holds (every decoded batch consumed downstream), calls ``on_loop(k)``
+    (a returned port is written into the feed frames' UDP source port) and re-bases the
+    schedule, so no packet of pass ``k - 1`` is decoded or built into bars under pass ``k``'s
     directory and the wait never counts as lag. ``loops`` 0 repeats forever.
 
     ``poll_gap_*`` measure how late the thread woke for a burst's deadline (its NIC poll),
@@ -185,6 +202,7 @@ class DeviceReplayDrain:
 
     _LAG_WINDOW = 16384  # bursts in the lag percentiles
     _WAIT_S = 0.05  # condition-wait bound; release(), take() and stop() notify
+    _SETTLE_S = 0.001  # settled() poll period at a loop boundary
 
     def __init__(
         self,
@@ -199,6 +217,7 @@ class DeviceReplayDrain:
         nic_bufs: int = 0,
         start_delay_ms: int = 0,
         on_loop: Callable[[int], int | None] | None = None,
+        settled: Callable[[], bool] | None = None,
         min_payload: int = UNIT_HEADER,
         max_records: int = 65536,
         gpu_device: int = 0,
@@ -211,7 +230,7 @@ class DeviceReplayDrain:
         self._pps, self._loops, self._burst = pps, loops, burst_packets
         self._timeout_ns = rx_timeout_us * 1000
         self._nic_bufs, self._delay_s = nic_bufs, start_delay_ms / 1e3
-        self._on_loop, self._min_payload = on_loop, min_payload
+        self._on_loop, self._settled, self._min_payload = on_loop, settled, min_payload
         self._max_records, self._gpu_device = max_records, gpu_device
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -463,6 +482,11 @@ class DeviceReplayDrain:
                 if self._stop.is_set():
                     return False
                 self._cond.wait(self._WAIT_S)
+        # Released means decoded, not consumed: the last batches may still be on their way
+        # to the bars, which would count them stale under the next generation.
+        while self._settled is not None and not self._settled():
+            if self._stop.wait(self._SETTLE_S):
+                return False
         self._loop_wait_ns += time.monotonic_ns() - w0
         port = self._on_loop(self._pass + 1) if self._on_loop is not None else None
         if port is not None:

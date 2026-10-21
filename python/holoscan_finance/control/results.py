@@ -7,7 +7,7 @@
 gate only after the comparison is published, so every validated GPU result has its CPU
 pair. Publication is on the risk lane right after compute (4.3 polled every 5 ms), and
 ``receive_to_result_ms`` keeps 4.3's formula. ``lock`` covers dict building only; the
-generation filter reads the directory's knob, never its lock (§8.3 lock order). The
+generation filter reads the directory's knob, never its lock (the lock order in docs/ARCHITECTURE.md). The
 formatting is 4.3 ``EquityState.publish_gpu`` and ``publish_comparison``, verbatim.
 """
 
@@ -90,7 +90,11 @@ class ResultsStore:
         self.disabled = False
 
     def on_risk(self, update: RiskUpdate) -> None:
-        """Publish a risk result of the current generation; never raises."""
+        """Publish a risk result of the current generation; never raises.
+
+        A failure never releases the gate: a validated update's comparison still comes and
+        releases it in ``on_comparison``; an earlier release would free risk's next claim
+        while this comparison is still in flight."""
         try:
             with self.lock:
                 self.received_risk += 1
@@ -98,14 +102,19 @@ class ResultsStore:
                 # moved the knob, so a result of the old generation can never follow it.
                 if self.disabled or update.window.generation != self.directory.generation:
                     return
-                self._publish_risk(update)
+                result = self._publish_risk(update)
+                capture = self.tap.capture
+            # After our lock (dict building only): record_single copies the window to the
+            # host and hashes it. LatencyCapture has its own lock.
+            if capture is not None:
+                if self.backend == "compare":
+                    capture.record_gpu(_work(update), result)
+                else:
+                    capture.record_single(_work(update), result, update.result)
         except Exception as exc:
             self._fail(f"Analytics failed: {exc}")
-            # A disabled store never holds risk back on the gate.
-            if self.gate is not None:
-                self.gate.release()
 
-    def _publish_risk(self, update: RiskUpdate) -> None:
+    def _publish_risk(self, update: RiskUpdate) -> dict:
         w, original = update.window, update.result
         result = {k: v for k, v in original.items() if k not in ("matrix", "covariance_probes")}
         now = time.time_ns()
@@ -126,12 +135,7 @@ class ResultsStore:
         self.history.append(point)
         self.published += 1
         self.latencies_ms.append(result["receive_to_result_ms"])
-        capture = self.tap.capture
-        if capture is not None:
-            if self.backend == "compare":
-                capture.record_gpu(_work(update), result)
-            else:
-                capture.record_single(_work(update), result, original)
+        return result
 
     def on_comparison(self, cmp: RiskComparison) -> None:
         """Publish a CPU/GPU comparison, then release the gate; never raises."""

@@ -7,7 +7,7 @@ analytics, and a slow consumer skips windows. ``lossless(depth)`` is a ``BLOCKIN
 explicit depth (the default depth 1 fails a run with ``BackpressuredError`` under load).
 ``topic_export_kwargs`` bounds a holomq export so a stalled external reader can never fail
 the run; the edge into an export is always ``LATEST`` (a ``BLOCKING`` one ended a run with
-``HOLOMQ_BACKPRESSURED`` after 17 emits once a reader stopped: c5, fixed and verified R-a).
+``HOLOMQ_BACKPRESSURED`` after 17 emits once a reader stopped).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import holoscan as hs
 
 LATEST = {"queue_policy": hs.QueuePolicy.DROP_OLDEST, "queue_depth": 1}
 
-# Subscribers must use a timeout <= this: one of 5.001 s fails without an attach bound (c5).
+# Subscribers must use a timeout <= this: one of 5.001 s fails without an attach bound.
 TOPIC_MAX_WAIT_MS = 10_000
 
 
@@ -26,7 +26,7 @@ def lossless(depth: int) -> dict:
 
 
 def topic_export_kwargs(max_wait_ms: int = TOPIC_MAX_WAIT_MS) -> dict:
-    """Optional peer, an explicit attach bound, and bounded subscribers (verified R-a):
+    """Optional peer, an explicit attach bound, and bounded subscribers:
     ``export_topic(..., **topic_export_kwargs())``."""
     return {
         "attach": hs.topics.TopicAttachPolicy(

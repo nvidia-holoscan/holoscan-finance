@@ -3,12 +3,11 @@
 """Plan introspection and rules: what a composition promises, checked before it runs.
 
 ``PlanView`` joins a compiled plan's JSON (payload edges -> ports -> operators, partition
-placements, clock triggers; verified F2) into operator-level facts. A ``Rule`` turns those
+placements, clock triggers) into operator-level facts. A ``Rule`` turns those
 facts into violation strings, so an application states its invariants next to its graph
 (source and bars share a lane, bars -> risk is latest-only, risk polls at 1 ms) and the
 runner refuses a plan that breaks them; the plan tests apply the same rules on the CPU
-tier. A rule never raises: a key a later SDK drops gives ``plan.json key <k> unavailable``
-(R10). ``plan_summary`` is what ``--plan-only``, ``GET /plan`` and ``/snapshot.engine`` show.
+tier. A rule never raises: a key a later SDK drops gives ``plan.json key <k> unavailable``. ``plan_summary`` is what ``--plan-only``, ``GET /plan`` and ``/snapshot.engine`` show.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ _INPUT, _OUTPUT = 0, 1  # ports[].direction
 @dataclass(frozen=True)
 class Edge:
     src: str  # "op.port", or "@import.<name>" for an imported topic
-    dst: str  # "op.port", or "@export.<name>" for an export topic endpoint (R-b)
+    dst: str  # "op.port", or "@export.<name>" for an export topic endpoint
     policy: str  # "BLOCKING" | "DROP_OLDEST"
     depth: int
 

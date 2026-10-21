@@ -7,14 +7,17 @@ persistent incremental engine per process and generation, so a worker pays the f
 only on a new generation; ``cpu_window`` tunes the BLAS thread count over {1, 2, 4, 8, all}
 at start and at the first full window (the 4.3 9.55x CPU/GPU method). Workers run in
 spawned processes so BLAS and CUDA work never holds the pipeline's GIL (in-process, 30%
-decoder duty added 45% to the engine time: J2); ``pin_worker`` is their initializer (the
-4.3 ``keep_off_cores``) and ``start_worker_pool`` starts one before data flows.
+decoder duty added 45% to the engine time); ``start_worker_pool`` starts one before data
+flows. Its initializer leaves SIGINT and SIGTERM to the parent, pins the worker
+(``pin_worker``, the 4.3 ``keep_off_cores``) and ends it with the parent.
 """
 
 from __future__ import annotations
 
 import multiprocessing
 import os
+import signal
+import threading
 import time
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -42,7 +45,7 @@ def start_worker_pool(worker_cpus: Sequence[int] = ()) -> ProcessPoolExecutor:
     pool = ProcessPoolExecutor(
         max_workers=1,
         mp_context=multiprocessing.get_context("spawn"),
-        initializer=pin_worker,
+        initializer=_init_worker,
         initargs=(list(worker_cpus),),
     )
     try:
@@ -51,6 +54,31 @@ def start_worker_pool(worker_cpus: Sequence[int] = ()) -> ProcessPoolExecutor:
         pool.shutdown(wait=False, cancel_futures=True)
         raise
     return pool
+
+
+def _init_worker(cpus: Sequence[int]) -> None:
+    """Spawn initializer: the parent owns SIGINT and SIGTERM; then ``pin_worker``.
+
+    A terminal Ctrl-C (or ``timeout``) signals the whole process group. With Python's default
+    handlers a busy worker failed its job with ``KeyboardInterrupt`` (a BaseException: the
+    compute failed and the run ended FAILED) and an idle one died, breaking the pool. The
+    parent's handler stops the run and the operators' ``stop()`` shuts the pool down. A
+    worker that ignores SIGTERM must not outlive its parent, so a daemon thread exits it when
+    the parent's end of the spawn pipe closes (also after a SIGKILL).
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    pin_worker(cpus)
+    parent = multiprocessing.parent_process()
+    if parent is not None:  # created after pinning, so it inherits the worker's mask
+        threading.Thread(
+            target=_exit_with_parent, args=(parent,), name="hf-worker-parent", daemon=True
+        ).start()
+
+
+def _exit_with_parent(parent: multiprocessing.process.BaseProcess) -> None:
+    parent.join()  # returns once the parent died, also by SIGKILL
+    os._exit(1)
 
 
 _cpu_engine = None

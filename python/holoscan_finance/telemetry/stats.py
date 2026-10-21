@@ -59,6 +59,7 @@ class IngestStats:
     packet_batches: int
     packet_batches_decoded: int
     event_batches: int
+    decoded_batches: int  # GPU sources: batches to emit, counted before their ring release
     retries: int
     held: int
     ring_packets: int  # under lock
@@ -84,6 +85,7 @@ class IngestStats:
         self.out_of_order_packets = self.non_udp_frames = self.bursts = 0
         self.last_packet_wall_ns = self.drain_host_ns = 0
         self.packet_batches = self.packet_batches_decoded = self.event_batches = 0
+        self.decoded_batches = 0
         self.retries = self.held = 0
         self.replay = None
         self.lane_cpus = []

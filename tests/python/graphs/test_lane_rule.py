@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The lane rule, for whoever edits a composition (judge probe J1, plus convexity).
+"""The lane rule, for whoever edits a composition (one entry per lane, plus convexity).
 
 An authored lane has exactly one entry operator: a clock-triggered one, or one fed only from
 other lanes. Every other member needs an input edge from inside the lane (more inputs from

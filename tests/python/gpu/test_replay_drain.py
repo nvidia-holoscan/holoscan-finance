@@ -5,12 +5,14 @@
 The ring wrap rule, the gather (same kernel, so the same header as the host strip path),
 hold-when-full on a condition variable (no CPU while held, woken by ``release``), the
 DAQIRI burst timeout, the NIC-buffer drop model, the loop boundary (``on_loop`` only before
-pass >= 1, after everything was released, with the port rewritten) and the statistics.
+pass >= 1, after everything was released and ``settled()`` holds, with the feed's port
+rewritten and any other sender's left alone) and the statistics.
 """
 
 from __future__ import annotations
 
 import socket
+import threading
 import time
 
 import numpy as np
@@ -240,6 +242,93 @@ def test_loop_boundary_waits_for_every_release_and_rewrites_the_port(tmp_path):
     finally:
         drain.stop()
     assert calls == []  # never before pass 0, never after the last pass
+
+
+def test_the_loop_boundary_also_waits_until_settled(tmp_path):
+    """Released means decoded, not consumed: ``on_loop`` waits for ``settled()`` too, and a
+    stop while it is false ends the thread without a next pass."""
+    calls, consumed = [], threading.Event()
+    units = payloads(50)
+    drain, ring = make_drain(
+        tmp_path, units, burst=16, loops=2, on_loop=calls.append, settled=consumed.is_set
+    )
+    consumer = Consumer(drain, ring)
+    drain.start()
+    try:
+        consumer.run(lambda: len(consumer.records) == 4)  # all of pass 0, released
+        time.sleep(0.05)
+        assert calls == [] and drain.stats()["fill"] == 0  # released, but not settled
+        consumed.set()
+        consumer.run(lambda: drain.stats()["eof"])
+    finally:
+        drain.stop()
+    replay = drain.stats()["replay"]
+    assert calls == [1] and replay["sent"] == 100 and replay["loop_wait_ms"] >= 50
+
+    calls.clear()
+    drain, ring = make_drain(
+        tmp_path, units, burst=16, loops=2, on_loop=calls.append, settled=lambda: False
+    )
+    consumer = Consumer(drain, ring)
+    drain.start()
+    consumer.run(lambda: len(consumer.records) == 4)
+    stopped = time.monotonic()
+    drain.stop()
+    assert time.monotonic() - stopped < 0.5 and not drain.stats()["running"]
+    assert calls == [] and not drain.stats()["eof"]
+
+
+def mixed_capture(tmp_path, units: list[bytes], foreign: list[bytes]) -> PcapFrames:
+    """``foreign`` from port 39999 (another sender), then the feed ``units`` from 40000."""
+    path = tmp_path / "mixed.pcap"
+    write_pcap(
+        path,
+        [udp_frame(u, src_port=39999, src_ip=SRC_IP) for u in foreign]
+        + [udp_frame(u, src_port=40000, src_ip=SRC_IP) for u in units],
+    )
+    return PcapFrames.read(path)
+
+
+def replayed_ports(frames: PcapFrames, sender_port: int | None, loops: int) -> list[int]:
+    """The UDP source port of every frame gathered, with ``on_loop`` returning 41000."""
+    ring = DeviceRing.allocate(64, 0)
+    drain = DeviceReplayDrain(
+        DeviceFrames.upload(frames, 0, sender_port=sender_port),
+        ring,
+        gather_fn=gpu_mitch._kernels().get_function("gather_frame"),
+        pps=0,
+        loops=loops,
+        burst_packets=16,
+        rx_timeout_us=20000,
+        on_loop=lambda pass_index: 41000,
+    )
+    consumer = Consumer(drain, ring)
+    drain.start()
+    try:
+        consumer.run(lambda: drain.stats()["eof"])
+    finally:
+        drain.stop()
+    return consumer.header[:, 1].tolist()
+
+
+def test_a_loop_re_sources_only_the_feed_frames(tmp_path):
+    """4.3 ``tcprewrite --portmap feed:new``: another sender's frames keep their port, so
+    they stay stale in every pass instead of joining the feed's session from pass 1."""
+    frames = mixed_capture(tmp_path, payloads(40), payloads(5, seed=9))
+    ports = replayed_ports(frames, None, loops=2)  # the feed: the most common port
+    assert ports == [39999] * 5 + [40000] * 40 + [39999] * 5 + [41000] * 40
+    ports = replayed_ports(frames, 40000, loops=2)
+    assert ports == [39999] * 5 + [40000] * 40 + [39999] * 5 + [41000] * 40
+
+
+def test_the_first_generation_port_picks_or_re_sources_the_feed(tmp_path):
+    frames = mixed_capture(tmp_path, payloads(40), payloads(5, seed=9))
+    # A port the capture carries picks that sender's frames as the feed.
+    ports = replayed_ports(frames, 39999, loops=2)
+    assert ports == [39999] * 5 + [40000] * 40 + [41000] * 5 + [40000] * 40
+    # Any other port re-sources the most common sender's frames before pass 0.
+    ports = replayed_ports(frames, 41234, loops=1)
+    assert ports == [39999] * 5 + [41234] * 40
 
 
 def test_a_drain_failure_is_reported_in_stats(tmp_path):

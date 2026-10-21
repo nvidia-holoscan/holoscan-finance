@@ -4,7 +4,7 @@
 side is the spawned ``cpu_window`` result and which agrees with the GPU side.
 
 The comparison is collected at a later poll than the one that received the update, and a
-clocked operator is not activated again once its staged harness input ends (J6), so this
+clocked operator is not activated again once its staged harness input ends, so this
 runs the production wiring in a small graph whose test source never ends."""
 
 from __future__ import annotations

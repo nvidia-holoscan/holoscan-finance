@@ -5,7 +5,7 @@
 Holoscan 5 resolves ``holoscan.<name>`` from ``holoscan.modules`` entry points, so a plain
 ``PYTHONPATH=<repo>/python`` gives only the canonical ``holoscan_finance``. Putting the
 directory written here on ``PYTHONPATH`` as well adds the alias, as the CMake staging and
-the wheel do (cli5 probe C; no dist-info is committed). Apps and tests import the
+the wheel do (verified with holoscan-cli 5.0; no dist-info is committed). Apps and tests import the
 canonical package and do not need this.
 
     python -m holoscan_finance.devpath DIR

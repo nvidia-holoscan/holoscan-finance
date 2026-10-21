@@ -134,7 +134,7 @@ class _GpuMitchSourceBase(hs.Operator):
         )
 
     def _helper_mask(self) -> list[int]:
-        """Never the lane mask, which may be narrowed or busy-polled (c3)."""
+        """Never the lane mask, which may be narrowed or busy-polled."""
         return helper_mask(normalize_cpu_list(self.helper_cpus, name="helper_cpus"))
 
     def _open(self, ingest: GpuIngest, frame_fetch: str) -> None:
@@ -301,6 +301,11 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
     on_loop = hs.Param(
         Ref(), description="Ref(callable(pass_index) -> sender port | None), before pass >= 1"
     )
+    settled = hs.Param(
+        Ref(),
+        description="Ref(callable() -> bool): before pass >= 1, wait until true (every batch "
+        "consumed downstream, e.g. DrainedCondition.batches_consumed)",
+    )
     keep_alive = hs.Param(False, description="False: the run's input ends after the last loop")
 
     def setup(self, spec: hs.OperatorSpec) -> None:
@@ -313,7 +318,11 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
     def start(self) -> None:
         self._begin("replay")
         frames = PcapFrames.read(self.pcap_path)
-        device_frames = DeviceFrames.upload(frames, self.gpu_device)
+        # Pass 0 is sent from the published first generation's port, like every later pass.
+        first = self._knob.get() if self._knob is not None else None
+        device_frames = DeviceFrames.upload(
+            frames, self.gpu_device, sender_port=first.sender_port if first is not None else None
+        )
         ring = DeviceRing.allocate(self.ring_size, self.gpu_device)
         ingest = self._new_ingest()
         with thread_mask(self._helper_mask()):
@@ -328,6 +337,7 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
                 nic_bufs=self.nic_bufs,
                 start_delay_ms=self.start_delay_ms,
                 on_loop=self.on_loop.obj,
+                settled=self.settled.obj,
                 gpu_device=self.gpu_device,
             )
             drain.start()

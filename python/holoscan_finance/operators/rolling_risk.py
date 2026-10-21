@@ -8,7 +8,7 @@ Ports: ``window`` (in, ``BarWindow``) -> ``risk`` (out, ``RiskUpdate``) and, onl
 ``lossless(8)``, same lane; ``validate`` -> ``RiskCrossCheckOp`` ``lossless(2)``. Lane: the
 entry of ``analytics``. It polls every ``poll_period_us`` (1 ms) and keeps the newest window
 in a slot, analyzing it as soon as ``min_interval_us`` has passed: 4.3's run-on-arrival
-timing (pick-up p50 0.99 ms, J1). ``executor="process"`` runs the analysis in a spawned
+timing (pick-up p50 0.99 ms, measured). ``executor="process"`` runs the analysis in a spawned
 worker (host front ends: off the decoder's GIL). Processor: ``analytics.rolling.RollingRisk``.
 """
 

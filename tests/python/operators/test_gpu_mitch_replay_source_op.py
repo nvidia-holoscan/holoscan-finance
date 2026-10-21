@@ -6,6 +6,8 @@ production gather, ring, accounting and decode.
 Every packet is accounted and decoded like the host decoder, the run ends (``stats.eof``);
 one pass registers no second generation and nothing is stale; two passes call ``on_loop``
 exactly once, between them, so pass 1 decodes under its own generation with nothing stale;
+a first-generation port the capture does not carry re-sources pass 0, and another sender's
+frames stay stale in every pass; looped passes reach the bars under their own generation;
 the NIC-buffer model's drops show up as sequence gaps. Pacing is a separate timing case.
 """
 
@@ -20,13 +22,15 @@ import numpy as np
 import pytest
 from holoscan.testing import OperatorTestHarness, TestRunOptions
 
+from holoscan_finance.app.drained import DrainedCondition
 from holoscan_finance.marketdata.framing import udp_frame, write_pcap
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import synthetic_stream
-from holoscan_finance.operators import GpuMitchReplaySourceOp
+from holoscan_finance.operators import GpuMitchReplaySourceOp, QuoteBarsOp
+from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Knob, Ref
-from holoscan_finance.telemetry.stats import IngestStats
+from holoscan_finance.telemetry.stats import BarsStats, IngestStats
 
 pytestmark = [pytest.mark.sdk, pytest.mark.gpu]
 
@@ -138,6 +142,92 @@ def test_two_passes_get_two_generations_and_nothing_stale(capture):
     per_generation = {g: sum(b.n_packets for b in batches if b.generation == g) for g in (1, 2)}
     assert per_generation == {1: 2000, 2: 2000}
     assert stats.replay["pass_index"] == 1 and stats.replay["sent"] == 4000
+
+
+def test_a_first_generation_port_the_capture_does_not_carry_sends_pass_0_from_it(capture):
+    """``--replay-sender-port``: pass 0 is re-sourced to the published port, not stale."""
+    path, units = capture
+    knob = Knob(validate_manifest(manifest(1, PORT + 500)))
+    batches, stats = replay(path, directory=Ref(knob), batch_size=8192)
+    assert stats.packets == 2000 and stats.stale_packets == 0 and stats.dropped == 0
+    assert stats.messages == sum(u[2] for u in units)
+    got, expected = columns(batches), host_events(units)
+    for name, values in got.items():
+        np.testing.assert_array_equal(values, expected[name].astype(values.dtype), err_msg=name)
+
+
+@pytest.fixture(scope="module")
+def mixed_capture(capture, tmp_path_factory):
+    """The capture behind 35 frames of another sender (PORT - 1) that repeat mid-day units,
+    as a raw capture holds a previous generation's tail."""
+    _, units = capture
+    path = tmp_path_factory.mktemp("replay") / "mixed.pcap"
+    foreign = [udp_frame(u, src_port=PORT - 1) for u in units[1000:1035]]
+    write_pcap(path, foreign + [udp_frame(u, src_port=PORT) for u in units])
+    return str(path), units
+
+
+def test_another_senders_frames_stay_stale_in_every_pass(mixed_capture):
+    """Only the feed is re-sourced per pass (4.3 ``tcprewrite --portmap``): the foreign
+    frames never join the feed's session, so every pass decodes the same."""
+    path, units = mixed_capture
+    knob = Knob(validate_manifest(manifest(1, PORT)))
+    batches, stats = replay(path, loops=2, on_loop=Ref(Generations(knob)), directory=Ref(knob))
+    assert stats.packets == 2 * 2035 and stats.stale_packets == 2 * 35
+    assert stats.out_of_order_packets == stats.dropped == 0
+    assert stats.messages == 2 * sum(u[2] for u in units)
+    per_generation = {g: sum(b.n_packets for b in batches if b.generation == g) for g in (1, 2)}
+    assert per_generation == {1: 2000, 2: 2000}
+
+
+def test_looped_passes_reach_the_bars_under_their_own_generation(capture):
+    """Unpaced, three passes: the loop boundary waits until the bars took every batch of the
+    pass (``settled``), so no pass's tail (or, unpaced, whole pass) is stale at the bars."""
+    path, units = capture
+    knob = Knob(validate_manifest(manifest(1, PORT)))
+    generations = Generations(knob)
+    ingest, bars_stats = IngestStats(), BarsStats()
+    drained = DrainedCondition(ingest=ingest, bars=[bars_stats])
+    g = hs.Graph("replay_loops", default_clock=hs.RealtimeClock)
+    source = g.op(
+        GpuMitchReplaySourceOp,
+        "source",
+        pcap_path=path,
+        pps=0,
+        loops=3,
+        batch_size=8192,  # one burst and one batch per pass: the race is deterministic
+        warmup=False,
+        on_loop=Ref(generations),
+        settled=Ref(drained.batches_consumed),
+        directory=Ref(knob),
+        stats=Ref(ingest),
+    )
+    bars = g.op(
+        QuoteBarsOp,
+        "bars",
+        backend="gpu",
+        emit_windows=False,
+        warmup=False,
+        directory=Ref(knob),
+        stats=Ref(bars_stats),
+    )
+    g.add_flow(source.events, bars.events, **lossless(4))
+    g.partition("ingest").add(source, bars)
+    plan = hs.compile(g)
+    assert plan.ok, plan.summary()
+    with hs.run_async(plan) as session:
+        deadline = time.monotonic() + 120
+        while not drained() and time.monotonic() < deadline and not session.wait(0.05):
+            pass
+        assert drained(), drained.why()
+        session.request_stop()
+        session.wait(10)
+    assert session.termination is hs.RunTermination.STOPPED, session.summary()
+    assert generations.calls == [1, 2] and ingest.stale_packets == 0
+    assert ingest.decoded_batches == ingest.event_batches == bars_stats.batches_in
+    assert bars_stats.stale_packets == 0 and bars_stats.sequence_gaps == 0
+    assert bars_stats.generation == knob.get().generation == 3
+    assert bars_stats.counters.events == len(host_events(units))  # the last pass only
 
 
 def test_nic_buffer_drops_show_up_as_sequence_gaps(capture):

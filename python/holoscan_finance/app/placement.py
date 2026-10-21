@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Authored lanes, their thread placement and the compile options, in one place.
 
-The lane rule (J1 plus convexity), for whoever edits a composition: each lane is weakly
+The lane rule, for whoever edits a composition: each lane is weakly
 connected and convex (no path leaves it and comes back), and has exactly one entry
 operator, either clock-triggered or fed only from other lanes; every other member has an
 input edge from inside the lane, and may have more from other lanes. Two entries are

@@ -143,7 +143,9 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--replay-sender-port",
         type=int,
-        help="UDP source port of the first generation (default: the capture's own)",
+        help="UDP source port of the first generation (default: the capture's most common); "
+        "a port the capture carries picks that sender's frames as the feed, any other port "
+        "re-sources the most common sender's frames",
     )
 
     g = p.add_argument_group("batching")

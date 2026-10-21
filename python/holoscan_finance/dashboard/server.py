@@ -7,7 +7,9 @@
 ``async def`` (no thread-pool hop per request: measured sub-ms tails under load); only the
 blocking full-day start and the GIL fault injection go to worker threads. ``serve`` is
 pattern B: uvicorn owns the main thread and SIGINT, the FastAPI lifespan owns the
-``RunSession`` (stopped in about 1 ms on shutdown). From 4.3 ``web_app`` and ``main``.
+``RunSession`` (stopped in about 1 ms on shutdown, but waited for without a bound, so the
+report and exit code always see a stopped graph). The port is bound before the graph
+starts, and uvicorn's own exit statuses never leak. From 4.3 ``web_app`` and ``main``.
 FastAPI is imported here so the pure-tier HTTP tests can use ``make_app``; Holoscan only
 inside ``serve``.
 """
@@ -20,6 +22,7 @@ import ctypes
 import logging
 import os
 import signal
+import socket
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -34,6 +37,8 @@ from .model import DashboardModel
 logger = logging.getLogger(__name__)
 
 INDEX_HTML = Path(__file__).parent / "webui" / "index.html"
+# Shutdown warns if the graph has not stopped after this long, then keeps waiting.
+STOP_WARNING_S = 10.0
 
 
 def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:
@@ -179,31 +184,51 @@ def serve(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
-        session = hs.run_async(plan)
-        sessions.append(session)
-        ctx.status.graph_status = "running"
-        if ctx.stall_monitor is not None:
-            ctx.stall_monitor.start()
-        watcher = asyncio.create_task(watch(session))
         try:
-            yield
+            # As in run_headless, leaving the block waits for the stop without a bound: slow
+            # operator stop()s (pool shutdowns, DAQIRI) finish before the report is written.
+            with hs.run_async(plan) as session:
+                sessions.append(session)
+                ctx.status.graph_status = "running"
+                if ctx.stall_monitor is not None:
+                    ctx.stall_monitor.start()
+                watcher = asyncio.create_task(watch(session))
+                try:
+                    yield
+                finally:
+                    watcher.cancel()
+                    ctx.stop_reason = ctx.stop_reason or "signal"
+                    session.request_stop()
+                    if not session.wait(STOP_WARNING_S):
+                        logger.warning(
+                            "graph still stopping after %g s; waiting for operator stop()",
+                            STOP_WARNING_S,
+                        )
         finally:
-            watcher.cancel()
-            ctx.stop_reason = ctx.stop_reason or "signal"
-            session.request_stop()
-            session.wait(10)
-            ctx.status.from_session(session)
             if ctx.stall_monitor is not None:
                 ctx.stall_monitor.stop()
 
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:  # before the lifespan starts the graph: a busy port must not start it
+        sock = socket.create_server((host, port), family=family)
+    except OSError as exc:
+        logger.error("dashboard cannot listen on %s:%d: %s", host, port, exc)
+        return ExitCode.RUN_FAILED
     app = make_app(DashboardModel(ctx), ctx, lifespan=lifespan)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
     logger.info("dashboard on http://%s:%d", host, port)
-    with _signals_return_here():
-        server.run()
-    if not sessions:  # run_async raised in the lifespan; uvicorn logged it and returned
+    with sock, _signals_return_here():
+        try:
+            server.run(sockets=[sock])
+        except SystemExit as exc:
+            # uvicorn exits when the lifespan fails to start (run_async raised); its status
+            # 3 would read as our PLAN_REJECTED.
+            logger.error("dashboard failed to start (uvicorn exit status %s)", exc.code)
+            return ExitCode.RUN_FAILED
+    if not sessions:  # the lifespan never started the graph
         return ExitCode.RUN_FAILED
     session = sessions[0]
+    ctx.status.from_session(session)
     if report:
         write_report(report, ctx, session)
     errors = report_diagnostics(session)

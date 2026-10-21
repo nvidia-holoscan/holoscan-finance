@@ -2,17 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """``CpuCrossCheck``: validated updates are recomputed in FIFO order by a spawned
 ``cpu_window`` worker and compared with the GPU-side result; a worker exception becomes an
-error comparison (which ``ResultsStore`` publishes and which releases the gate)."""
+error comparison (which ``ResultsStore`` publishes and which releases the gate), and so does
+a worker that died while idle."""
 
 from __future__ import annotations
 
+import os
+import signal
 import time
 
 import numpy as np
 import pytest
 
 from holoscan_finance.analytics.crosscheck import CpuCrossCheck
-from holoscan_finance.analytics.workers import cpu_window, start_worker_pool
+from holoscan_finance.analytics.workers import cpu_window, ping, start_worker_pool
 from holoscan_finance.marketdata.covariance import CovarianceEngine
 from holoscan_finance.payloads import BarWindow, RiskUpdate
 from holoscan_finance.telemetry.stats import RiskStats
@@ -90,6 +93,19 @@ def test_a_worker_exception_becomes_an_error_comparison(xc):
     assert failed.update is bad and failed.cpu is None and failed.error.startswith("ValueError")
     assert not (failed.agreement or failed.matched_work or failed.usable)
     assert ok.update is good and ok.agreement  # the worker survives a failed job
+
+
+def test_a_worker_that_died_while_idle_becomes_an_error_comparison(xc):
+    """The next submit raises BrokenProcessPool; it must not escape ``poll`` (and fail the
+    run): the update is published as an error comparison, which releases the gate."""
+    os.kill(xc._pool.submit(ping).result(timeout=60), signal.SIGKILL)
+    time.sleep(0.5)  # the pool's manager thread marks it broken
+    (update,) = validated((12, 1))
+    xc.submit(update)
+    (failed,) = drain(xc, 1)
+    assert failed.update is update and failed.cpu is None
+    assert failed.error.startswith("BrokenProcessPool")
+    assert (xc.stats.crosschecks_submitted, xc.stats.crosschecks_done) == (1, 1)
 
 
 def test_an_unvalidated_update_is_refused():

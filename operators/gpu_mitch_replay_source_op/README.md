@@ -52,7 +52,8 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
 | `rx_timeout_us` | int | `20000` | DAQIRI partial-burst timeout |
 | `nic_bufs` | int | `0` | `0`: hold forever. Otherwise a NIC buffer model (paced only): due frames beyond `nic_bufs` are dropped oldest first and show up as sequence gaps. A forming burst occupies buffers too, so it must cover `pps × rx_timeout` |
 | `start_delay_ms` | int | `0` | delay before the first frame is due |
-| `on_loop` | `Ref` | `Ref()` | `callable(pass_index) -> sender port \| None`, called only before pass k ≥ 1, after everything gathered was released; a returned port is written into every frame's UDP source port |
+| `on_loop` | `Ref` | `Ref()` | `callable(pass_index) -> sender port \| None`, called only before pass k ≥ 1, after everything gathered was released and `settled` holds; a returned port is written into the feed frames' UDP source port |
+| `settled` | `Ref` | `Ref()` | `callable() -> bool`: before pass k ≥ 1 the drain also waits until it is true, so that every decoded batch has reached the bars (the applications pass `DrainedCondition.batches_consumed`); empty: no wait |
 | `keep_alive` | bool | `False` | `False`: the input ends after the last pass (`stats.eof`) |
 
 ## Behaviour
@@ -60,9 +61,15 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
 - **Schedule.** Frame `i` of a pass is due at `t0 + i / pps`; the burst deadline is
   `min(due(first) + rx_timeout, due(last))`, and a burst holds the frames due by then.
   `lag` is how late a burst was gathered against its deadline.
+- **Feed and sender port.** The feed is the capture's frames from the first generation's
+  `sender_port` when the capture carries that port, else its most common UDP source port's
+  frames, which are rewritten to `sender_port` before pass 0. Each later pass re-sources
+  only the feed's frames (4.3's `tcprewrite --portmap feed:new`); frames from any other
+  sender stay stale in every pass.
 - **Loops.** Before pass k ≥ 1 the drain waits until the consumer released every row (ring
-  and staging empty), calls `on_loop(k)` (`ReplayGenerations` registers a new generation on
-  a fresh sender port) and re-bases the schedule, so no packet of pass k − 1 is decoded under
+  and staging empty) and `settled()` holds (every decoded batch reached the bars), calls
+  `on_loop(k)` (`ReplayGenerations` registers a new generation on a fresh sender port) and
+  re-bases the schedule, so no packet of pass k − 1 is decoded or built into bars under
   pass k's directory and the wait never counts as lag. One pass registers no extra
   generation.
 - **Everything else** (accounting, staging, decode, release, backpressure, errors) is
@@ -97,8 +104,11 @@ from holoscan_finance.ref import Ref
 
 source = g.op(GpuMitchReplaySourceOp, "source", pcap_path="day.pcap", pps=200_000,
               nic_bufs=114_688, loops=1, helper_cpus=sorted(cpus.helper),
-              on_loop=Ref(replay_generations), directory=Ref(knob), stats=Ref(ingest_stats))
-bars = g.op(QuoteBarsOp, "bars", backend="gpu", directory=Ref(knob), stats=Ref(bars_stats))
+              on_loop=Ref(replay_generations), settled=Ref(drained.batches_consumed),
+              directory=Ref(knob), stats=Ref(ingest_stats))
+# nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
+bars = g.op(QuoteBarsOp, "bars", backend="gpu", emit_windows=False, directory=Ref(knob),
+            stats=Ref(bars_stats))
 g.add_flow(source.events, bars.events, **lossless(4))
 g.partition("ingest").add(source, bars)
 ```

@@ -76,3 +76,18 @@ def test_check_holds_on_a_capture_with_missing_packets(tmp_path):
     # The receive accounting counts every missing message, as the synthesizer dropped them.
     assert report["sequence_gaps"] == capture["dropped_messages"]
     assert report["packets"] == capture["packets"]
+
+
+def test_looped_unpaced_replay_stays_lossless_at_the_bars(tmp_path):
+    """Each pass is a new generation, and the loop boundary waits until the bars took every
+    batch of the pass: none is counted stale, so --require-lossless holds over three passes.
+    A small capture is one burst per pass, which the bars used to see only after the next
+    generation was published."""
+    data, report_path = tmp_path / "loops", tmp_path / "loops.json"
+    summary = synth(data, "--symbols", "200", "--packets", "3000")
+    capture = ["--pcap", str(data / "day.pcap"), "--tape", str(data / "tape")]
+    flags = ["--pps", "0", "--loops", "3", "--require-lossless", "--report", str(report_path)]
+    done = run(str(BENCH), *capture, *flags)
+    report = json.loads(report_path.read_text())
+    assert done.returncode == 0 and report["ok"], (report["failures"], done.stderr[-4000:])
+    assert report["stale_packets"] == 0 and report["packets"] == 3 * summary["capture"]["packets"]

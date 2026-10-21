@@ -120,6 +120,8 @@ jobs:
       - name: GPU and slow tests, CTest, smoke runs, wheel
         # Non-root with a private IPC namespace: never --ipc=host (a root Holoscan 5 process
         # with host IPC leaves a root-owned shared-memory file that breaks later runs).
+        # `holoscan test` runs every CTest tier (tests/CMakeLists.txt: python.unit and python.gpu,
+        # i.e. all tests not marked slow), so pytest adds only the slow ones.
         run: |
           docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all -u "$(id -u):$(id -g)" \
             -e HOME=/tmp --shm-size=2g --ulimit stack=33554432 -v "$PWD:$PWD" -w "$PWD" \
@@ -127,7 +129,7 @@ jobs:
               set -e
               export PYTHONPATH=$PYTHONPATH:$PWD/python:$PWD/tests/python
               holoscan test --local --no-xvfb
-              python3 -m pytest -q -m "(gpu or slow) and not timing"
+              python3 -m pytest -q -m "slow and not timing"
               holoscan run equity_analytics smoke --local
               holoscan run market_data_bench smoke --local
               holoscan package --pkg-generator WHEEL --local'

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Every ``equity_analytics`` mode and option compiles to exactly the lanes, edges, clocks and
-placement of the design (§2 O5), with no I/O and no GPU, so it runs on the CPU-only tier.
+placement of docs/ARCHITECTURE.md, with no I/O and no GPU, so it runs on the CPU-only tier.
 
 Ingest {udp, daqiri-host, gpudirect, replay} x analytics {compare, gpu, cpu} (minus the two
 GPU front ends with CPU analytics) x ``--topics`` x ``--ingest-busy-poll``. In DAQIRI modes
@@ -267,7 +267,7 @@ def test_plan_only_prints_the_plan_and_writes_plan_json(tmp_path: Path) -> None:
 
 
 def test_plan_only_with_topics_writes_the_endpoint_catalog(tmp_path: Path) -> None:
-    catalog = tmp_path / "new" / "dir" / "ep.json"  # save_json makes no directory (c6)
+    catalog = tmp_path / "new" / "dir" / "ep.json"  # save_json makes no directory
     done = run_app(
         "--ingest", "replay", "--pcap", "none", "--tape", "none", "--plan-only", "--topics",
         "--topics-catalog", str(catalog),

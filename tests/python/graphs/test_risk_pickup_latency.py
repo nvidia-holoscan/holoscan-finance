@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Risk keeps 4.3's run-on-arrival latency: a window reaching ``RollingRiskOp`` over the
-``LATEST`` edge is picked up by the 1 ms poll, not on a 50 ms grid (judge J1 measured a
+``LATEST`` edge is picked up by the 1 ms poll, not on a 50 ms grid (the 1 ms poll measured a
 0.99 ms p50; a 50 ms clock added 28 ms). Pick-up delay = receive-to-result minus the engine
 time, over at least 30 windows arriving every 100 ms at a random phase. Timing pass only."""
 

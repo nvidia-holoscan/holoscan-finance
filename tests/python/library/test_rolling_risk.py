@@ -4,18 +4,20 @@
 interval, the cross-check gate, validated host copies, one engine per generation, and the
 spawned-worker executor.
 
-Clocked ``RollingRiskOp`` activations stop at the end of staged harness input (J6), so these
+Clocked ``RollingRiskOp`` activations stop at the end of staged harness input, so these
 rules are tested here on the processor rather than through the operator."""
 
 from __future__ import annotations
 
+import os
+import signal
 import time
 
 import numpy as np
 import pytest
 from fakes.stores import GateFake, ResultsStoreFake
 
-from holoscan_finance.analytics import rolling
+from holoscan_finance.analytics import rolling, workers
 from holoscan_finance.analytics.rolling import RollingRisk
 from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.marketdata.covariance import CovarianceEngine
@@ -220,5 +222,26 @@ def test_process_executor_failure_records_the_error_and_stops_submitting():
         assert not gate.in_flight  # the void claim is released
         r.offer(window(20))
         assert r.poll() is None and not r.stats.busy and r.stats.analyzed == 0
+    finally:
+        r.stop()
+
+
+def test_a_worker_that_died_while_idle_is_recorded_like_a_failed_job():
+    """The next submit raises BrokenProcessPool; it must not escape ``poll`` (and fail the
+    run) but void the claim and stop analyzing, as a failed job does."""
+    pytest.importorskip("threadpoolctl")
+    gate = CrossCheckGate()
+    r = RollingRisk(backend="cpu", executor="process", cpu_threads=1, cross_check=True, gate=gate)
+    r.start()
+    try:
+        os.kill(r._pool.submit(workers.ping).result(timeout=60), signal.SIGKILL)
+        time.sleep(0.5)  # the pool's manager thread marks it broken
+        r.offer(window(20))
+        deadline = time.monotonic() + 60
+        while r.stats.error is None and time.monotonic() < deadline:
+            r.poll()
+            time.sleep(0.002)
+        assert r.stats.error.startswith("Analytics failed: ")
+        assert not gate.in_flight and not r.stats.busy and r.stats.analyzed == 0
     finally:
         r.stop()

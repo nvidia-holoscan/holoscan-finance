@@ -43,17 +43,25 @@ With the Holoscan CLI (`holoscan run equity_analytics <mode>`), on any GPU host:
 | `smoke` | CI: a small synthetic day, unpaced and headless; exits non-zero if the run fails, no window is analyzed or a comparison disagrees |
 | `plan` | compiles and checks the plan rules only, and writes `equity_analytics.plan.json` |
 
-Or directly, from the repository root inside the Holoscan 5.0 image
-(`scripts/dev5.sh '<command>'`):
+`holoscan run` starts the container on the host network and the dashboard modes serve on
+`--host 0.0.0.0`, so after `holoscan run equity_analytics replay` open
+<http://localhost:8080/>. Inside the dev container (`holoscan run-container`), add
+`--local`. `GET /plan` returns the compiled lanes, edges and clocks, and `/snapshot`
+carries them as `engine`.
+
+For a headless, finite run directly from the repository root inside the Holoscan 5.0
+image (`scripts/dev5.sh '<command>'`):
 
 ```bash
 python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 50000 --seconds 1800 --reuse
 python3 applications/equity_analytics/equity_analytics.py --ingest replay \
-    --pcap data/synth/day.pcap --tape data/synth/tape --replay-pps 2000 --replay-loops 0
+    --pcap data/synth/day.pcap --tape data/synth/tape --replay-pps 0 \
+    --port 0 --exit-when-drained --report out/eq.json
 ```
 
-Open <http://localhost:8080/>. `GET /plan` returns the compiled lanes, edges and clocks, and
-`/snapshot` carries them as `engine`.
+`scripts/dev5.sh` publishes no ports and has no host network, and it kills the command
+after `RUN5_TIMEOUT` seconds (1500 by default), so use it for headless runs only, not for
+the dashboard.
 
 **NIC modes are not in `metadata.json`.** `gpudirect` and `daqiri-host` need DAQIRI, a
 ConnectX NIC, root and hugepages. They run only through

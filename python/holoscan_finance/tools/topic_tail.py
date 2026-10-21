@@ -10,7 +10,7 @@ namespace: ``docker exec`` into the engine container, or a container started wit
 ``--ipc=container:<engine>``; never ``--ipc=host``. A paused or slow tail costs the graph
 nothing: the export is latest-only, so its summaries are dropped there. ``--timeout-s`` is the
 attach bound and may not exceed the export's (``edges.TOPIC_MAX_WAIT_MS``): beyond about 5 s
-without an explicit bound, attaching fails with ``ENDPOINT_ATTACH_BOUND_INVALID`` (c5).
+without an explicit bound, attaching fails with ``ENDPOINT_ATTACH_BOUND_INVALID``.
 """
 
 from __future__ import annotations

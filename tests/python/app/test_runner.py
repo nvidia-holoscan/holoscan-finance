@@ -130,11 +130,15 @@ CASES = textwrap.dedent(
         args = SimpleNamespace(ingest_cpus=None, ingest_busy_poll=False,
                                nic_master_core=mask[-2], nic_rx_core=mask[-1])
         if case != "bench":  # the bench's args have no --ingest
-            args.ingest = "daqiri-host" if case == "daqiri" else "udp"
+            args.ingest = "daqiri-host" if case.startswith("daqiri") else "udp"
+        if case.endswith("busypoll"):  # a busy-polled ingest CPU just below the lcores
+            args.ingest_cpus = str(mask[-3] if case.startswith("daqiri") else mask[-1])
+            args.ingest_busy_poll = True
         cpus = runner.prepare_process(args)
         result = dict(
             switch=sys.getswitchinterval(), mask=mask, reserved=sorted(cpus.reserved),
-            app=sorted(cpus.app), main=sorted(os.sched_getaffinity(0)),
+            app=sorted(cpus.app), helper=sorted(cpus.helper),
+            main=sorted(os.sched_getaffinity(0)),
             early=sorted(os.sched_getaffinity(early.native_id)),
         )
         release.set()
@@ -144,7 +148,7 @@ CASES = textwrap.dedent(
 
     if __name__ == "__main__":
         case, tmp = sys.argv[1], sys.argv[2]
-        if case in ("udp", "daqiri", "bench"):
+        if case in ("udp", "daqiri", "bench", "busypoll", "daqiri-busypoll"):
             prepare(case)
         else:
             run(case, tmp)
@@ -192,6 +196,22 @@ def test_prepare_process_moves_the_process_off_the_daqiri_lcores(tmp_path: Path)
     assert out["reserved"] == lcores
     assert out["main"] == out["app"] == mask[:-2]  # what later threads inherit
     assert out["early"] == mask[:-2]  # the 4.3 sweep moved a thread started before
+
+
+@pytest.mark.parametrize("case", ["busypoll", "daqiri-busypoll"])
+def test_prepare_process_keeps_the_process_off_a_busy_polled_ingest_cpu(
+    case: str, tmp_path: Path
+) -> None:
+    """Under ``--ingest-cpus N --ingest-busy-poll`` only the ingest lane may run on N: the main
+    thread (and so uvicorn, the stall heartbeat and the runtime's threads) is masked to
+    ``helper``, and threads started before are swept off N as off the DAQIRI lcores."""
+    mask = mask_of_at_least(4)
+    out, _ = run_case(case, tmp_path)
+    expected = mask[:-3] if case == "daqiri-busypoll" else mask[:-1]
+    assert out["app"] == (mask[:-2] if case == "daqiri-busypoll" else mask)
+    assert out["helper"] == expected
+    assert out["main"] == expected  # what later threads inherit
+    assert out["early"] == expected
 
 
 def test_cpu_sets_refuse_an_ingest_cpu_the_app_may_not_use(

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The §8.3 lock order under stress: manifests from two writers against the data plane.
+"""The lock order (docs/ARCHITECTURE.md) under stress: manifests from two writers against the data plane.
 
 Two threads register 1,000 generations (one like ``POST /manifest``, one like the replay
 loop's ``ReplayGenerations``) while a 1 kHz thread publishes risk results and comparisons

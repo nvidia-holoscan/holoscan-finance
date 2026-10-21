@@ -144,9 +144,9 @@ compile either. This is why a sink fed only from another lane gets its own lane,
 | --- | --- |
 | `all` | the process affinity at start-up |
 | `reserved` | the DPDK lcores (`--nic-master-core`, `--nic-rx-core`) in DAQIRI modes, else none |
-| `app` | `all − reserved`; the main thread is masked to it before `run_async`, so everything created later inherits it |
+| `app` | `all − reserved`; every pipeline thread |
 | `ingest` | `--ingest-cpus`, else `app`; the `ingest` lane's `ThreadPlacement` (with `BUSY_POLL` only under `--ingest-busy-poll`) |
-| `helper` | `app`, minus `ingest` only when a busy-polled ingest set is carved out; every other lane, the drain and receiver threads |
+| `helper` | `app`, minus `ingest` only when a busy-polled ingest set is carved out; every other lane, the drain and receiver threads. The main thread is masked to it before `run_async` (and earlier threads are swept off `all − helper`), so everything created later inherits it: uvicorn, the stall heartbeat, CuPy and the runtime's own threads |
 | `worker` | `helper`; spawned analytics workers pin themselves to it (the 4.3 BLAS candidate set) |
 
 The runtime never re-applies a lane's placement, so a mask change made in `start()` would
@@ -181,7 +181,7 @@ operators as `Ref` parameters, and operators read them once per activation:
 
 | Object | Written by | Read by |
 | --- | --- | --- |
-| `Knob[FeedDirectory]`: manifest, generation, sender port, universe | `ReplayDirectory.set_manifest` (HTTP `POST /manifest`, or the replay loop through `ReplayGenerations`) | decode sites and `QuoteBarsOp`, lock-free (`knob.get()`); a generation change resets the bars at the next batch |
+| `Knob[FeedDirectory]`: manifest, generation, sender port, universe | `ReplayDirectory.set_manifest` (HTTP `POST /manifest`, or the replay loop through `ReplayGenerations`) | decode sites and `QuoteBarsOp`, lock-free (`knob.get()`); a generation change resets the bars at the first batch decoded under it |
 | `CrossCheckGate` | `RollingRiskOp` claims; `ResultsStore.on_comparison` releases after publishing | `RollingRiskOp`; `FullDayController` suspends validation during a full-day burst |
 | `CaptureTap` | HTTP `POST /capture`, `/capture/finish` | the decode sites and `ResultsStore` record into it |
 | `FeedControl` | HTTP `/feedrate`, `/feedstatus`, `/replay/resume` | the external sender, which polls; never the graph (replay mode ignores it) |
@@ -230,7 +230,7 @@ Operators never complete or stop the run themselves.
 | 7 | Statistics conventions | `CovarianceEngine`, agreement tolerances and eligibility unchanged | `library/test_covariance.py`, `test_agreement.py` |
 | 8 | Warm-up before data | kernels and worker pools start in `start()`, which runs downstream first and before any `compute`; the NIC starts last | operator tests |
 | 9 | BLAS tuning on the 4.3 core set | workers pinned to `CpuSets.worker` | `library/test_workers.py` |
-| 10 | Core and IRQ isolation | main thread masked to `app`; lanes placed; `daqiri_init` mask restored and asserted; the post-init sweep; helpers under the process mask | plan rule `lanes_avoid_cpus`; `library/test_affinity.py`; source operator tests |
+| 10 | Core and IRQ isolation | main thread masked to `helper` (`app` unless a busy-polled ingest set is carved out); lanes placed; `daqiri_init` mask restored and asserted; the post-init sweep; helpers under the process mask | plan rule `lanes_avoid_cpus`; `library/test_affinity.py`; `app/test_runner.py`; source operator tests |
 | 11 | Interpreter tuning | `sys.setswitchinterval(0.001)`; no idle sleeps in `compute`; no clock below 500 µs by default | `app/test_runner.py` |
 | 12 | Latency accounting | the receive stamp of the packet that closed the newest bar travels in `BarWindow.recv_ns`; results publish on the risk lane right after analysis | `control/test_results_store.py`; e2e reports |
 | 13 | No allocations that wake a suspended iGPU | ring, pinned buffers and replay frames preallocated in `start()` | review; NIC run |

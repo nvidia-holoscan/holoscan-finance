@@ -3,7 +3,8 @@
 """``QuoteBarsOp`` under the operator harness.
 
 cpu: windows equal ``BarBuilder`` on the same input; a knob generation change resets the bars
-and older batches turn stale; ``emit_windows=False`` declares no ``window`` port; counters are
+and older batches turn stale, but messages of the bars' generation still in flight when the
+knob moved are built first; ``emit_windows=False`` declares no ``window`` port; counters are
 mirrored per batch and the symbol snapshot at its cadence; ``stop()`` publishes the final
 state. gpu: windows equal ``GpuQuoteBars`` + ``apply_sequence`` through a stale generation, a
 gap and a reset, with device-resident parts (from 4.3
@@ -189,6 +190,22 @@ def test_a_new_generation_resets_the_bars_and_older_batches_turn_stale():
     assert stats.counters.generation == stats.symbol_snapshot.generation == 2
     assert timeless(stats.counters) == timeless(builder.counters())
     assert stats.windows_emitted == len(windows)  # run totals survive the reset
+
+
+def test_messages_in_flight_when_the_knob_moves_are_built_before_the_reset():
+    """A replay loop moves the knob once the ring is released, before the bars took the pass's
+    last decoded messages: they are built under their own generation, not stale, and the bars
+    reset at the first message decoded under the new one."""
+    old, new = host_messages(1)[:40], host_messages(2)[:40]
+    knob = ScriptedKnob(*[feed(1)] * (len(old) - 2), feed(2))  # moves with two still queued
+    stats = BarsStats()
+    windows = run_bars(old + new, knob=knob, stats=stats, backend="cpu")
+    want_old, _ = reference(old, feed(1))
+    want_new, builder = reference(new, feed(2))
+    assert_same_windows(windows, want_old + want_new)
+    assert stats.generation == 2 and stats.stale_packets == 0
+    assert timeless(stats.counters) == timeless(builder.counters())
+    assert stats.windows_emitted == len(windows) and stats.batches_in == len(old) + len(new)
 
 
 def test_without_windows_no_window_port_is_declared():

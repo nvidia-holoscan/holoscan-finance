@@ -36,7 +36,7 @@ Contract: `OnClock(poll_period_us).input(window, DrainAll())`, plus
 ## Why a 1 ms poll with an internal minimum interval
 
 4.3 ran risk as soon as a window was available *and* `--interval` had passed since the last
-run. A 50 ms clock alone would add 28 ms at p50 (judge J1); polling every 1 ms and enforcing
+run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms and enforcing
 `min_interval_us` in the operator measured a 0.99 ms pick-up at about 0.01 core.
 
 ## Params

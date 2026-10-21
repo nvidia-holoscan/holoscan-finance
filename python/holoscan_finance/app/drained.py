@@ -4,8 +4,8 @@
 
 The runner polls the predicate every 50 ms and then calls ``session.request_stop()``;
 nothing is queued by then, so the stop loses nothing. Operators never end a run themselves:
-``complete_after`` counts returned calls (C9) and ``request_completion`` drops data queued
-between lanes (v07b). Risk is matched to bars by the ``(generation, completed_bars)`` key
+``complete_after`` counts returned calls and ``request_completion`` drops data queued
+between lanes. Risk is matched to bars by the ``(generation, completed_bars)`` key
 of the last window, never by the bar count alone, because every pass of a looped replay
 closes the same number of bars. Only GIL-atomic reads of host objects: safe from any thread.
 """
@@ -48,6 +48,12 @@ class DrainedCondition:
 
     def __call__(self) -> bool:
         return not self.why()
+
+    def batches_consumed(self) -> bool:
+        """Every batch a GPU source decoded reached every bars operator: the replay source's
+        ``settled``, so a loop's next generation never makes the previous pass's tail stale."""
+        decoded = self.ingest.decoded_batches
+        return all(bars.batches_in >= decoded for bars in self.bars)
 
     def why(self) -> str:
         """The first unmet condition, in pipeline order; empty once drained."""

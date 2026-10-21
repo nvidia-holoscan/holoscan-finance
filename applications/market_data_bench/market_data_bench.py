@@ -43,6 +43,7 @@ def compose(args, ctx: BenchContext) -> tuple[hs.Graph, Lanes]:
         # hf-replay is never created on a narrowed or busy-polled ingest core
         helper_cpus=sorted(ctx.cpus.helper),
         on_loop=Ref(ctx.replay_generations),
+        settled=Ref(ctx.drained.batches_consumed),  # a pass's tail is built before the next
         directory=directory,
         stats=Ref(ctx.ingest_stats),
     )

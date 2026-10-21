@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """``RollingRiskOp`` under the operator harness: the newest of several queued windows is the
-one analyzed (J9), ``validate`` exists only with ``cross_check``, Params are checked at
+one analyzed, ``validate`` exists only with ``cross_check``, Params are checked at
 authoring, late poll ticks are counted, and on the GPU the update matches the engine with
 and without host-variance ranking (from 4.3 ``test_rolling_risk_op_matches_the_engine``).
 
 The slot, interval, gate and process-executor rules are tested on ``RollingRisk`` itself
 (``library/test_rolling_risk.py``): clocked operators stop being activated once staged
-harness input ends (J6)."""
+harness input ends."""
 
 from __future__ import annotations
 

@@ -6,7 +6,7 @@
 A one-window slot keeps only the newest window, and ``poll`` analyzes it at most once per
 ``min_interval_ns`` and only while no CPU comparison is in flight: 4.3's run-on-arrival
 timing (``MessageAvailable`` + ``PeriodicCondition``) with a 1 ms poll measured a 0.99 ms
-pick-up (J1), where a 50 ms clock added 28 ms at p50. Inline it is 4.3
+pick-up, where a 50 ms clock added 28 ms at p50. Inline it is 4.3
 ``GpuRollingRiskOp.compute`` (a throwaway engine per generation, host-variance ranking of
 validated windows); with ``executor="process"`` it is the host paths' 4.3 ``RiskOp``
 (``gpu_window``/``cpu_window`` in one spawned worker, off the decoder's GIL). Never imports
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, Future, ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -173,20 +173,25 @@ class RollingRisk:
 
     def _submit(self, window: BarWindow, validated: bool, started: int) -> None:
         rows, times, generation = _host(window.rows), window.times, window.generation
-        if self.backend == "gpu":
-            future = self._pool.submit(
-                workers.gpu_window, rows, times, generation, self._bar_seconds, self._gpu_device
-            )
-        else:
-            future = self._pool.submit(
-                workers.cpu_window,
-                rows,
-                times,
-                generation,
-                self._bar_seconds,
-                self._cpu_threads,
-                self._full_window_bars,
-            )
+        try:
+            if self.backend == "gpu":
+                future = self._pool.submit(
+                    workers.gpu_window, rows, times, generation, self._bar_seconds, self._gpu_device
+                )
+            else:
+                future = self._pool.submit(
+                    workers.cpu_window,
+                    rows,
+                    times,
+                    generation,
+                    self._bar_seconds,
+                    self._cpu_threads,
+                    self._full_window_bars,
+                )
+        except BrokenExecutor as exc:
+            # The worker died while idle: _collect records it as it records a failed job.
+            future = Future()
+            future.set_exception(exc)
         self._future, self._job = future, (window, validated, started, rows)
         self.stats.busy = True
 

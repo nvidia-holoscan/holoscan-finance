@@ -6,7 +6,7 @@
 The real ``QuoteBarsOp(cpu)`` in lane ``ingest`` closes one bar per batch and feeds a 30 ms
 clocked consumer in lane ``analytics`` over the production ``LATEST`` edge. The bars must
 never be paced by the consumer, and the consumer must end on the newest window, with gaps.
-The feed never ends: a finite source would end the clocked consumer's activations (J6)."""
+The feed never ends: a finite source would end the clocked consumer's activations."""
 
 from __future__ import annotations
 

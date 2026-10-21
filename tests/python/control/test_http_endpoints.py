@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Every dashboard endpoint through FastAPI's test client: bodies, 422 paths, added routes.
 
-The context is the ``EquityContext`` attribute set (WP5) over the real control objects.
+The context is the ``EquityContext`` attribute set over the real control objects.
 ``serve()`` (``sdk``) runs a tiny graph behind uvicorn: exit codes and stop reasons.
 """
 
@@ -296,6 +296,7 @@ SERVE_CASES = textwrap.dedent(
     import holoscan as hs
 
     from holoscan_finance.control.status import RunStatus
+    from holoscan_finance.dashboard import server as server_module
     from holoscan_finance.dashboard.server import serve
     from holoscan_finance.ref import Ref
 
@@ -321,15 +322,24 @@ SERVE_CASES = textwrap.dedent(
                 self.out.emit(self.n)
 
 
-    class Sink(hs.Operator):
+    class Sink(hs.Operator):  # a stop_ms stop() appends one item at the end (then fails)
         items = hs.Input("items", hs.pyobject)
         seen = hs.Param(Ref())
+        stop_ms = hs.Param(0)
+        stop_fails = hs.Param(False)
 
         def contract(self):
             return hs.Contract().trigger(hs.OnEach(self.items))
 
         def compute(self, ctx):
             self.seen.obj.append(self.items.receive_data())
+
+        def stop(self):
+            if self.stop_ms:
+                time.sleep(self.stop_ms / 1000)
+                self.seen.obj.append("final")
+                if self.stop_fails:
+                    raise RuntimeError("injected stop failure")
 
 
     def healthz_once_running(port, out):
@@ -348,10 +358,22 @@ SERVE_CASES = textwrap.dedent(
 
 
     def main(case, tmp):
-        seen = []
+        seen, run_async_calls = [], []
+        run_async = hs.run_async
+
+        def counted_run_async(plan):
+            run_async_calls.append(1)
+            if case == "start_fails":
+                raise RuntimeError("injected start failure")
+            return run_async(plan)
+
+        hs.run_async = counted_run_async
+        server_module.STOP_WARNING_S = 0.2  # the slow stop()s below take 1 s
         g = hs.Graph("serve", default_clock=hs.RealtimeClock)
         counter = g.op(Counter, "counter", fail_at=5 if case == "failed" else 0)
-        sink = g.op(Sink, "sink", seen=Ref(seen))
+        slow = case.startswith("slow_stop")
+        sink = g.op(Sink, "sink", seen=Ref(seen), stop_ms=1000 if slow else 0,
+                    stop_fails=case == "slow_stop_fails")
         g.add_flow(counter.out, sink.items, queue_policy=hs.QueuePolicy.BLOCKING, queue_depth=8)
         ctx = SimpleNamespace(status=RunStatus(), stall_monitor=None, plan_summary=None,
                               stop_reason=None, drained=lambda: len(seen) >= COUNT)
@@ -359,6 +381,9 @@ SERVE_CASES = textwrap.dedent(
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
+        if case == "port_busy":  # another process already listens on the dashboard port
+            busy = socket.create_server(("127.0.0.1", 0))
+            port = busy.getsockname()[1]
         healthz = {}
         if case == "signal":
             threading.Thread(target=healthz_once_running, args=(port, healthz), daemon=True).start()
@@ -368,8 +393,9 @@ SERVE_CASES = textwrap.dedent(
                    exit_when_drained=case != "signal", report=report, expect=expect)
         print(json.dumps(dict(
             rc=int(rc), stop_reason=ctx.stop_reason, status=vars(ctx.status), healthz=healthz,
-            report=json.load(open(report)),
+            report=json.load(open(report)) if os.path.exists(report) else None,
             sigterm_restored=signal.getsignal(signal.SIGTERM) is signal.SIG_DFL,
+            run_async_calls=len(run_async_calls),
         )))
 
 
@@ -392,7 +418,7 @@ def serve_case(case: str, tmp_path: Path) -> dict:
     )
     lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
     assert lines, done.stderr[-3000:]
-    return json.loads(lines[-1])
+    return dict(json.loads(lines[-1]), stderr=done.stderr)
 
 
 @pytest.mark.sdk
@@ -417,3 +443,31 @@ def test_serve_exit_codes_and_stop_reasons(case, rc, stop_reason, termination, t
         assert r["status"]["error"] is None
     if case == "signal":
         assert r["healthz"] == {"graph_status": "running", "termination": "RUNNING"}
+
+
+@pytest.mark.sdk
+@pytest.mark.parametrize(
+    ("case", "rc", "termination"),
+    [("slow_stop", 0, "STOPPED"), ("slow_stop_fails", 1, "FAILED")],
+)
+def test_serve_waits_for_a_slow_stop(case, rc, termination, tmp_path):
+    # A stop() that outlasts STOP_WARNING_S (0.2 s here): the status, report and exit code
+    # still come from the stopped graph, with what stop() added and how it ended.
+    r = serve_case(case, tmp_path)
+    assert "graph still stopping after 0.2 s" in r["stderr"]  # the bound expired first
+    assert (r["rc"], r["stop_reason"]) == (rc, "drained")
+    assert r["status"]["graph_status"] == "stopped"
+    assert r["status"]["termination"] == r["report"]["termination"] == termination
+    assert r["report"]["items"] == 21  # the 20 counted, then the one stop() appends
+    if case == "slow_stop_fails":
+        assert "injected stop failure" in r["status"]["error"]
+
+
+@pytest.mark.sdk
+@pytest.mark.parametrize("case", ["port_busy", "start_fails"])
+def test_serve_startup_failures_exit_run_failed(case, tmp_path):
+    # RUN_FAILED, never uvicorn's own status 3 (our PLAN_REJECTED); a busy port starts nothing.
+    r = serve_case(case, tmp_path)
+    assert (r["rc"], r["stop_reason"], r["report"]) == (1, None, None)
+    assert r["run_async_calls"] == (0 if case == "port_busy" else 1)
+    assert r["status"]["graph_status"] == "starting" and r["sigterm_restored"]

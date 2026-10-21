@@ -126,7 +126,7 @@ class UdpPacketSourceOp(_HostPacketSourceBase):
             recv_timeout_s=self.recv_timeout_s,
             stats=stats,
         )
-        # Never under the lane mask, which may be narrowed or busy-polled (c3).
+        # Never under the lane mask, which may be narrowed or busy-polled.
         with thread_mask(helper_mask(self._helper_cpus())):
             rx.start()
         self._open(rx)

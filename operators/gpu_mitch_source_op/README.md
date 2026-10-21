@@ -137,7 +137,9 @@ from holoscan_finance.ref import Ref
 source = g.op(GpuMitchSourceOp, "source", port=26400, pcie_address="0004:03:00.0",
               init_cpus=sorted(cpus.all), helper_cpus=sorted(cpus.helper),
               directory=Ref(knob), stats=Ref(ingest_stats))
-bars = g.op(QuoteBarsOp, "bars", backend="gpu", directory=Ref(knob), stats=Ref(bars_stats))
+# nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
+bars = g.op(QuoteBarsOp, "bars", backend="gpu", emit_windows=False, directory=Ref(knob),
+            stats=Ref(bars_stats))
 g.add_flow(source.events, bars.events, **lossless(4))
 g.partition("ingest").add(source, bars)
 ```

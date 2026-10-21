@@ -186,6 +186,8 @@ class GpuIngest:
         # The drains gather on their own non-blocking streams: finish the decode before
         # these ring rows can be gathered into again.
         cp.cuda.get_current_stream().synchronize()
+        if batches:  # before the release, which can open a replay loop boundary
+            stats.decoded_batches += 1
         if self._drain is not None:
             self._drain.release(staged[-1].end)
         marks.append(time.perf_counter_ns())

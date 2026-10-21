@@ -3,14 +3,14 @@
 """``RiskSummaryOp``: a compact JSON risk summary for other processes over holomq (``--topics``).
 
 Ports: ``risk`` (in, ``RiskUpdate``) -> ``summary`` (out, ``holoscan.schema.String``, at most
-``max_bytes``: a ``String`` over 512 B makes ``emit`` raise, sc-F7). Edges: in, ``LATEST``
+``max_bytes``: a ``String`` over 512 B makes ``emit`` raise). Edges: in, ``LATEST``
 from ``RollingRiskOp.risk`` (a fan-out beside the publish edge); out, ``LATEST`` into
 ``export_topic("holomq://finance.risk", ..., **edges.topic_export_kwargs())``. Lane:
 ``topics``, of which it is the entry. Off by default and absent from measured runs.
 The one operator that drops instead of holding: a summary is latest-value and its reader is
 an external process the graph does not control, so an emit error is counted in
 ``RiskStats.summary_drops`` and never fails the run (a ``BLOCKING`` export failed a run with
-``HOLOMQ_BACKPRESSURED`` after 17 emits once a reader stopped: c5).
+``HOLOMQ_BACKPRESSURED`` after 17 emits once a reader stopped).
 """
 
 from __future__ import annotations

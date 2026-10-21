@@ -57,7 +57,8 @@ from holoscan_finance.ref import Ref
 directory, ingest = Ref(directory_knob), Ref(ingest_stats)
 source = g.op(UdpPacketSourceOp, "source", port=26400, stats=ingest)
 decode = g.op(MitchDecodeOp, "decode", directory=directory, stats=ingest)
-bars = g.op(QuoteBarsOp, "bars", backend="cpu", directory=directory)
+# nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
+bars = g.op(QuoteBarsOp, "bars", backend="cpu", emit_windows=False, directory=directory)
 g.add_flow(source.packets, decode.packets, **lossless(16))
 g.add_flow(decode.events, bars.events, **lossless(16))
 g.partition("ingest").add(source, decode, bars)

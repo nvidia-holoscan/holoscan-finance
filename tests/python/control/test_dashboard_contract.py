@@ -6,7 +6,7 @@ The golden lists come from the 4.3 code paths (``EquityState.snapshot`` and ``ne
 ``engine`` and ``network.ingest_mode`` are the only additions. Tools read the pinned values:
 ``measure.py`` and ``ano_runtime.wait`` read ``network.ingest``, ``index.html`` prints
 ``network.transport``. Every field ``index.html`` reads must be present. The context is the
-``EquityContext`` attribute set (WP5) over the real control and telemetry objects.
+``EquityContext`` attribute set over the real control and telemetry objects.
 """
 
 from __future__ import annotations
@@ -469,7 +469,7 @@ def test_engine_block():
     assert (e["lanes"], e["edges"], e["clocks"]) == (None, None, None)
 
 
-# What index.html reads (codebase map §8.3), by the JavaScript name it reads it through.
+# What dashboard/webui/index.html reads, by the JavaScript name it reads it through.
 INDEX_READS = {
     "s": [
         "feed_control", "error", "observations", "profile", "sender_status", "live", "settings",

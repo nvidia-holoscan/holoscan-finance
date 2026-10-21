@@ -68,6 +68,7 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
             pps=args.replay_pps,
             loops=args.replay_loops,
             on_loop=Ref(ctx.replay_generations),
+            settled=Ref(ctx.drained.batches_consumed),  # a pass's tail is built before the next
             **gpu_common,
         )
     elif args.ingest == "udp":  # kernel UDP socket (host baseline)

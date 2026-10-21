@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Sequence
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, Future, ProcessPoolExecutor
 
 from ..payloads import RiskComparison, RiskUpdate
 from ..telemetry.stats import RiskStats
@@ -68,15 +68,21 @@ class CpuCrossCheck:
         if self._queue:
             update = self._running = self._queue.popleft()
             w = update.window
-            self._future = self._pool.submit(
-                workers.cpu_window,
-                update.rows_host,
-                w.times,
-                w.generation,
-                self._bar_seconds,
-                self._cpu_threads,
-                self._full_window_bars,
-            )
+            try:
+                self._future = self._pool.submit(
+                    workers.cpu_window,
+                    update.rows_host,
+                    w.times,
+                    w.generation,
+                    self._bar_seconds,
+                    self._cpu_threads,
+                    self._full_window_bars,
+                )
+            except BrokenExecutor as exc:
+                # The worker died while idle: an error comparison at the next poll, as for a
+                # failed job.
+                self._future = Future()
+                self._future.set_exception(exc)
             self.stats.crosschecks_submitted += 1
         return comparison
 

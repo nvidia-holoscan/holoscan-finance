@@ -65,10 +65,10 @@ place an embedded graph's operators), `complete_after` and `request_completion`.
    since the previous start, which reproduces 4.3's run-on-arrival timing. After a
    cross-check gate release, the next window runs within 1 ms; in 4.3 it took up to 50 ms.
    `--risk-poll-us` raises the poll period (the plan rule follows it).
-3. **Bars reset at the next batch after `POST /manifest`**, on the ingest lane; 4.3 reset
-   them inside the HTTP call. The snapshot hides counters of a stale generation, so
-   nothing visible changes. A reset requested while no data flows takes effect when data
-   arrives.
+3. **Bars reset at the first batch decoded after `POST /manifest`**, on the ingest lane;
+   4.3 reset them inside the HTTP call. The snapshot hides counters of a stale generation,
+   so nothing visible changes. A reset requested while no data flows takes effect when
+   data arrives.
 4. **Host `compare` mode runs the CPU job after the GPU job.** In 4.3 the two workers
    started together; now the CPU cross-check starts when the GPU result is ready. Only
    host-mode `cpu_receive_to_result_ms` grows (by the GPU job time); `cpu_ms`, `gpu_ms`

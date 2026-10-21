@@ -40,7 +40,7 @@ Contract: `OnEach(events)`.
 | `max_spread_bps` | float | `100.0` | quotes with a wider spread are invalid |
 | `gpu_device` | int | `0` | CUDA device; ignored by the cpu backend |
 | `warmup` | bool | `True` | gpu: compile and run the bar kernels in `start()` |
-| `emit_windows` | bool | `True` | declare `window` |
+| `emit_windows` | bool | `True` | declare `window`, which must then be wired: an unwired `window` compiles cleanly but raises `NotReadyError` at the first window (the rule `holoscan_finance.app.plan.outputs_connected()` catches it before the run); `False` when nothing consumes windows |
 | `snapshot_period_ms` | int | `250` | symbol snapshot cadence; `0` = none during the run |
 | `directory` | `Ref` | `Ref()` | `Ref(Knob[FeedDirectory])`; empty: input is counted and ignored |
 | `stats` | `Ref` | `Ref()` | `Ref(BarsStats)`; private if empty |
@@ -50,9 +50,11 @@ The five bar Params are validated with the 4.3 `QuoteBars` rules at `graph.op`
 
 ## Behaviour
 
-- **Generations.** The directory is read once per batch. A new generation resets the bars at
-  that batch (new engine, next expected sequence 1); batches of any other generation are
-  stale. 4.3 reset at the HTTP call; the dashboard hides the old generation meanwhile.
+- **Generations.** The directory is read once per input message. A new generation resets
+  the bars (new engine, next expected sequence 1) at the first message decoded under it;
+  messages of the bars' generation still in flight when the directory moved are built
+  first, and batches of any other generation are stale. 4.3 reset at the HTTP call; the
+  dashboard hides the old generation meanwhile.
 - **Sequences.** A sequence below the expected one is stale; a gap resets the marks, so no
   return spans missing updates.
 - **Host mirrors.** After every batch the exact counters go to `BarsStats.counters` (an
