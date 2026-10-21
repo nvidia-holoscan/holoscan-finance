@@ -81,7 +81,7 @@ class Controller:
         for old in self.work.glob("run_*.pcap"):  # this controller's own rewritten copies
             if old != path:
                 old.unlink(missing_ok=True)
-        from holoscan.equities.bench_replay import register
+        from holoscan_finance.tools.bench_replay import register
 
         register(port, self.a.app, self.a.tape)
         cmd = [f"{self.a.tcpreplay_dir}/tcpreplay", "-i", self.a.nic, f"--pps={pps}", str(path)]

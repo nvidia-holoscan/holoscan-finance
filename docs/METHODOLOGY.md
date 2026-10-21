@@ -9,9 +9,9 @@ consolidated instruments primarily listed on NYSE; NYS denotes the NYSE venue. S
 The NYQ label does not certify this extract's quote coverage or NBBO semantics, and
 the prepared tape does not keep the contributor field.
 
-Preparation (`holoscan.equities.data`) keeps Quote, Trade and Mkt. Condition records
-from the regular 09:30–16:00 New York session (IANA timezone), sorted by source
-timestamp, internal sequence, instrument ID and kind. Missing numeric fields stay NaN;
+Preparation (`python -m holoscan_finance.tools.prepare_tape`) keeps Quote, Trade and
+Mkt. Condition records from the regular 09:30–16:00 New York session (IANA timezone),
+sorted by source timestamp, internal sequence, instrument ID and kind. Missing numeric fields stay NaN;
 values stay float64; instrument names go to a directory.
 
 ## Wire format: MITCH replay
@@ -86,13 +86,27 @@ microstructure noise ([Aït-Sahalia and Yu](https://arxiv.org/abs/0906.1444)).
 
 ## Workers
 
-Holoscan schedules the receiver, the quote-bar operator and the analytics operator.
-In `--ingest async`/`ano` the CPU and GPU analytics each run in a spawned process; in
-`--ingest gpu` the GPU analytics (`GpuRollingRiskOp`) run in-process on the
-device-resident window. One
-matched comparison is in flight at a time and takes the latest closed window. The
-minimum interval is 50 ms (`--interval`); work is submitted only after a new bar
-closes. CPU BLAS thread tuning runs at startup and when the first full window exists.
+The receiver, MITCH decode and the quote bars run on one Holoscan lane (thread); the
+risk operator and its publisher run on a second, and in `compare` mode the CPU
+cross-check and its publisher on a third ([architecture](ARCHITECTURE.md)). On the host
+front ends (`udp`, `daqiri-host`; 4.3 `async`, `ano`) the GPU and CPU analytics each run
+in a spawned process; on the GPU front ends (`gpudirect`, `replay`; 4.3 `gpu`) the GPU
+analytics (`RollingRiskOp`) run in-process on the device-resident window.
+
+The bars hand each new window to risk through a latest-only mailbox, so a slow analysis
+skips windows instead of delaying the bars. The risk operator checks for a new window
+every 1 ms (`--risk-poll-us`), keeps only the newest, and starts an analysis once a new
+bar has closed and at least the minimum interval (50 ms, `--interval`) has passed since
+the previous start. This is 4.3's rule (run on arrival, at a bounded rate), with at most
+1 ms added. One matched comparison is in flight at a time: in `compare` mode, risk
+claims the comparison slot for a window, sends the CPU cross-check a host copy of it,
+and waits for that comparison to be published before analyzing the next window. CPU
+BLAS thread tuning runs at startup and when the first full window exists.
+
+`market_data_bench --check` checks the bars inside the graph: the decoded stream feeds a
+GPU and a CPU `QuoteBarsOp`, every GPU window is compared with its CPU twin by
+generation and bar count (times exactly, returns within 1 ULP, NaN pattern exactly), and
+after the run every closed bar is compared with an independent host decode of the pcap.
 
 ## Timing scopes
 
@@ -101,32 +115,36 @@ MITCH carries no sender wall-clock time, so sender-to-receiver latency is unavai
 - **Analytics timer:** host input preparation, incremental statistics, covariance,
   correlation, volatility, heatmap/probes and required transfers. GPU timers
   synchronize before returning.
-- **Live `compare` mode:** both workers run concurrently on the same windows; every
+- **Live `compare` mode:** the CPU recomputes each validated GPU window; every
   comparison checks volatilities, covariance probes and the heatmap, and failures are
-  kept in `/snapshot` as `comparison_failure`. Its timing ratio is not the headline
-  benchmark.
+  kept in `/snapshot` as `comparison_failure`. The CPU job starts when the GPU result is
+  ready (4.3's host modes started both together), so its timing ratio is not the
+  headline benchmark.
 - **Packet arrival to result:** from the drain of the packet that closes the newest
-  bar to publication (GPU) or worker completion (CPU). The arrival timestamp is taken
-  when Python drains a DAQIRI burst, after the partial-burst timeout; it is not a NIC
-  hardware timestamp and excludes browser refresh.
+  bar to publication (GPU) or worker completion (CPU). Results are published on the
+  risk lane as soon as the analysis returns (4.3 polled for them every 5 ms). The
+  arrival timestamp is taken when the drain takes a DAQIRI burst, after the
+  partial-burst timeout, or in `replay` mode when the software NIC gathers the burst; it
+  is not a NIC hardware timestamp and excludes browser refresh.
 
 ## Separate CPU-only and GPU-only benchmark
 
-The 9.55× headline comes from two separate streaming runs. On Thor:
+The 9.55× headline comes from two separate streaming runs on Holoscan 4.3. On Thor
+(with the 5.0 receiver image and module paths):
 
 ```bash
 for backend in cpu gpu; do
     bash deploy/igx_thor/igx_ano_down.sh
     ANALYTICS_BACKEND="$backend" bash deploy/igx_thor/igx_ano_run.sh
     docker exec fin-equities-ano bash deploy/igx_thor/ano_python.sh \
-        -m holoscan.equities.measure --seconds 120 --rate 75000 \
+        -m holoscan_finance.tools.measure --seconds 120 --rate 75000 \
         --output "/tmp/$backend-only.json"
     docker cp "fin-equities-ano:/tmp/$backend-only.json" "/tmp/$backend-only.json"
 done
 bash deploy/igx_thor/igx_ano_down.sh
 ANALYTICS_BACKEND=compare bash deploy/igx_thor/igx_ano_run.sh
 
-./scripts/runenv -m holoscan.equities.compare_runs \
+PYTHONPATH=python python3 -m holoscan_finance.tools.compare_runs \
     --cpu /tmp/cpu-only.json --gpu /tmp/gpu-only.json \
     --all-shared --output /tmp/separate-streaming.json
 ```

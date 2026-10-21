@@ -1,0 +1,52 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "GpuMitchReplaySourceOp",
+    "description": "NIC-free GPU MITCH source: replays the Ethernet frames of a pcap from GPU memory through a software NIC with DAQIRI's burst cadence, into the production device ring, accounting and GPU decode.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "0.2.0",
+    "changelog": {
+      "0.2.0": "Holoscan SDK 5.0 port"
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Market Data",
+      "Replay",
+      "CUDA",
+      "Testing",
+      "Source"
+    ],
+    "ranking": 2,
+    "requirements": {
+      "hardware": [
+        {
+          "name": "CUDA GPU",
+          "description": "Device ring, gather and MITCH decode run on the GPU",
+          "required": true
+        }
+      ]
+    }
+  }
+}

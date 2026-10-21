@@ -8,13 +8,21 @@
 
 ``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the 4.3 replay
 packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
-counts and expected totals. ``--reuse`` keeps an existing directory made with identical
-arguments. CPU-only, so every test and the NIC-free validation run without licensed data.
+counts and expected totals (``capture``: what a lossless receiver of the pcap counts).
+``--reuse`` keeps an existing directory made with identical arguments. CPU-only, so every
+test and the NIC-free validation run without licensed data.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import logging
+from pathlib import Path
+
+from ..nyq.synthetic import synthetic_capture, synthetic_tape
+
+_FILES = ("tape/events.bin", "tape/manifest.json", "day.pcap")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -37,9 +45,67 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def _size(path: Path) -> int | None:
+    return path.stat().st_size if path.is_file() else None
+
+
+def _reusable(out: Path, args: dict) -> bool:
+    """``out`` was completed by a run with ``args`` and its files are unchanged in size."""
+    try:
+        previous = json.loads((out / "synth.json").read_text())
+    except (OSError, ValueError):
+        return False
+    files = previous.get("files", {})
+    return previous.get("args") == args and all(
+        _size(out / name) == files.get(name) for name in _FILES
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser().parse_args(argv)
-    raise NotImplementedError
+    a = parser().parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    out = Path(a.out)
+    args = {k: v for k, v in sorted(vars(a).items()) if k not in ("out", "reuse")}
+    if a.reuse and _reusable(out, args):
+        print(f"synth: {out} already holds this data set (--reuse)")
+        return 0
+    out.mkdir(parents=True, exist_ok=True)
+    # Written last, so an interrupted run never looks reusable.
+    (out / "synth.json").unlink(missing_ok=True)
+    try:
+        tape = synthetic_tape(
+            out / "tape",
+            symbols=a.symbols,
+            packets=a.packets,
+            seconds=a.seconds,
+            max_events_per_packet=a.max_events_per_packet,
+            seed=a.seed,
+        )
+        capture = synthetic_capture(
+            out / "tape",
+            out / "day.pcap",
+            sender_port=a.sender_port,
+            max_events_per_packet=a.max_events_per_packet,
+            drop_every=a.drop_every,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"synth: {exc}") from exc
+    summary = {
+        "args": args,
+        "tape": {
+            "date": tape["date"],
+            "symbols": len(tape["symbols"]),
+            "events": tape["events"],
+            **tape["kinds"],
+            "start_ns": tape["start_ns"],
+            "end_ns": tape["end_ns"],
+        },
+        "capture": capture,
+        "files": {name: _size(out / name) for name in _FILES},
+    }
+    (out / "synth.json").write_text(json.dumps(summary, indent=2) + "\n")
+    print(json.dumps({"out": str(out), **capture}))
+    return 0
 
 
 if __name__ == "__main__":

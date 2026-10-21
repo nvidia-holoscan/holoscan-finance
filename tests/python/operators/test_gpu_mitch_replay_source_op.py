@@ -1,0 +1,189 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""``GpuMitchReplaySourceOp``: a synthetic pcap replayed from GPU memory through the
+production gather, ring, accounting and decode.
+
+Every packet is accounted and decoded like the host decoder, the run ends (``stats.eof``);
+one pass registers no second generation and nothing is stale; two passes call ``on_loop``
+exactly once, between them, so pass 1 decodes under its own generation with nothing stale;
+the NIC-buffer model's drops show up as sequence gaps. Pacing is a separate timing case.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import time
+
+import cupy as cp
+import holoscan as hs
+import numpy as np
+import pytest
+from holoscan.testing import OperatorTestHarness, TestRunOptions
+
+from holoscan_finance.marketdata.framing import udp_frame, write_pcap
+from holoscan_finance.nyq.manifest import validate_manifest
+from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.nyq.synthetic import synthetic_stream
+from holoscan_finance.operators import GpuMitchReplaySourceOp
+from holoscan_finance.ref import Knob, Ref
+from holoscan_finance.telemetry.stats import IngestStats
+
+pytestmark = [pytest.mark.sdk, pytest.mark.gpu]
+
+DATE, PORT, UNIVERSE = "2025-04-01", 40000, 100
+MIDNIGHT = day_start_ns(DATE)
+
+
+def manifest(generation: int, port: int) -> dict:
+    return dict(
+        format="nyq-equity-replay-v1",
+        wire_protocol=PROTOCOL,
+        market_timezone=TIMEZONE,
+        sender_port=port,
+        symbols=[f"S{i}" for i in range(UNIVERSE)],
+        generation=generation,
+        date=DATE,
+        start_ns=MIDNIGHT,
+        end_ns=MIDNIGHT + 86_400 * 10**9,
+        events=1,
+        profile=[],
+    )
+
+
+@pytest.fixture(scope="module")
+def capture(tmp_path_factory):
+    """2,000 synthetic units in a pcap, sent from PORT."""
+    units = synthetic_stream(np.random.default_rng(17), 2000, UNIVERSE, MIDNIGHT)
+    path = tmp_path_factory.mktemp("replay") / "day.pcap"
+    write_pcap(path, [udp_frame(u, src_port=PORT) for u in units])
+    return str(path), units
+
+
+class Generations:
+    """``ReplayGenerations``-like ``on_loop``: a new generation on a fresh sender port."""
+
+    def __init__(self, knob: Knob) -> None:
+        self.knob, self.calls = knob, []
+
+    def __call__(self, pass_index: int) -> int:
+        port = PORT + pass_index
+        self.calls.append(pass_index)
+        self.knob.set(validate_manifest(manifest(1 + pass_index, port)))
+        return port
+
+
+def replay(path: str, *, during=None, **params):
+    """Run the replay source until its input ended; returns (batches, stats). ``during(stats)``
+    runs on the test thread while the replay is live."""
+    stats = IngestStats()
+    params = dict(pcap_path=path, pps=0, warmup=False, stats=Ref(stats)) | params
+    params.setdefault("directory", Ref(Knob(validate_manifest(manifest(1, PORT)))))
+    with OperatorTestHarness(GpuMitchReplaySourceOp, params=params) as h:
+        h.capture("events", capacity=100_000)
+        with h.run_async(TestRunOptions(expect_stop=True, timeout_ms=60_000)) as running:
+            if during is not None:
+                during(stats)
+            deadline = time.monotonic() + 30
+            while not stats.eof and time.monotonic() < deadline:
+                time.sleep(0.005)
+            # A stop drops what the collector has not taken yet: wait for every batch sent.
+            assert running.wait_for_output("events", stats.event_batches, timeout_ms=10_000)
+            running.request_stop()
+            result = running.finish()
+    assert result.ok, result.describe_failure()
+    assert stats.eof, "the replay never ended"
+    return [b for out in result.values("events") for b in out], stats
+
+
+def columns(batches) -> dict[str, np.ndarray]:
+    names = ("timestamp_ns", "symbol_id", "kind", "flags", "bid", "ask", "price", "volume")
+    return {n: np.concatenate([cp.asnumpy(b.columns[n]) for b in batches]) for n in names}
+
+
+def host_events(units: list[bytes]) -> np.ndarray:
+    return np.concatenate(
+        [
+            decode_packet(u, 0, generation=1, midnight_ns=MIDNIGHT, universe=UNIVERSE)[0][0].events
+            for u in units
+        ]
+    )
+
+
+def test_one_pass_is_accounted_decoded_and_ends(capture):
+    path, units = capture
+    calls = []
+    batches, stats = replay(path, on_loop=Ref(calls.append), batch_size=8192)
+    assert stats.packets == 2000
+    assert stats.dropped == stats.ring_dropped == stats.stale_packets == 0
+    assert stats.messages == stats.received_messages == sum(u[2] for u in units)
+    assert stats.malformed_packets == stats.decode_malformed == 0
+    got, expected = columns(batches), host_events(units)
+    for name, values in got.items():
+        np.testing.assert_array_equal(values, expected[name].astype(values.dtype), err_msg=name)
+    assert {b.generation for b in batches} == {1} and calls == []  # no second generation
+    assert stats.front_end == "replay" and stats.frame_fetch == "device frame pool"
+    assert stats.replay["sent"] == 2000 and stats.replay["eof"] and stats.replay["pps"] == 0
+    assert {"poll_gaps_10ms", "poll_gaps_50ms", "poll_gaps_100ms"} <= set(stats.stalls["native"])
+    assert stats.pending_packets() == 0 and stats.drained()
+
+
+def test_two_passes_get_two_generations_and_nothing_stale(capture):
+    path, units = capture
+    knob = Knob(validate_manifest(manifest(1, PORT)))
+    generations = Generations(knob)
+    batches, stats = replay(path, loops=2, on_loop=Ref(generations), directory=Ref(knob))
+    assert generations.calls == [1]  # before pass 1 only
+    assert stats.packets == 4000 and stats.stale_packets == 0 and stats.dropped == 0
+    assert stats.messages == 2 * sum(u[2] for u in units)
+    per_generation = {g: sum(b.n_packets for b in batches if b.generation == g) for g in (1, 2)}
+    assert per_generation == {1: 2000, 2: 2000}
+    assert stats.replay["pass_index"] == 1 and stats.replay["sent"] == 4000
+
+
+def test_nic_buffer_drops_show_up_as_sequence_gaps(capture):
+    path, units = capture
+
+    def stall(stats: IngestStats) -> None:
+        """Once the first burst is in, hold the GIL for 40 ms (800 packets at 20k/s): the
+        drain cannot take the next burst, so 600 NIC buffers (a 20 ms burst needs 401)
+        overflow mid-stream."""
+        deadline = time.monotonic() + 10
+        while not stats.packets and time.monotonic() < deadline:
+            time.sleep(0.001)
+        ctypes.PyDLL(None).usleep(40_000)
+
+    batches, stats = replay(path, pps=20000, nic_bufs=600, during=stall)
+    dropped = stats.replay["nic_dropped"]
+    assert dropped > 0 and stats.packets + dropped == 2000 and stats.ring_dropped == 0
+    sequences = {int(s) for b in batches for s in b.sequence}
+    received = [i for i, u in enumerate(units) if int.from_bytes(u[4:8], "little") in sequences]
+    lost = [u for i, u in enumerate(units) if received[0] < i < received[-1] and i not in received]
+    assert stats.dropped == sum(u[2] for u in lost) > 0  # the drops are sequence gaps
+
+
+def test_setup_rejects_a_missing_capture_and_oversized_bursts():
+    g = hs.Graph("bad", default_clock=hs.RealtimeClock)
+    with pytest.raises(hs.errors.HoloscanError, match="pcap_path is required"):
+        g.op(GpuMitchReplaySourceOp, "replay")
+    with pytest.raises(hs.errors.HoloscanError, match="burst_packets"):
+        g.op(GpuMitchReplaySourceOp, "replay2", pcap_path="x", ring_size=4096, burst_packets=8192)
+
+
+def test_an_unreadable_capture_fails_start(tmp_path):
+    bad = tmp_path / "bad.pcap"
+    bad.write_bytes(b"not a pcap at all, just text....")
+    with OperatorTestHarness(GpuMitchReplaySourceOp, params={"pcap_path": str(bad)}) as h:
+        result = h.run(TestRunOptions(timeout_ms=10_000), check=False)
+    assert not result.ok and "not a pcap file" in result.describe_failure()
+
+
+@pytest.mark.slow
+@pytest.mark.timing
+def test_paced_replay_keeps_the_requested_rate(capture):
+    path, _ = capture
+    batches, stats = replay(path, pps=20000)  # bursts close at the 20 ms timeout
+    recv = np.concatenate([b.packet_recv_ns for b in batches])
+    first = int(np.count_nonzero(recv == recv[0]))  # the first burst's packets
+    rate = (len(recv) - first) / ((recv[-1] - recv[0]) / 1e9)
+    assert abs(rate / 20000 - 1) < 0.05
+    assert stats.replay["lag_p99_ms"] < 5

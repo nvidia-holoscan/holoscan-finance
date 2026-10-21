@@ -1,0 +1,56 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "DaqiriPacketSourceOp",
+    "description": "MITCH datagrams received through DAQIRI into pinned host memory, emitted as packet batches for MitchDecodeOp (the DAQIRI host-memory baseline).",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "0.2.0",
+    "changelog": {
+      "0.2.0": "Holoscan SDK 5.0 port"
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Market Data",
+      "Networking",
+      "DPDK",
+      "Source"
+    ],
+    "ranking": 2,
+    "requirements": {
+      "hardware": [
+        {
+          "name": "NVIDIA ConnectX NIC",
+          "description": "Received through DAQIRI (Python bindings, DPDK engine) into pinned host memory; needs hugepages",
+          "required": true
+        },
+        {
+          "name": "daqiri Python module",
+          "description": "The daqiri Python module with the DPDK engine (deploy/igx_thor builds it); its absence fails start() explicitly",
+          "required": true
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# `holoscan lint` runs these hooks (pre-commit run --all-files). Build trees, caches, data and
+# run outputs are never linted.
+exclude: '^(build[^/]*|install[^/]*|dist|data|out|\.cache|\.local|\.cupy)/'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      # daqiri_thor_steering.patch has single-space context lines that must stay byte-identical.
+      - id: trailing-whitespace
+        exclude: '\.patch$'
+      - id: check-yaml
+      - id: end-of-file-fixer
+        exclude: '\.patch$'
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.48.0
+    hooks:
+      - id: markdownlint
+        args: [--fix, --config, .markdownlint.yaml]
+  - repo: local
+    hooks:
+      - id: holoscan-metadata-validate
+        name: validate metadata.json against the holoscan-cli schemas
+        entry: python scripts/validate_metadata.py
+        language: python
+        additional_dependencies: ["holoscan-cli[create]==5.0.0"]
+        files: '(^|/)metadata\.json$'
+        pass_filenames: false

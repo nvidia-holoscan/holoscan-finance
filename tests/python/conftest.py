@@ -32,6 +32,8 @@ def missing(marker: str) -> str | None:
         module = importlib.import_module(TIER_MODULES[marker])
     except ImportError as exc:
         return f"{marker}: {exc}"
+    if module.__file__ is None:  # a stray empty directory on sys.path imports as a namespace
+        return f"{marker}: {module.__name__} is a namespace package here, not the installed module"
     if marker == "gpu":
         try:
             if module.cuda.runtime.getDeviceCount() < 1:

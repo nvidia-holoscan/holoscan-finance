@@ -1,13 +1,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
+#
+# Three test tiers (pytest markers in pyproject.toml):
+#   unit-pure  any Python 3.12+, no SDK: library, control and deploy tests
+#   unit-sdk   the Holoscan 5.0 image on a CPU runner, with a stub libcuda: operator harness
+#              tests on CPU backends, every application plan, CPU graphs
+#   gpu        a self-hosted GPU runner: GPU and slow tests, CTest, smoke runs, the wheel
+# The Holoscan SDK is not on PyPI (it tops out at 4.6), so the SDK tiers run in the 5.0 image.
+# Inside a container holoscan-cli always runs with --local: its container mode needs a docker
+# daemon. `timing` tests never run in CI (shared runners make them flaky).
 name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, "bh/**"]
   pull_request:
-    branches: [master]
+    branches: [master, "bh/**"]
+
+env:
+  HOLOSCAN_IMAGE: nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13
 
 jobs:
   lint:
@@ -16,30 +27,60 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - run: pip install ruff==0.15.17
-      - run: ruff check .
-      - run: ruff format --check .
+          python-version: "3.12"
+      - run: python -m pip install -r requirements-cli.txt pre-commit
+      - run: pre-commit run --show-diff-on-failure --all-files
 
-  unit-tests:
-    name: CPU tests (Python ${{ matrix.python-version }})
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements-cli.txt
+      - run: holoscan list --json
+      - run: holoscan modes equity_analytics
+      - run: holoscan modes market_data_bench
+
+  unit-pure:
+    name: unit-pure (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install cmake ninja pytest pytest-timeout numpy scipy duckdb pyarrow threadpoolctl fastapi uvicorn
-      - name: Configure and build
+      - run: >-
+          python -m pip install -r requirements-cli.txt numpy scipy threadpoolctl fastapi uvicorn
+          anyio httpx duckdb pyarrow pytest pytest-timeout
+      - run: python -m pytest -m "not sdk and not gpu and not daqiri"
+        env:
+          PYTHONPATH: python
+
+  unit-sdk:
+    # No `container:` here: a job container is pulled before any step could free disk, and the
+    # 15.6 GB image does not fit the ~14 GB a standard runner has free. If the pull still runs
+    # out of space, move this job to the self-hosted runner (runs-on: [self-hosted, linux]).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk for the Holoscan image
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DFINANCE_BUILD_TESTING=ON -DBUILD_ALL=ON
-          cmake --build build --parallel
-      - run: ctest --test-dir build --output-on-failure
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+      - name: SDK tests on the CPU (stub libcuda)
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:$PWD" -w "$PWD" \
+            --entrypoint bash "$HOLOSCAN_IMAGE" -c '
+              set -e
+              python3 -m pip install --user -q -r requirements-dev.txt
+              PYTHONPATH=$PYTHONPATH:$PWD/python:$PWD/tests/python scripts/with_stub_libcuda.sh \
+                python3 -m pytest -q -m "sdk and not gpu and not slow"'
 
   wheel:
     runs-on: ubuntu-latest
@@ -47,13 +88,53 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - run: pip install build && python -m build --wheel
-      - name: Install the wheel and import the SDK-free codec
+          python-version: "3.12"
+      - run: python -m pip install build "setuptools>=77"
+      - run: python -m build --wheel -o dist
+      - name: Install into a fresh venv and import from outside the checkout
         run: |
-          pip install --no-deps dist/*-py3-none-any.whl
-          cd / && python -c "from holoscan.marketdata import mitch; print(mitch.inspect_unit)"
+          python -m venv /tmp/v
+          /tmp/v/bin/pip install dist/*.whl
+          cd /
+          /tmp/v/bin/python -c "
+          import importlib.metadata as m, importlib.resources as r
+          import holoscan_finance as g, holoscan_finance.marketdata.mitch_codec
+          assert g.__file__.startswith('/tmp/v/'), g.__file__
+          assert 'finance' in [e.name for e in m.entry_points(group='holoscan.modules')]
+          assert r.files(g).joinpath('dashboard/webui/index.html').is_file()
+          assert r.files(g).joinpath('ingest/native/daqiri_drain.cpp').is_file()
+          "
       - uses: actions/upload-artifact@v4
         with:
           name: holoscan-finance-wheel
           path: dist/*.whl
+
+  gpu:
+    runs-on: [self-hosted, linux, gpu]
+    env:
+      IMAGE: holoscan-finance-ci:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the dev image (5.0 base, holoscan-cli, test dependencies)
+        run: docker build -t "$IMAGE" .
+      - name: GPU and slow tests, CTest, smoke runs, wheel
+        # Non-root with a private IPC namespace: never --ipc=host (a root Holoscan 5 process
+        # with host IPC leaves a root-owned shared-memory file that breaks later runs).
+        run: |
+          docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all -u "$(id -u):$(id -g)" \
+            -e HOME=/tmp --shm-size=2g --ulimit stack=33554432 -v "$PWD:$PWD" -w "$PWD" \
+            --entrypoint bash "$IMAGE" -c '
+              set -e
+              export PYTHONPATH=$PYTHONPATH:$PWD/python:$PWD/tests/python
+              holoscan test --local --no-xvfb
+              python3 -m pytest -q -m "(gpu or slow) and not timing"
+              holoscan run equity_analytics smoke --local
+              holoscan run market_data_bench smoke --local
+              holoscan package --pkg-generator WHEEL --local'
+      - name: Remove the dev image
+        if: always()
+        run: docker image rm -f "$IMAGE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holoscan-finance-wheel-gpu
+          path: build/dist/*.whl

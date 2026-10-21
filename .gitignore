@@ -11,9 +11,8 @@ dist/
 .cupy/
 out/
 
-# CMake build trees and the holohub CLI download
+# CMake build trees: holoscan build/run (build/<project>) and holoscan test (build-<project>)
 build*/
-.holohub/
 
 # Licensed market data and captures stay off Git.
 data/

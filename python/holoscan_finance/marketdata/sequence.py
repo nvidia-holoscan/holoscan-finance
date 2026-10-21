@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .records import combine_batches
+
 if TYPE_CHECKING:
     from .bars import QuoteBars
     from .records import ReplayBatch
@@ -26,8 +28,25 @@ class SequenceTracker:
     sequence_gaps: int
 
     def __init__(self, generation: int, expected: int = 1) -> None:
-        raise NotImplementedError
+        self.generation = generation
+        self.expected = expected
+        self.stale_packets = self.sequence_gaps = 0
 
     def observe(self, bars: QuoteBars, batches: list[ReplayBatch]) -> None:
         """Feed ``batches`` (one per packet) to ``bars`` under the 4.3 stale and gap rules."""
-        raise NotImplementedError
+        pending: list[ReplayBatch] = []
+        for batch in batches:
+            if batch.generation != self.generation or batch.sequence < self.expected:
+                self.stale_packets += 1
+                continue
+            if self.expected and batch.sequence > self.expected:
+                if pending:
+                    bars.observe(combine_batches(pending))
+                    pending.clear()
+                self.sequence_gaps += batch.sequence - self.expected
+                # Unknown missing updates: require refreshed marks and a new return endpoint.
+                bars.reset_marks()
+            self.expected = batch.sequence + batch.sequence_count
+            pending.append(batch)
+        if pending:
+            bars.observe(combine_batches(pending))

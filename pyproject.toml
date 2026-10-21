@@ -50,6 +50,10 @@ testpaths = ["tests/python"]
 pythonpath = ["python", "tests/python"]
 addopts = "-p no:cacheprovider -ra --strict-markers"
 timeout = 300
+filterwarnings = [
+    # Starlette >= 1.9 asks TestClient users for httpx2; httpx 0.28 still works.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
+]
 markers = [
     "sdk: needs the Holoscan 5 SDK (import holoscan)",
     "gpu: needs CuPy and a CUDA device",

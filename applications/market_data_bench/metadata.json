@@ -1,0 +1,89 @@
+{
+  "$schema": "urn:holoscan:application:v1",
+  "application": {
+    "name": "market_data_bench",
+    "description": "NIC-free MITCH replay through the production GPU chain (gather, decode, quote bars, optional risk): throughput, loss and lag gates, and in-graph GPU vs CPU bit identity.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": ["Python"],
+    "version": "0.2.0",
+    "changelog": {
+      "0.2.0": "Holoscan SDK 5.0: finite, headless benchmark composed from holoscan.finance operators."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": ["5.0.0"]
+    },
+    "platforms": ["x86_64", "aarch64"],
+    "tags": ["Finance", "Market Data", "Benchmark", "GPU"],
+    "ranking": 2,
+    "requirements": {
+      "operators": [
+        "gpu_mitch_replay_source_op",
+        "quote_bars_op",
+        "rolling_risk_op",
+        "callback_sink_op"
+      ]
+    },
+    "default_mode": "smoke",
+    "modes": {
+      "smoke": {
+        "description": "Small synthetic day, unpaced, lossless, every GPU bar checked against the CPU backend and a host decode (CI)",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-small --symbols 500 --packets 50000 --seconds 1800 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-small/day.pcap --tape <holohub_data_dir>/synth-small/tape --pps 0 --check --require-lossless --report <holohub_bin>/bench_smoke.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "check": {
+        "description": "Bit identity on one million synthetic packets: in-graph GPU vs CPU bars and a host decode of the capture",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-1m --symbols 3000 --packets 1000000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-1m/day.pcap --tape <holohub_data_dir>/synth-1m/tape --pps 0 --check --require-lossless --report <holohub_bin>/bench_check.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "paced": {
+        "description": "Full synthetic day at 200k packets/s with the NIC buffer model and GPU risk: lossless, real time, replay lag p99 within 5 ms",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --risk gpu --require-lossless --require-realtime --max-lag-p99-ms 5 --report <holohub_bin>/bench_paced.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "throughput": {
+        "description": "Full synthetic day, unpaced: at least 13.2M MITCH messages/s (twice the 200k packets/s line rate)",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 0 --min-msgs-per-s 13200000 --report <holohub_bin>/bench_throughput.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "drops": {
+        "description": "A capture with every 997th packet missing: the sequence gaps and the bars after them match the CPU backend and the host decode",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-small-drops --symbols 500 --packets 50000 --seconds 1800 --drop-every 997 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-small-drops/day.pcap --tape <holohub_data_dir>/synth-small-drops/tape --pps 0 --check --report <holohub_bin>/bench_drops.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "pcap": {
+        "description": "A recorded day (data/nyq/day.pcap and its tape) at 200k packets/s: lossless and real time",
+        "run": {
+          "command": "python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --pps 200000 --nic-bufs 114688 --require-lossless --require-realtime",
+          "workdir": "holohub_bin"
+        }
+      },
+      "plan": {
+        "description": "Compile the --check --risk gpu composition, check its plan rules and write plan.json; no GPU work, no I/O",
+        "run": {
+          "command": "python3 <holohub_app_source>/market_data_bench.py --pcap none --tape none --plan-only --check --risk gpu --plan-json <holohub_bin>/market_data_bench.plan.json",
+          "workdir": "holohub_bin"
+        }
+      }
+    }
+  }
+}

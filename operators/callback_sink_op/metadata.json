@@ -1,0 +1,40 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "CallbackSinkOp",
+    "description": "Hands every received item to a Python callable, in order, on the producer's runtime lane.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "0.2.0",
+    "changelog": {
+      "0.2.0": "Holoscan SDK 5.0 port"
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Sink",
+      "Utility"
+    ],
+    "ranking": 2,
+    "requirements": {}
+  }
+}

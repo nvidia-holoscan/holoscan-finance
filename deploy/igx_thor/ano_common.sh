@@ -6,7 +6,8 @@
 set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$DEPLOY_DIR/../.." && pwd)"
-ANO_IMAGE="${ANO_IMAGE:-holoscan-finance:ano}"
+# Built from deploy/igx_thor/Dockerfile (Holoscan SDK 5.0 + DAQIRI).
+ANO_IMAGE="${ANO_IMAGE:-holoscan-finance:hsdk5-daqiri}"
 MST_IMAGE="${MST_IMAGE:-ano-igx:mst}"
 APP_NAME="${APP_NAME:-fin-equities-ano}"
 FEED_NAME="${FEED_NAME:-fin-equities-feed}"
@@ -29,10 +30,10 @@ if [[ "$CONTROL_HOST" == 0.0.0.0 ]]; then CONTROL_HOST=127.0.0.1; fi
 UDP_PORT="${UDP_PORT:-26400}"
 TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/nyq-equities-2025-04-01}"
 GPU_UUID="${GPU_UUID:-}"
-# ano: DAQIRI into pinned host memory, Python MITCH decode.
-# gpu: DAQIRI GPUDirect into GPU memory, CUDA gather + MITCH decode + quote bars.
+# ano (= daqiri-host): DAQIRI into pinned host memory, Python MITCH decode.
+# gpu (= gpudirect): DAQIRI GPUDirect into GPU memory, CUDA gather + MITCH decode + quote bars.
 INGEST="${INGEST:-ano}"
-# Persistent CUDA kernel cache for INGEST=gpu (avoids ~10 s JIT on every start).
+# Persistent CUDA kernel cache for GPUDirect (avoids ~10 s JIT on every start).
 KERNEL_CACHE_DIR="${KERNEL_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/holoscan-finance/cupy}"
 CPU_THREADS="${CPU_THREADS:-0}"
 SPEED="${SPEED:-10}"

@@ -1,38 +1,64 @@
 {
-    "$schema": "urn:holohub:operator:v1",
-    "operator": {
-        "name": "GpuMitchSourceOp",
-        "authors": [
-            {
-                "name": "Jake Goldberg",
-                "affiliation": "NVIDIA"
-            }
-        ],
-        "language": [
-            "Python"
-        ],
-        "version": "0.1.0",
-        "changelog": {
-            "0.1.0": "GPUDirect MITCH receive: DAQIRI places packets in GPU memory (dma-buf), CUDA kernels gather the UDP payloads and check MITCH framing, and a pluggable GPU decoder emits device-resident batches; host-side receive accounting and stall diagnostics."
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "GpuMitchSourceOp",
+    "description": "MITCH market data over DAQIRI GPUDirect: frames land in GPU memory, a GIL-free native drain gathers the UDP payloads into a device ring, and the source decodes MITCH on the GPU into device-resident event batches.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "0.2.0",
+    "changelog": {
+      "0.1.0": "GPUDirect MITCH receive: DAQIRI places packets in GPU memory (dma-buf), CUDA kernels gather the UDP payloads and check MITCH framing, and a pluggable GPU decoder emits device-resident batches; host-side receive accounting and stall diagnostics.",
+      "0.2.0": "Holoscan SDK 5.0 port: declarative operator with typed Params and an OnClock contract; decode fused through GpuIngest and GpuMitchDecoder; the native drain is built before daqiri_init; lane masks restored after daqiri_init and drains started under the process mask."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Market Data",
+      "Networking",
+      "GPUDirect",
+      "DPDK",
+      "High Throughput",
+      "Source"
+    ],
+    "ranking": 2,
+    "requirements": {
+      "hardware": [
+        {
+          "name": "CUDA GPU",
+          "description": "GPUDirect RDMA target (dma-buf); the ring, gather and MITCH decode run on it",
+          "required": true
         },
-        "holoscan_sdk": {
-            "minimum_required_version": "4.3.0",
-            "tested_versions": [
-                "4.3.0"
-            ]
+        {
+          "name": "NVIDIA ConnectX NIC",
+          "description": "Received through DAQIRI (Python bindings, DPDK engine) into GPU memory; needs hugepages",
+          "required": true
         },
-        "platforms": [
-            "aarch64"
-        ],
-        "tags": [
-            "Finance",
-            "Networking",
-            "Market Data",
-            "High Throughput",
-            "DPDK",
-            "GPUDirect"
-        ],
-        "ranking": 2,
-        "requirements": {}
+        {
+          "name": "daqiri Python module",
+          "description": "The daqiri Python module with the DPDK engine (deploy/igx_thor builds it); its absence fails start() explicitly",
+          "required": true
+        }
+      ]
     }
+  }
 }

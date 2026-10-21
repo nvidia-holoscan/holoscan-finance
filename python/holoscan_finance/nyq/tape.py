@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 def prepare(
     pattern: str | Path, output: str | Path, *, memory: str = "2GB", threads: int = 2
 ) -> dict:
+    """Prepare one UTC day of NYQ Parquet files matching ``pattern`` into a new tape at
+    ``output``; returns its manifest. ValueError when no file matches, ``output`` already
+    holds a tape, or the files span several UTC days or hold no session observations."""
     import duckdb
 
     files = sorted(glob.glob(str(pattern)))
@@ -138,6 +141,8 @@ def prepare(
 
 
 def open_tape(path: str | Path) -> tuple[dict, np.memmap]:
+    """The manifest and a read-only map of the records; ValueError for another format or an
+    incomplete tape."""
     p = Path(path)
     m = json.loads((p / "manifest.json").read_text())
     if m.get("format") != "nyq-equity-replay-v1" or m.get("record_bytes") != EVENT_DTYPE.itemsize:

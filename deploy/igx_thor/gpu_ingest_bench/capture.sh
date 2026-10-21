@@ -18,4 +18,4 @@ sleep 5
 curl -s -X POST "$WEB/feedrate" -H 'content-type: application/json' -d "{\"seek\": $SEEK, \"rate\": 200000, \"speed\": 0}"
 echo; echo "capturing $PACKETS packets into $OUT ..."
 docker wait holofin-capture >/dev/null
-echo "done. Next: python -m holoscan.equities.bench_replay inspect $OUT"
+echo "done. Next: PYTHONPATH=python python3 -m holoscan_finance.tools.bench_replay inspect $OUT"

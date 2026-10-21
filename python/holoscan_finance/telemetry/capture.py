@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..marketdata.gpu_decoder import GpuMitchDecoder
+
 if TYPE_CHECKING:
     from ..marketdata.gpu_bars import GpuReplayBatch
     from ..marketdata.records import ReplayBatch
@@ -275,36 +277,59 @@ class LatencyCapture:
 
 
 class CaptureTap:
-    """Thread-safe holder for the active capture."""
+    """Thread-safe holder for the active capture.
+
+    HTTP starts and finishes captures, the decode sites record packets while one is active,
+    and ``ResultsStore`` records results into ``capture``. Recorders read ``capture`` once
+    and rely on its own lock, so only ``start`` takes the tap's lock.
+    """
 
     capture: LatencyCapture | None
 
     def __init__(self) -> None:
-        raise NotImplementedError
+        self._lock = threading.Lock()
+        self.capture = None
 
     @property
     def active(self) -> bool:
         """A capture exists and is not closed."""
-        raise NotImplementedError
+        capture = self.capture
+        return capture is not None and not capture.closed
 
     def start(self, seconds: float, generation: int, backend: str) -> dict:
         """Start a new capture (ValueError while one is open); returns its status."""
-        raise NotImplementedError
+        with self._lock:
+            if self.active:
+                raise ValueError("finish the previous capture before starting another")
+            self.capture = LatencyCapture(seconds, generation, backend=backend)
+            return self.capture.status()
 
     def finish(self) -> dict:
         """Close the capture and return its result (ValueError if none was started)."""
-        raise NotImplementedError
+        capture = self.capture
+        if capture is None:
+            raise ValueError("no capture has been started")
+        return capture.finish()
 
     def status(self) -> dict | None:
-        raise NotImplementedError
+        capture = self.capture
+        return capture.status() if capture is not None else None
 
     def on_generation(self, d: FeedDirectory) -> None:
         """Directory listener: a new generation during the capture interval invalidates it."""
-        raise NotImplementedError
+        capture = self.capture
+        if capture is not None and capture.includes(time.time_ns()):
+            capture.generation_changed = True
 
     def record_host_batches(self, batches: list[ReplayBatch]) -> None:
-        raise NotImplementedError
+        capture = self.capture
+        if capture is not None:
+            for batch in batches:
+                capture.record_packet(batch)
 
     def record_gpu_batch(self, batch: GpuReplayBatch) -> None:
         """Count every packet of a device batch (the 4.3 ``_PacketView`` loop)."""
-        raise NotImplementedError
+        capture = self.capture
+        if capture is not None:
+            for view in GpuMitchDecoder.capture_views(batch):
+                capture.record_packet(view)

@@ -1,16 +1,23 @@
 # Thor deployment: DAQIRI/ConnectX and GPUDirect ingest
 
-These launchers run the NYQ graph on IGX Thor with NVIDIA DAQIRI/DPDK and a ConnectX
-NIC, in containers, optionally with the sender on the same host through PHY loopback.
+These launchers run the `equity_analytics` application on IGX Thor with NVIDIA
+DAQIRI/DPDK and a ConnectX NIC, in containers, optionally with the sender on the same host
+through PHY loopback. They are the only way to run the NIC ingest modes: `holoscan run`
+starts an image without DAQIRI, as a non-root user, with the host IPC namespace.
 
 ```text
-INGEST=ano: MITCH / UDP → ConnectX / DAQIRI → pinned host memory
+INGEST=ano (daqiri-host): MITCH / UDP → ConnectX / DAQIRI → pinned host memory
             → Python decode / NumPy quote bars → CuPy / cuBLAS → dashboard
-INGEST=gpu: MITCH / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect, dma-buf)
+INGEST=gpu (gpudirect):   MITCH / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect, dma-buf)
             → CUDA gather / MITCH decode / quote bars → CuPy / cuBLAS → dashboard
 ```
 
-Results and validation: [GPUDirect ingest](../../docs/GPU_INGEST.md).
+To run the same GPU chain without a NIC, use the `replay` mode of `equity_analytics`
+(pcap frames staged in GPU memory; see the [main README](../../README.md)).
+
+Results and validation: [GPUDirect ingest](../../docs/GPU_INGEST.md). The published
+numbers were measured with Holoscan SDK 4.3; the Holoscan 5.0 port has not yet been run
+against the NIC (the revalidation status is in that document).
 
 ## Prepare the platform
 
@@ -20,23 +27,37 @@ A supported ConnectX Ethernet device, NVIDIA container runtime, mlx5/verbs,
 [DAQIRI setup guide](https://nvidia.github.io/daqiri/getting-started/) and
 [Python bindings build](https://nvidia.github.io/daqiri/api-reference/python/).
 
-The base image supplies Holoscan 4.3+, CuPy and DAQIRI with Python bindings and the
-DPDK engine. On Thor (DOCA-OFED 25.10) DAQIRI must be built with
-[daqiri_thor_steering.patch](daqiri_thor_steering.patch): mlx5 hardware steering and
-non-zero flow groups fail there, and the patch adds the `DAQIRI_DV_FLOW_EN=1` /
-`DAQIRI_RX_FLOW_GROUP=0` overrides the launcher sets. Then add the app dependencies:
+The receiver image is built by [Dockerfile](Dockerfile) on the Holoscan SDK 5.0 image
+(`nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13`). It builds DPDK 25.11 and DAQIRI
+(DPDK engine, Python binding) from source at a pinned commit, installs rdma-core from the
+DOCA 3.3.0 repository, and adds the app dependencies; the build takes about 8 minutes on
+Thor. On Thor (DOCA-OFED 25.10) DAQIRI must be built with
+[daqiri_thor_steering.patch](daqiri_thor_steering.patch), which the Dockerfile applies:
+mlx5 hardware steering and non-zero flow groups fail there, and the patch adds the
+`DAQIRI_DV_FLOW_EN=1` / `DAQIRI_RX_FLOW_GROUP=0` overrides the launcher sets.
 
 ```bash
-docker build -f deploy/igx_thor/Dockerfile.equities \
-    --build-arg ANO_BASE_IMAGE=holoscan-finance:ano \
-    -t holoscan-finance:equities-ano deploy/igx_thor
-export ANO_IMAGE=holoscan-finance:equities-ano
+docker build -f deploy/igx_thor/Dockerfile -t holoscan-finance:hsdk5-daqiri .   # the launchers' default ANO_IMAGE
 ```
 
-The launcher mounts this checkout read-only and checks imports, GPU, NIC vendor, CPU
-affinity and hugepages before starting; DAQIRI failure never falls back to sockets.
+In Holoscan 5, `import holoscan` needs the GPU driver, and the SDK is found only through
+the image's `PYTHONPATH` (`/usr/lib/python3.12/site-packages`).
+[ano_python.sh](ano_python.sh) therefore appends the checkout's `python/` directory to it
+and never replaces it. The sender and the replay controller run without the GPU runtime;
+they import only `holoscan_finance` tools, which never import the SDK.
+
+The launcher mounts this checkout read-only and checks imports (Holoscan SDK 5, the
+operators, DAQIRI with the bindings the ingest mode needs), GPU, NIC vendor, CPU affinity
+and hugepages before starting; DAQIRI failure never falls back to sockets. The receiver
+runs `applications/equity_analytics/equity_analytics.py --ingest daqiri-host|gpudirect` with
+`--nic-pcie`, `--nic-master-core` and `--nic-rx-core` from the variables below. It gets a
+private IPC namespace with `--shm-size=4g`, never `--ipc=host`: DPDK needs the
+bind-mounted `/dev/hugepages`, not the host's IPC namespace, and a root Holoscan 5 process
+with `--ipc=host` leaves a root-owned shared-memory file in the host's `/dev/shm` that
+breaks later non-root Holoscan runs.
+
 The receiver needs no tape; the sender needs the prepared `manifest.json` and
-`events.bin` (see the [main README](../../README.md#run)).
+`events.bin` (see the [main README](../../README.md#the-licensed-day)).
 
 ## One-host PHY loopback
 
@@ -64,7 +85,7 @@ customized it.
 ANO_PCIE=0004:03:00.0 ANO_MASTER_CORE=3 ANO_RX_CORE=9 \
     WEB_HOST=0.0.0.0 bash deploy/igx_thor/igx_ano_run.sh
 # on the sender:
-./scripts/runenv -m holoscan.equities.replay --data /licensed/prepared-nyq \
+PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender --data /licensed/prepared-nyq \
     --host RECEIVER_CONNECTX_IP --port 26400 \
     --control-url http://RECEIVER_MANAGEMENT_IP:8080
 ```
@@ -77,12 +98,12 @@ network.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANO_IMAGE`, `MST_IMAGE` | `holoscan-finance:ano`, `ano-igx:mst` | Runtime image and PHY tools |
+| `ANO_IMAGE`, `MST_IMAGE` | `holoscan-finance:hsdk5-daqiri`, `ano-igx:mst` | Runtime image ([Dockerfile](Dockerfile)) and PHY tools |
 | `ANO_PCIE`, `ANO_NIC` | `0004:03:00.0`, `enP4p3s0f0np0` | Receiver function and test interface |
 | `ANO_MASTER_CORE`, `ANO_RX_CORE` | `3`, `9` | Distinct DAQIRI cores |
-| `GPU_UUID` | unset | Select one GPU; on Thor device index 0 can be the integrated GPU |
-| `INGEST` | `ano` | `ano`: host memory, Python decode. `gpu`: GPUDirect, CUDA gather/decode/bars |
-| `KERNEL_CACHE_DIR` | `~/.cache/holoscan-finance/cupy` | CUDA kernels and the native frame helper for `INGEST=gpu` (first start compiles ~15 s) |
+| `GPU_UUID` | unset | Select one GPU; on Thor device index 0 can be the integrated GPU (the receiver also gets `CUDA_DEVICE_ORDER=PCI_BUS_ID`) |
+| `INGEST` | `ano` | `ano` or `daqiri-host`: host memory, Python decode. `gpu` or `gpudirect`: GPUDirect, CUDA gather/decode/bars |
+| `KERNEL_CACHE_DIR` | `~/.cache/holoscan-finance/cupy` | CUDA kernels and the native drain for `INGEST=gpu` (first start compiles ~15 s) |
 | `LOOPBACK`, `START_FEED` | `0`, follows loopback | PHY setup and local sender |
 | `LOOPBACK_CIDR`, `LOOPBACK_PEER` | `192.168.100.1/24`, `192.168.100.2` | Test network |
 | `FEED_HOST` | loopback peer if enabled | Local sender destination |
@@ -94,7 +115,7 @@ network.
 | `READY_TIMEOUT` | `90` | Receiver readiness timeout, seconds |
 | `APP_NAME`, `FEED_NAME` | `fin-equities-ano`, `fin-equities-feed` | Container names |
 | `DAQIRI_DV_FLOW_EN`, `DAQIRI_RX_FLOW_GROUP` | `1`, `0` | Steering-patch overrides (see above) |
-| `FULLDAY_PCAP` | unset | Captured day ([capture.sh](gpu_ingest_bench/capture.sh)); enables the full-day button (`INGEST=gpu`) |
+| `FULLDAY_PCAP` | unset | Captured day ([capture.sh](gpu_ingest_bench/capture.sh)); enables the full-day button (`INGEST=gpu` or `gpudirect`) |
 | `FULLDAY_BASE_PORT`, `FULLDAY_PACKETS` | unset | The capture's sender port and packet count |
 | `TCPREPLAY_DIR`, `TCPREPLAY_LIBS` | unset | `tcpreplay`/`tcprewrite` binaries and libraries for the replay controller |
 | `FULLDAY_WORK` | `replay_control/` beside the capture | Rewritten per-run copies of the capture |
@@ -108,8 +129,8 @@ host buffers, bursts of up to 1,024 packets and a 5,000 µs partial-burst timeou
 120,000 2-KiB buffers; ~0.57 s at 200,000 packets/s) and bursts of up to 4,096 packets
 with a 20,000 µs timeout. The native drain copies each burst into a 1,048,576-slot ring in
 GPU memory (2 GiB, ~5 s at 200,000 packets/s) and returns it to the NIC without the
-Python interpreter lock; the receiver also moves its other threads off the DAQIRI cores. `--ano-config PATH`
-takes a custom YAML that keeps that port and queue.
+Python interpreter lock; the receiver also moves its other threads off the DAQIRI cores.
+`--nic-config PATH` takes a custom YAML that keeps that port and queue.
 
 ## Full-day button
 
@@ -144,13 +165,14 @@ previous values are kept in the receiver's labels; a reboot also restores them):
   a refresh or an fwupd restart at the start of 9 bursts caused no stall over 111 ms,
   and stalls still occurred with the timer stopped.
 
-With these settings, 242 of 250 `compare`-mode runs with a `/snapshot` poller delivered all
-2,880,565 packets in order in ~14.4 s each (~1,620× real time). Five lost 2–4% to
-receiver stalls longer than the ~0.57 s of NIC buffering, one rejected 35 stale-port
-packets, and in two, 26–41 packets arrived out of order and were discarded
+With these settings on Holoscan 4.3, 242 of 250 `compare`-mode runs with a `/snapshot`
+poller delivered all 2,880,565 packets in order in ~14.4 s each (~1,620× real time). Five
+lost 2–4% to receiver stalls longer than the ~0.57 s of NIC buffering, one rejected 35
+stale-port packets, and in two, 26–41 packets arrived out of order and were discarded
 ([details](../../docs/GPU_INGEST.md#performance)). Those runs used the Python drain; the
 native drain survives injected interpreter-lock stalls of up to 3 s
-([native drain](../../docs/GPU_INGEST.md#native-drain)).
+([native drain](../../docs/GPU_INGEST.md#native-drain)). The 5.0 build repeats these
+series only with approval for the NIC.
 
 ## Check it
 
@@ -166,11 +188,11 @@ DAQIRI counters over the same interval for any throughput claim.
 
 ## Example: full GPUDirect demo on one Thor
 
-A complete launch with PHY loopback and the full-day button. Pick the GPU by UUID
-(`nvidia-smi -L`), since CUDA device index 0 can be the integrated GPU:
+A complete launch with PHY loopback, the full-day button and the 5.0 image. Pick the GPU by
+UUID (`nvidia-smi -L`), since CUDA device index 0 can be the integrated GPU:
 
 ```bash
-export ANO_IMAGE=holoscan-finance:nyq-20260911 INGEST=gpu LOOPBACK=1 \
+export ANO_IMAGE=holoscan-finance:hsdk5-daqiri INGEST=gpu LOOPBACK=1 \
     GPU_UUID=GPU-<uuid> \
     TAPE_DIR=/data/nyq-equities-2025-04-01 APP_NAME=fin-gpu-demo FEED_NAME=fin-gpu-feed \
     FULLDAY_PCAP=/data/xportbench/base.pcap FULLDAY_BASE_PORT=$(cat /data/xportbench/baseport) \
@@ -180,5 +202,5 @@ export ANO_IMAGE=holoscan-finance:nyq-20260911 INGEST=gpu LOOPBACK=1 \
 bash deploy/igx_thor/igx_ano_run.sh
 ```
 
-From another machine, tunnel to the dashboard:
+The dashboard binds to `127.0.0.1`. From another machine, tunnel to it:
 `ssh -N -L 8080:127.0.0.1:8080 <user>@<thor-host>`, then open <http://localhost:8080/>.

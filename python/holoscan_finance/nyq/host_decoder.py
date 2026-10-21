@@ -11,10 +11,13 @@ the 0.28M msgs/s host baseline, so it stays a plain per-packet loop.
 
 from __future__ import annotations
 
+import struct
 from typing import TYPE_CHECKING
 
+from ..marketdata.gpu_decoder import DecodeCounts
+from .mapping import decode_packet
+
 if TYPE_CHECKING:
-    from ..marketdata.gpu_decoder import DecodeCounts
     from ..marketdata.records import ReplayBatch
     from ..payloads import PacketBatch
     from .manifest import FeedDirectory
@@ -27,4 +30,25 @@ class HostMitchDecoder:
         self, batch: PacketBatch, directory: FeedDirectory | None
     ) -> tuple[list[ReplayBatch], DecodeCounts]:
         """One ``ReplayBatch`` per accepted packet, in receive order, and the call's counts."""
-        raise NotImplementedError
+        if directory is None:
+            return [], DecodeCounts(0, len(batch.items), 0)
+        out: list[ReplayBatch] = []
+        messages = stale = malformed = 0
+        for data, recv_ns, _wire_count, peer in batch.items:
+            if peer is None or peer[1] != directory.sender_port:
+                stale += 1
+                continue
+            try:
+                batches, count = decode_packet(
+                    data,
+                    recv_ns,
+                    generation=directory.generation,
+                    midnight_ns=directory.midnight_ns,
+                    universe=directory.universe,
+                )
+            except (ValueError, struct.error):
+                malformed += 1
+                continue
+            messages += count
+            out.extend(batches)
+        return out, DecodeCounts(messages, stale, malformed)

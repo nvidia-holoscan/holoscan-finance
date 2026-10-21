@@ -13,10 +13,15 @@ elif [[ $# != 0 ]]; then
 fi
 [[ "$LOOPBACK" =~ ^[01]$ && "$START_FEED" =~ ^[01]$ ]] || fail "LOOPBACK and START_FEED must be 0 or 1"
 [[ "$APP_NAME" != "$FEED_NAME" ]] || fail "APP_NAME and FEED_NAME must differ"
-[[ "$INGEST" =~ ^(ano|gpu)$ ]] || fail "INGEST must be ano or gpu"
+# The app's canonical ingest names; ano and gpu are the 4.3 spellings (labels keep $INGEST).
+case "$INGEST" in
+    ano | daqiri-host) MODE=daqiri-host ;;
+    gpu | gpudirect) MODE=gpudirect ;;
+    *) fail "INGEST must be ano, gpu, daqiri-host or gpudirect" ;;
+esac
 [[ "$START_FEED" != 1 || -n "$FEED_HOST" ]] || fail "set FEED_HOST for the local sender, or LOOPBACK=1"
 if [[ -n "$FULLDAY_PCAP" ]]; then
-    [[ "$INGEST" == gpu ]] || fail "the full-day button needs INGEST=gpu"
+    [[ "$MODE" == gpudirect ]] || fail "the full-day button needs INGEST=gpu (gpudirect)"
     [[ -f "$FULLDAY_PCAP" && "$FULLDAY_BASE_PORT" =~ ^[0-9]+$ && -x "$TCPREPLAY_DIR/tcpreplay" ]] ||
         fail "FULLDAY_PCAP needs FULLDAY_BASE_PORT and TCPREPLAY_DIR (with tcpreplay and tcprewrite)"
     FULLDAY_PCAP="$(cd "$(dirname "$FULLDAY_PCAP")" && pwd)/$(basename "$FULLDAY_PCAP")"
@@ -30,22 +35,22 @@ COMMON=(--net=host --workdir "$CONTAINER_REPO"
     -e PYTHONUNBUFFERED=1 -e PYTHONDONTWRITEBYTECODE=1)
 ACCEL=(--runtime=nvidia -e NVIDIA_DISABLE_REQUIRE=1 -e NVIDIA_VISIBLE_DEVICES=all
     --device=/dev/infiniband --mount "type=bind,src=/dev/hugepages,dst=/dev/hugepages"
-    --ulimit memlock=-1 --ulimit stack=67108864 --ipc=host
+    --ulimit memlock=-1 --ulimit stack=67108864 --shm-size=4g
     --cap-add=NET_ADMIN --cap-add=IPC_LOCK --cap-add=SYS_NICE --cap-add=SYS_PTRACE
     -e "DAQIRI_DV_FLOW_EN=${DAQIRI_DV_FLOW_EN:-1}"
-    -e "DAQIRI_RX_FLOW_GROUP=${DAQIRI_RX_FLOW_GROUP:-0}")
+    -e "DAQIRI_RX_FLOW_GROUP=${DAQIRI_RX_FLOW_GROUP:-0}" -e CUDA_DEVICE_ORDER=PCI_BUS_ID)
 if [[ -n "$GPU_UUID" ]]; then ACCEL+=(-e "CUDA_VISIBLE_DEVICES=$GPU_UUID"); fi
 # Passed through when set: HOLOSCAN_FINANCE_NATIVE_DRAIN=0 selects the Python drain (A/B);
 # HOLOSCAN_FINANCE_FAULTS=1 enables POST /debug/hold_gil (fault injection, tests only).
 for var in HOLOSCAN_FINANCE_NATIVE_DRAIN HOLOSCAN_FINANCE_FAULTS; do
     if [[ -n "${!var:-}" ]]; then ACCEL+=(-e "$var=${!var}"); fi
 done
-if [[ "$INGEST" == gpu ]]; then
+if [[ "$MODE" == gpudirect ]]; then
     ACCEL+=(--mount "type=bind,src=$KERNEL_CACHE_DIR,dst=/kernel-cache" -e CUPY_CACHE_DIR=/kernel-cache)
 fi
-APP_ARGS=(-m holoscan.equities.stream --ingest "$INGEST"
+APP_ARGS=(applications/equity_analytics/equity_analytics.py --ingest "$MODE"
     --host "$WEB_HOST" --port "$WEB_PORT" --udp-port "$UDP_PORT"
-    --ano-pcie "$ANO_PCIE" --ano-master-core "$ANO_MASTER_CORE" --ano-rx-core "$ANO_RX_CORE"
+    --nic-pcie "$ANO_PCIE" --nic-master-core "$ANO_MASTER_CORE" --nic-rx-core "$ANO_RX_CORE"
     --cpu-threads "$CPU_THREADS" --analytics-backend "${ANALYTICS_BACKEND:-compare}")
 if [[ -n "$FULLDAY_PCAP" ]]; then APP_ARGS+=(--replay-control "http://127.0.0.1:$REPLAY_PORT"); fi
 LABELS=(--label "$OWNER_LABEL=$OWNER_VALUE" --label "ano.loopback=$LOOPBACK"
@@ -53,11 +58,11 @@ LABELS=(--label "$OWNER_LABEL=$OWNER_VALUE" --label "ano.loopback=$LOOPBACK"
     --label "ano.peer=$LOOPBACK_PEER" --label "ano.mst-image=$MST_IMAGE" --label "ano.feed=$FEED_NAME"
     --label "ano.ingest=$INGEST" --label "ano.replay=${FULLDAY_PCAP:+$REPLAY_NAME}")
 GPU_PM=""
-if [[ "$INGEST" == gpu ]]; then GPU_PM=$(gpu_pm_auto); fi
+if [[ "$MODE" == gpudirect ]]; then GPU_PM=$(gpu_pm_auto); fi
 LABELS+=(--label "ano.gpu-pm=$GPU_PM")
 FEED=(docker run -d --name "$FEED_NAME" --label "$OWNER_LABEL=$OWNER_VALUE"
     "${COMMON[@]}" --mount "type=bind,src=$TAPE_DIR,dst=/data/tape,readonly"
-    "$ANO_IMAGE" bash deploy/igx_thor/ano_python.sh -m holoscan.equities.replay
+    "$ANO_IMAGE" bash deploy/igx_thor/ano_python.sh -m holoscan_finance.tools.replay_sender
     --host "$FEED_HOST" --port "$UDP_PORT" --data /data/tape
     --loops 0 --control-url "http://$CONTROL_HOST:$WEB_PORT")
 # Privileged: tcpreplay writes raw frames on the NIC. Paths keep their host names.
@@ -74,13 +79,13 @@ REPLAY+=("$ANO_IMAGE" bash deploy/igx_thor/ano_python.sh deploy/igx_thor/gpu_ing
     ${FULLDAY_PACKETS:+--packets "$FULLDAY_PACKETS"})
 CHECK=(docker run --rm "${COMMON[@]}" "${ACCEL[@]}" "$ANO_IMAGE"
     bash deploy/igx_thor/ano_python.sh deploy/igx_thor/ano_runtime.py check --pcie "$ANO_PCIE"
-    --master-core "$ANO_MASTER_CORE" --rx-core "$ANO_RX_CORE")
+    --master-core "$ANO_MASTER_CORE" --rx-core "$ANO_RX_CORE" --ingest "$MODE")
 
 if [[ "$DRY_RUN" == 0 ]]; then
     command -v docker >/dev/null || fail "docker is required"
     command -v python3 >/dev/null || fail "python3 is required"
     docker image inspect "$ANO_IMAGE" >/dev/null || fail "build ANO_IMAGE first (deploy/igx_thor/README.md)"
-    if [[ "$INGEST" == gpu ]]; then mkdir -p "$KERNEL_CACHE_DIR"; fi
+    if [[ "$MODE" == gpudirect ]]; then mkdir -p "$KERNEL_CACHE_DIR"; fi
     if [[ -n "$FULLDAY_PCAP" ]]; then
         mkdir -p "$FULLDAY_WORK"
         FWUPD_TIMER=$(host_systemctl is-active fwupd-refresh.timer || true)
@@ -148,5 +153,5 @@ if [[ "$LOOPBACK" == 1 ]]; then
 fi
 if [[ "$START_FEED" == 1 ]]; then run "${FEED[@]}"; fi
 if [[ -n "$FULLDAY_PCAP" ]]; then run "${REPLAY[@]}"; fi
-printf 'NYQ equity demo: http://127.0.0.1:%s/ (%s RX, UDP destination port %s)\n' "$WEB_PORT" "$INGEST" "$UDP_PORT"
+printf 'NYQ equity demo: http://127.0.0.1:%s/ (%s RX, UDP destination port %s)\n' "$WEB_PORT" "$MODE" "$UDP_PORT"
 printf 'Stop: APP_NAME=%q bash %q/igx_ano_down.sh\n' "$APP_NAME" "$DEPLOY_DIR"

@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Container dependency/hardware preflight and host-side HTTP readiness gate."""
+"""Container dependency/hardware preflight and host-side HTTP readiness gate.
+
+``check`` runs in the receiver image (Holoscan SDK 5, DAQIRI, the mounted checkout); ``wait``
+runs on the host with the system Python and imports nothing from the checkout.
+"""
 
 import argparse
 import importlib
@@ -14,25 +18,32 @@ from urllib.request import Request, urlopen
 
 
 def check(args):
+    import holoscan as hs
+
+    if not hasattr(hs, "compile"):
+        raise RuntimeError(f"{hs!r} is not Holoscan SDK 5 (no holoscan.compile)")
     for name in (
-        "holoscan.core",
         "cupy",
         "numpy",
         "scipy",
         "threadpoolctl",
         "fastapi",
         "uvicorn",
-        "holoscan.equities.stream",
+        "holoscan_finance.operators.gpu_mitch_source",
+        "holoscan_finance.dashboard.server",
     ):
         importlib.import_module(name)
-    from holoscan.marketdata.daqiri import require_daqiri
+    import holoscan_finance
+    from holoscan_finance.ingest.daqiri import require_daqiri
+    from holoscan_finance.settings import canonical_ingest
 
-    require_daqiri()
+    mode, _ = canonical_ingest(args.ingest)
+    require_daqiri(gpu=mode == "gpudirect")
     import cupy as cp
 
     if cp.cuda.runtime.getDeviceCount() < 1:
         raise RuntimeError("CuPy CUDA device is unavailable")
-    source = importlib.import_module("holoscan.equities.stream").__file__
+    source = holoscan_finance.__file__
     repo = Path(os.environ["HOLOSCAN_FINANCE_REPO"]).resolve()
     if not Path(source).resolve().is_relative_to(repo):
         raise RuntimeError(f"finance imports must resolve to the mounted branch, got {source}")
@@ -46,7 +57,7 @@ def check(args):
     if int(meminfo["HugePages_Free"].strip()) == 0:
         raise RuntimeError("no free hugepages; provision them using the DAQIRI system setup guide")
     gpu = cp.cuda.runtime.getDeviceProperties(0)["name"].decode()
-    print(f"Preflight passed: {source}; analytics GPU {gpu}")
+    print(f"Preflight passed ({mode}): {source}; analytics GPU {gpu}")
 
 
 def wait_ready(args):
@@ -88,6 +99,9 @@ def main():
     check_parser.add_argument("--pcie", required=True)
     check_parser.add_argument("--master-core", type=int, required=True)
     check_parser.add_argument("--rx-core", type=int, required=True)
+    check_parser.add_argument(
+        "--ingest", required=True, choices=("daqiri-host", "gpudirect", "ano", "gpu")
+    )
     wait_parser = sub.add_parser("wait")
     wait_parser.add_argument("--url", required=True)
     wait_parser.add_argument("--timeout", type=float, default=90)

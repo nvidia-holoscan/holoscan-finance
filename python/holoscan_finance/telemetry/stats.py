@@ -244,7 +244,7 @@ class BarsStats:
 @dataclass(eq=False)
 class RiskStats:
     """Risk-lane telemetry. ``RollingRiskOp``, ``RiskCrossCheckOp`` (``crosschecks_*``) and
-    ``RiskSummaryOp`` (``summar*``) write disjoint fields."""
+    ``RiskSummaryOp`` (``summaries``, ``summary_drops``) write disjoint fields."""
 
     windows_received: int = 0
     windows_superseded: int = 0

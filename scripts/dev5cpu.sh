@@ -8,7 +8,7 @@
 #   scripts/dev5cpu.sh 'python3 -m pytest -q -m "sdk and not gpu and not slow" tests/python'
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN5_PIP='python3 -m pip install --user -q --disable-pip-version-check scipy threadpoolctl fastapi uvicorn anyio httpx duckdb pyarrow pytest-timeout ruff==0.15.17 "holoscan-cli[create]==5.0.0" >/dev/null'   # ONE line, as in dev5.sh
+RUN5_PIP='python3 -m pip install --user -q --disable-pip-version-check scipy threadpoolctl fastapi uvicorn anyio httpx duckdb pyarrow pytest-timeout ruff==0.15.17 "numba>=0.68" "holoscan-cli[create]==5.0.0" >/dev/null'   # ONE line, as in dev5.sh
 exec docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -e HOME=/tmp \
   -e PYTHONUSERBASE="$REPO/.cache/pyuser5" -e CUPY_CACHE_DIR=/tmp/cupy \
   -e RUN5_CMD="$*" -e RUN5_TIMEOUT="${RUN5_TIMEOUT:-1500}" -e RUN5_PIP="$RUN5_PIP" \

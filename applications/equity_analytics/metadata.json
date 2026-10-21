@@ -1,53 +1,89 @@
 {
-    "$schema": "urn:holohub:application:v1",
-    "application": {
-        "name": "equity_analytics",
-        "authors": [
-            {
-                "name": "Jake Goldberg",
-                "affiliation": "NVIDIA"
-            }
-        ],
-        "language": [
-            "Python"
-        ],
-        "version": "0.1.0",
-        "changelog": {
-            "0.1.0": "NYQ trade/quote UDP replay into rolling price, volatility and correlation analytics with matched CPU/GPU measurements"
-        },
-        "holoscan_sdk": {
-            "minimum_required_version": "4.3.0",
-            "tested_versions": [
-                "4.3.0"
-            ]
-        },
-        "platforms": [
-            "x86_64",
-            "aarch64"
-        ],
-        "tags": [
-            "Financial Services",
-            "GPU",
-            "Market Data",
-            "Risk Analytics"
-        ],
-        "ranking": 2,
-        "requirements": {
-            "operators": [
-                "gpu_mitch_source_op",
-                "gpu_quote_bars_op",
-                "gpu_rolling_risk_op"
-            ]
-        },
-        "default_mode": "default",
-        "modes": {
-            "default": {
-                "description": "NYQ historical MITCH replay, CuPy/cuBLAS covariance, concurrent validation, separate CPU/GPU benchmark modes and timeline scrubbing",
-                "run": {
-                    "command": "python3 applications/equity_analytics/equity_demo.py",
-                    "workdir": "holohub_app_source"
-                }
-            }
+  "$schema": "urn:holoscan:application:v1",
+  "application": {
+    "name": "equity_analytics",
+    "description": "NYQ MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": ["Python"],
+    "version": "0.2.0",
+    "changelog": {
+      "0.1.0": "NYQ trade/quote UDP replay into rolling price, volatility and correlation analytics with matched CPU/GPU measurements",
+      "0.2.0": "Holoscan SDK 5.0 port: one composition of holoscan.finance operators for every front end (udp, daqiri-host, gpudirect, NIC-free GPU replay), placed lanes, plan rules"
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": ["5.0.0"]
+    },
+    "platforms": ["x86_64", "aarch64"],
+    "tags": ["Finance", "Market Data", "Risk Analytics", "GPU"],
+    "ranking": 2,
+    "requirements": {
+      "operators": [
+        "gpu_mitch_source_op",
+        "gpu_mitch_replay_source_op",
+        "udp_packet_source_op",
+        "daqiri_packet_source_op",
+        "mitch_decode_op",
+        "quote_bars_op",
+        "rolling_risk_op",
+        "risk_cross_check_op",
+        "callback_sink_op",
+        "risk_summary_op"
+      ]
+    },
+    "default_mode": "replay",
+    "modes": {
+      "replay": {
+        "description": "The full GPU chain on any GPU host, no NIC: a synthetic day replayed from GPU memory, looping, each pass a new generation; dashboard on port 8080",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth --symbols 1000 --packets 400000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth/day.pcap --tape <holohub_data_dir>/synth/tape --replay-pps 2000 --replay-loops 0 --analytics-backend compare --host 0.0.0.0\"",
+          "workdir": "holohub_bin"
         }
+      },
+      "replay_pcap": {
+        "description": "A recorded NYQ day (nyq/day.pcap and its prepared tape nyq/tape in the data directory) replayed from GPU memory at 200,000 packets/s",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --replay-pps 200000 --analytics-backend compare --host 0.0.0.0",
+          "workdir": "holohub_bin"
+        }
+      },
+      "udp": {
+        "description": "Kernel UDP ingest, GPU risk with a CPU cross-check; start python3 -m holoscan_finance.tools.replay_sender separately",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend compare --host 0.0.0.0",
+          "workdir": "holohub_bin"
+        }
+      },
+      "udp_cpu": {
+        "description": "Kernel UDP ingest with CPU analytics only (the CPU baseline)",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend cpu --host 0.0.0.0",
+          "workdir": "holohub_bin"
+        }
+      },
+      "smoke": {
+        "description": "CI: a small synthetic day replayed unpaced, headless; fails if the run fails, no window is analyzed or a CPU/GPU comparison disagrees",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-smoke --symbols 200 --packets 20000 --seconds 900 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-smoke/day.pcap --tape <holohub_data_dir>/synth-smoke/tape --replay-pps 0 --port 0 --exit-when-drained --timeout-s 300 --analytics-backend compare --expect-windows 1 --report <holohub_bin>/equity_smoke.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "plan": {
+        "description": "Compile and check the plan rules only: print the lanes, edges and clocks, write plan.json; no GPU work, no I/O",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap none --tape none --plan-only --plan-json <holohub_bin>/equity_analytics.plan.json",
+          "workdir": "holohub_bin"
+        }
+      }
     }
+  }
 }

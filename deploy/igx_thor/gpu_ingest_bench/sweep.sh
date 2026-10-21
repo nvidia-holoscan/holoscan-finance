@@ -5,13 +5,14 @@
 # mode at a time, and report loss counters from the NIC, the receiver and the app.
 #   BASE_PCAP  capture filtered to one generation's source port (see README)
 #   BASE_PORT  that source port;  TCPREPLAY_DIR  directory with tcpreplay/tcprewrite
-#   MODES="gpu ano" (add async for kernel sockets)  RATES="4500 10000 20000 50000"  DUR=15 (seconds per rate)
+#   MODES="gpu ano" (add async for kernel sockets; or gpudirect, daqiri-host, udp)
+#   RATES="4500 10000 20000 50000"  DUR=15 (seconds per rate)
 # Leaves the NIC free afterwards; it does not restart any other demo.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(cd "$here/../../.." && pwd)"
 : "${BASE_PCAP:?}" "${BASE_PORT:?}" "${TCPREPLAY_DIR:?}"
 NIC="${ANO_NIC:-enP4p3s0f0np0}"; PCIE="${ANO_PCIE:-0004:03:00.0}"; U="${WEB:-http://127.0.0.1:8080}"
-IMAGE="${ANO_IMAGE:-holoscan-finance:ano}"; MST="${MST_IMAGE:-ano-igx:mst}"; TAPE="${TAPE_DIR:?}"
+IMAGE="${ANO_IMAGE:-holoscan-finance:hsdk5-daqiri}"; MST="${MST_IMAGE:-ano-igx:mst}"; TAPE="${TAPE_DIR:?}"
 GPU="${GPU_UUID:-}"; BACKEND="${ANALYTICS_BACKEND:-gpu}"; DUR="${DUR:-15}"
 MODES="${MODES:-gpu ano}"; RATES="${RATES:-4500 10000 20000 50000}"; PORTN="${PORT_START:-43000}"
 CACHE="${KERNEL_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/holoscan-finance/cupy}"; mkdir -p "$CACHE"
@@ -43,32 +44,33 @@ cleanup() {
 }
 trap cleanup EXIT
 total=$(tcpdump -r "$BASE_PCAP" -n 2>/dev/null | wc -l)
-printf "%-5s %8s %9s %9s %10s %6s %9s %6s %6s %10s\n" mode req_pps tx_pkts app_pkts app_msg/s gaps ring_drop stale malf rx2res_ms
+printf "%-11s %8s %9s %9s %10s %6s %9s %6s %6s %10s\n" mode req_pps tx_pkts app_pkts app_msg/s gaps ring_drop stale malf rx2res_ms
 for mode in $MODES; do
-    extra=(--ingest "$mode" --ano-pcie "$PCIE"); [[ "$mode" == async ]] && extra=(--ingest async --udp-host 0.0.0.0)
+    case "$mode" in gpu) mode=gpudirect ;; ano) mode=daqiri-host ;; async) mode=udp ;; esac  # 4.3 names
+    extra=(--ingest "$mode" --nic-pcie "$PCIE"); [[ "$mode" == udp ]] && extra=(--ingest udp --udp-host 0.0.0.0)
     docker rm -f receiver-bench >/dev/null 2>&1 || true
-    docker run -d --name receiver-bench --runtime nvidia --net host --ipc host --device /dev/infiniband \
+    docker run -d --name receiver-bench --runtime nvidia --net host --shm-size 4g --device /dev/infiniband \
         -v /dev/hugepages:/dev/hugepages -v "$repo:/workspace/holoscan-finance:ro" -v "$TAPE:/data/tape:ro" \
         -v "$CACHE:/kernel-cache" -e CUPY_CACHE_DIR=/kernel-cache -w /workspace/holoscan-finance \
         --cap-add IPC_LOCK --cap-add NET_ADMIN --cap-add SYS_NICE --ulimit memlock=-1 --ulimit stack=67108864 \
         -e HOLOSCAN_FINANCE_REPO=/workspace/holoscan-finance -e NVIDIA_DISABLE_REQUIRE=1 -e NVIDIA_VISIBLE_DEVICES=all \
         -e DAQIRI_DV_FLOW_EN=1 -e DAQIRI_RX_FLOW_GROUP=0 ${GPU:+-e CUDA_VISIBLE_DEVICES=$GPU} \
-        "$IMAGE" bash deploy/igx_thor/ano_python.sh -m holoscan.equities.stream \
+        "$IMAGE" bash deploy/igx_thor/ano_python.sh applications/equity_analytics/equity_analytics.py \
         --host 127.0.0.1 --port 8080 --udp-port 26400 --analytics-backend "$BACKEND" "${extra[@]}" >/dev/null
     for _ in $(seq 120); do curl -s --max-time 2 -o /dev/null "$U/feedrate" && break; sleep 2; done
     sleep 10; loopback; sleep 3
-    [[ "$mode" == async ]] && root sysctl -q -w net.core.rmem_max=268435456 "net.ipv4.conf.$NIC.accept_local=1" "net.ipv4.conf.$NIC.rp_filter=0" "net.ipv4.conf.all.rp_filter=0"
+    [[ "$mode" == udp ]] && root sysctl -q -w net.core.rmem_max=268435456 "net.ipv4.conf.$NIC.accept_local=1" "net.ipv4.conf.$NIC.rp_filter=0" "net.ipv4.conf.all.rp_filter=0"
     for rate in $RATES; do
         PORTN=$((PORTN + 1)); n=$((rate * DUR)); ((n > total)) && n=$total
         tcpdump -r "$BASE_PCAP" -c "$n" -w "$work/cut.pcap" 2>/dev/null
-        rw=(--portmap="$BASE_PORT:$PORTN" --fixcsum); [[ "$mode" == async ]] && rw+=(--dstipmap=192.168.100.2/32:192.168.100.1/32)
+        rw=(--portmap="$BASE_PORT:$PORTN" --fixcsum); [[ "$mode" == udp ]] && rw+=(--dstipmap=192.168.100.2/32:192.168.100.1/32)
         "$TCPREPLAY_DIR/tcprewrite" "${rw[@]}" -i "$work/cut.pcap" -o "$work/run.pcap" >/dev/null 2>&1
-        docker exec receiver-bench bash deploy/igx_thor/ano_python.sh -m holoscan.equities.bench_replay register --port "$PORTN" >/dev/null
+        docker exec receiver-bench bash deploy/igx_thor/ano_python.sh -m holoscan_finance.tools.bench_replay register --port "$PORTN" >/dev/null
         sleep 2; read -r a1 m1 g1 r1 s1 f1 _ <<<"$(snap)"; t1=$(ph tx_packets_phy)
         root "$TCPREPLAY_DIR/tcpreplay" -i "$NIC" --pps="$rate" -K "$work/run.pcap" > "$work/tcpreplay_${mode}_$rate.log" 2>&1
         sleep 8; read -r a2 m2 g2 r2 s2 f2 rr <<<"$(snap)"; t2=$(ph tx_packets_phy)
         secs=$(grep -oE 'sent in [0-9.]+ seconds' "$work/tcpreplay_${mode}_$rate.log" | awk '{print $3}')
-        printf "%-5s %8s %9s %9s %10.0f %6s %9s %6s %6s %10.1f\n" "$mode" "$rate" $((t2 - t1)) $((a2 - a1)) \
+        printf "%-11s %8s %9s %9s %10.0f %6s %9s %6s %6s %10.1f\n" "$mode" "$rate" $((t2 - t1)) $((a2 - a1)) \
             "$(python3 -c "print(($m2-$m1)/max(float('${secs:-1}'),1e-3))")" $((g2 - g1)) $((r2 - r1)) $((s2 - s1)) $((f2 - f1)) "$rr"
     done
 done

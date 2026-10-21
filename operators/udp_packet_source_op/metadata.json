@@ -1,0 +1,43 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "UdpPacketSourceOp",
+    "description": "MITCH datagrams from a kernel UDP socket into a host ring, emitted as packet batches for MitchDecodeOp (the host baseline).",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "0.2.0",
+    "changelog": {
+      "0.2.0": "Holoscan SDK 5.0 port"
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Market Data",
+      "Networking",
+      "UDP",
+      "Source"
+    ],
+    "ranking": 2,
+    "requirements": {}
+  }
+}

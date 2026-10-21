@@ -1,77 +1,143 @@
 # GpuMitchSourceOp
 
-GPUDirect receive for MITCH market data. The NIC writes packets straight into GPU
-memory and CUDA kernels unpack them, so packet payloads never touch the CPU:
+GPUDirect receive for MITCH market data. The NIC writes frames straight into GPU memory and
+CUDA kernels unpack and decode them, so no packet payload ever reaches the CPU:
 
 ```text
 ConnectX → DAQIRI RX buffers in GPU memory (dma-buf)
-         → native drain thread (no Python lock): gather_frame kernel copies UDP payloads
+         → native drain thread hf-drain (no Python lock): gather_frame copies the UDP payloads
            into a device slot ring and checks MITCH framing; the burst returns to the NIC
-         → compute(): loss accounting from a 7-field header per packet,
-           batch_decoder on the device slots → emit on "tick"
+         → compute(): receive accounting on a 7-column header per packet, staging,
+           GPU MITCH decode, legacy-stream sync, ring release → events (list[GpuReplayBatch])
 ```
 
-The drain is a C++ thread ([daqiri_drain.cpp](../../python/holoscan/marketdata/native/daqiri_drain.cpp))
-that never takes the Python interpreter lock. It polls DAQIRI bursts, launches the gather
-kernel into a preallocated ring of `ring_size` device slots, copies the per-packet header
-to pinned host memory and returns the burst to the NIC, with no allocation in steady
-state. A Python thread that stalls while holding the lock (the cause of the occasional
-full-day loss before this drain) no longer stops the NIC buffers from being recycled: the
-ring keeps filling and `compute()` catches up afterwards. When the ring is full the drain
-holds the burst, so overflow appears as NIC drops and sequence gaps, never as silently
-discarded packets. `compute()` accounts the gathered bursts, stages them up to
-`batch_size` messages and calls the decoder once per batch.
-On IGX Thor this sustains 200,000 packets/s (6.6M MITCH messages/s); see
-[GPUDirect ingest](../../docs/GPU_INGEST.md) for the data path, measurements and limits.
+The drain ([daqiri_drain.cpp](../../python/holoscan_finance/ingest/native/daqiri_drain.cpp),
+byte-identical to 4.3) is a C++ thread that never takes the Python interpreter lock. It
+polls DAQIRI bursts, gathers them into a preallocated ring of `ring_size` device slots,
+copies the per-packet header to pinned host memory and returns the burst to the NIC, with
+no allocation in steady state. A Python thread that stalls while holding the lock therefore
+cannot stop NIC buffers from being recycled: the ring absorbs the stall and `compute()`
+catches up. When the ring is full the drain holds the burst, so overflow shows up as NIC
+drops and sequence gaps, never as silently discarded packets. Decode is fused into the
+source: ring rows stay leased until decode has synchronized, so the lease has exactly one
+consumer. On IGX Thor this sustains 200,000 packets/s (6.6M MITCH messages/s, measured on
+Holoscan 4.3); see [GPUDirect ingest](../../docs/GPU_INGEST.md).
+
+Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with
+`holoscan_finance.marketdata.gpu_decoder.GpuMitchDecoder`. Derived from the 4.3 operator of
+the same name, `EquityState.decode_gpu` and `warmup.py`.
 
 ## Requirements
 
-- Holoscan 4.3+, CuPy, and DAQIRI with Python bindings that expose `get_packet_ptr` and
-  `get_packet_length`, built with the DPDK engine.
-- A ConnectX NIC with GPUDirect over dma-buf (no `nvidia_peermem`), and hugepages.
-- Tested on IGX Thor (aarch64) with an RTX PRO 6000 and ConnectX-7. DAQIRI on Thor
-  needs [daqiri_thor_steering.patch](../../deploy/igx_thor/daqiri_thor_steering.patch);
-  platform setup is in [Thor deployment](../../deploy/igx_thor/README.md).
+- CuPy, and DAQIRI with Python bindings that expose `get_packet_ptr` and
+  `get_packet_length`, built with the DPDK engine
+  ([deploy/igx_thor/Dockerfile](../../deploy/igx_thor/Dockerfile)).
+- A ConnectX NIC with GPUDirect over dma-buf (no `nvidia_peermem`), hugepages, and the
+  pybind11 headers to build the native drain on first start. Tested on IGX Thor (aarch64)
+  with an RTX PRO 6000 and a ConnectX-7; platform setup is in
+  [Thor deployment](../../deploy/igx_thor/README.md).
 
-## Arguments
+## Ports
 
-| Argument | Default | Purpose |
+| Port | Type | Notes |
 | --- | --- | --- |
-| `batch_decoder` | required | `(slots, lengths, src_port, recv_ns) → (batches, decoded, malformed)`; `batches` is emitted on `tick` |
-| `port`, `pcie_address` | `26400`, `0004:03:00.0` | UDP destination port for the flow match; NIC PCIe address |
-| `daqiri_config` | built | Custom DAQIRI config (dict or YAML path) with the same interface and queue |
-| `interface_name`, `queue_id` | `rx_port`, `0` | DAQIRI interface and RX queue |
-| `master_core`, `rx_core` | `3`, `9` | DPDK cores; the operator moves its process's other threads off them |
-| `num_bufs`, `buf_size` | `51200`, `2048` | GPU receive buffers (at most `SLOT_BYTES` each) |
-| `rx_batch_size`, `rx_timeout_us` | `4096`, `20000` | DAQIRI burst size and partial-burst timeout |
-| `ring_size`, `batch_size` | `65536`, `16384` | Device ring slots (2 KiB each; covers a stall of `ring_size` / packet rate); messages per decode |
-| `native_drain` | `True` | Use the native drain; `False`, or `HOLOSCAN_FINANCE_NATIVE_DRAIN=0`, selects the Python drain thread |
-| `keep_alive`, `recv_timeout` | `True`, `5.0` | Keep listening, or end the stream after this many idle seconds |
-| `gpu_device` | `0` | CUDA device for the slots and kernels |
+| `events` (out) | `list[GpuReplayBatch]` | always one batch; columns in GPU memory, complete before emit; per-packet sequence, wire count, offsets and receive times on the host |
 
-`batch_decoder` receives a CuPy `(n, 2048)` uint8 slot buffer, CuPy payload lengths and
-NumPy source ports and receive times. It would normally call
-`holoscan.marketdata.gpu_mitch.decode_packets`, which returns per-packet status and
-device-resident observation columns. The application's `EquityState.decode_gpu`
-([stream.py](../../python/holoscan/equities/stream.py)) is a complete example: it drops
-packets from stale senders, decodes, and returns GPU quote-bar batches.
+Contract: `OnClock(poll_period_us)`; no idle sleep, the clock paces the source.
 
-## Counters and diagnostics
+## Params
 
-`packets`, `received_messages` (wire messages), `messages` (decoded), `dropped`
-(sequence gaps), `ring_dropped`, `malformed_packets`, `out_of_order_packets`,
-`non_udp_frames` and `bursts`, plus `feed_buckets()` (100 ms arrival counts),
-`ring_fill()`, `ring_peak()` (most packets held since `reset_stalls()`) and `drain_alive()`. A new session (sender address or MITCH group) restarts sequence tracking.
+Shared with `GpuMitchReplaySourceOp`:
 
-`stalls` records the longest gaps between NIC bursts, the slowest drain and decode
-passes with per-step times, and every stall over 50 ms; `reset_stalls()` clears it. A
-drain stall longer than the NIC buffer pool (`num_bufs` packets) overflows the receive
-queue, which DAQIRI logs as `Rx: Dropped N packets`.
+| Param | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `batch_size` | int | `131072` | max MITCH messages staged per batch |
+| `ring_size` | int | `1048576` | device slots, 2 KiB each; covers a stall of `ring_size` / packet rate |
+| `poll_period_us` | int | `500` | below 100 needs a busy-polled lane |
+| `gpu_device` | int | `0` | CUDA device of the ring and kernels |
+| `recv_timeout_s` | float | `5.0` | silence that ends the input when `keep_alive` is off |
+| `keep_alive` | bool | `True` | `False`: end of input sets `stats.eof` once everything was emitted |
+| `warmup` | bool | `True` | compile and run the gather and decode kernels in `start()` |
+| `helper_cpus` | list | `[]` | mask the drain thread starts under; `[]` = the process mask, never the lane mask |
+| `directory` | `Ref` | `Ref()` | `Ref(Knob[FeedDirectory])`; empty: every packet is stale |
+| `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`; private if empty |
+| `tap` | `Ref` | `Ref()` | `Ref(CaptureTap)`; no capture recording if empty |
 
-The native drain and the frame-address helper
-([daqiri_frames.cpp](../../python/holoscan/marketdata/native/daqiri_frames.cpp)) are
-compiled on first start against the installed DAQIRI and CUDA headers. If the drain cannot
-be built or started, a Python drain thread does the same work (allocating per burst, and
-stopping whenever another Python thread holds the lock); if the helper cannot be built
-either, that thread makes one binding call per packet. `HOLOSCAN_FINANCE_NATIVE=0`
-disables both. `frame_fetch` names the path in use.
+`GpuMitchSourceOp` only:
+
+| Param | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `port` | int | `26400` | UDP destination port of the flow rule |
+| `pcie_address` | str | `"0004:03:00.0"` | NIC PCIe address (non-empty) |
+| `daqiri_config` | str | `""` | DAQIRI YAML path; overrides the built config and disables `isolate_cores` |
+| `interface_name`, `queue_id` | str, int | `"rx_port"`, `0` | DAQIRI interface and RX queue |
+| `master_core`, `rx_core` | int | `3`, `9` | DPDK lcores |
+| `num_bufs`, `buf_size` | int | `114688`, `2048` | GPU receive buffers (bounded by BAR1) |
+| `rx_batch_size`, `rx_timeout_us` | int | `4096`, `20000` | DAQIRI burst size and partial-burst timeout: few, large bursts |
+| `daqiri_log_level` | str | `"warn"` | `trace`, `debug`, `info`, `warn`, `error`, `critical` or `off` |
+| `native_drain` | bool | `True` | `False` (or `HOLOSCAN_FINANCE_NATIVE_DRAIN=0`): the Python drain, the A/B switch |
+| `isolate_cores` | bool | `True` | after `daqiri_init`, move this process's threads off the two lcores |
+| `init_cpus` | list | `[]` | mask to widen to around `daqiri_init` (the apps pass every CPU) |
+
+CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
+
+## Behaviour
+
+- **`start()` order.** Stats reset and lane CPUs recorded, kernels warmed, bindings checked;
+  the native drain is built **before** `daqiri_init` (a cold build takes about 5 s, which must
+  not pass with the NIC up and unpolled) and the ring allocated; `daqiri_init` runs inside
+  `thread_mask(init_cpus or None)`, which always restores and checks the lane mask (DPDK's
+  EAL pins its caller, and the runtime never re-applies a lane's placement); then the lcore
+  sweep, the interface lookup, and the drain, started under `helper_mask(helper_cpus)`. A
+  failure after a successful `daqiri_init` (the mask check included) stops a started drain
+  and shuts DAQIRI down before it propagates.
+- **Accounting.** Per burst, vectorized for one contiguous session (4.3 rules): sequence gaps
+  (`dropped`, in messages), reordering, framing rejects, non-UDP frames; rows beyond
+  `ring_size` queued packets count as `ring_dropped` messages.
+- **Staging.** Consecutive ring rows are decoded through one zero-copy view; rejected rows,
+  or rows that straddle the ring end, are gathered by copy.
+- **Decode.** The directory is read immediately before decoding; packets from another sender
+  port are stale. Ring rows are released only after the legacy stream synchronized.
+- **Backpressure.** A full downstream edge is held and retried at the next activation
+  (`PendingEmits`); a compute with a backlog emits nothing new.
+- **Fallback.** Without the native helper the Python drain `gpu-mitch-drain` does the same
+  with one binding call per packet and the GIL per burst (`frame_fetch = "per-packet
+  binding"`); the 4.3 `burst_frames` helper is gone, so the native-vs-Python A/B now compares
+  against this weaker baseline.
+
+## Edges and lane
+
+- Out: `lossless(4)` into `QuoteBarsOp(backend="gpu")`, in the same lane.
+- Lane: the entry of `ingest`; the drain and DPDK threads run outside the graph.
+- Threads: `hf-drain` (C++, never takes the GIL) or `gpu-mitch-drain` (Python); the DPDK
+  lcores pinned by DPDK; the DAQIRI stats thread (moved off the lcores by the sweep).
+- Streams: the drains gather on their own non-blocking stream and synchronize each burst;
+  decode runs on the legacy stream.
+- Errors: a `start()` failure fails the run; a drain error goes to `stats.error` and the next
+  compute raises, so the run is `FAILED` with the message.
+
+## Telemetry
+
+`IngestStats` (4.3 names): `packets`, `received_messages`, `messages`, `dropped`,
+`ring_dropped`, `malformed_packets`, `decode_malformed`, `stale_packets`,
+`out_of_order_packets`, `non_udp_frames`, `bursts`, `last_packet_wall_ns`, `drain_host_ns`,
+`frame_fetch`, `event_batches`, `retries`, `held`, `eof`, `error`, `lane_cpus`, and
+`stalls` (`burst_gaps_ms`, `worst_burst`, `worst_compute`, `events`, and `native`:
+`poll_gap_max_ms`, `poll_gap_at`, `ring_waits`, `ring_wait_ms` and every `poll_gaps_*`
+count over 10, 50 and 100 ms), plus `feed_buckets()`, `ring_fill()`, `ring_peak()`,
+`pending_packets()` and `drain_alive()`.
+
+## Example
+
+```python
+from holoscan_finance.operators import GpuMitchSourceOp, QuoteBarsOp
+from holoscan_finance.operators.edges import lossless
+from holoscan_finance.ref import Ref
+
+source = g.op(GpuMitchSourceOp, "source", port=26400, pcie_address="0004:03:00.0",
+              init_cpus=sorted(cpus.all), helper_cpus=sorted(cpus.helper),
+              directory=Ref(knob), stats=Ref(ingest_stats))
+bars = g.op(QuoteBarsOp, "bars", backend="gpu", directory=Ref(knob), stats=Ref(bars_stats))
+g.add_flow(source.events, bars.events, **lossless(4))
+g.partition("ingest").add(source, bars)
+```
