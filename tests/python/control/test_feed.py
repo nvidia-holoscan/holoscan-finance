@@ -90,6 +90,16 @@ def test_sender_status_accepts_only_the_current_generation_and_issued_seeks():
     assert feed.sender["position"] == 40000.0
 
 
+def test_sender_status_keeps_only_the_numeric_report_fields():
+    # /snapshot serves the report back: unknown keys and non-numbers are dropped.
+    d = ReplayDirectory(Knob())
+    d.set_manifest(manifest(1))
+    feed = FeedControl(d)
+    report = dict(seek_seq=1, generation=1, position=34200.5, sent=10, loops=0)
+    feed.sender_status(dict(report, note="<script>", nested={"a": 1}, sent="10"))
+    assert feed.sender == {k: v for k, v in report.items() if k != "sent"}
+
+
 def test_resume_unpauses_at_the_session_open():
     d = ReplayDirectory(Knob())
     feed = FeedControl(d)

@@ -283,6 +283,8 @@ def test_hold_gil_exists_only_with_fault_injection(monkeypatch):
     started = time.perf_counter()
     assert client.post("/debug/hold_gil", json={"seconds": 0.05}).json() == {"held_s": 0.05}
     assert time.perf_counter() - started >= 0.05
+    # usleep() takes an unsigned count: a negative request must not wrap to an hour-long hold.
+    assert client.post("/debug/hold_gil", json={"seconds": -1}).json() == {"held_s": 0.0}
 
 
 # ---- serve(): the run loop behind uvicorn (sdk) ---------------------------------------------

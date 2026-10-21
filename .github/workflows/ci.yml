@@ -13,9 +13,12 @@ name: CI
 
 on:
   push:
-    branches: [master, "bh/**"]
+    branches: [main]
   pull_request:
-    branches: [master, "bh/**"]
+    branches: [main]
+
+permissions:
+  contents: read
 
 env:
   HOLOSCAN_IMAGE: nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13
@@ -28,7 +31,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -r requirements-cli.txt pre-commit
+      - run: python -m pip install -r requirements-cli.txt -c requirements-dev.txt pre-commit
       - run: pre-commit run --show-diff-on-failure --all-files
 
   discover:
@@ -56,7 +59,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: >-
-          python -m pip install -r requirements-cli.txt numpy scipy threadpoolctl fastapi uvicorn
+          python -m pip install -r requirements-cli.txt -c requirements-dev.txt numpy scipy threadpoolctl fastapi uvicorn
           anyio httpx duckdb pyarrow pytest pytest-timeout
       - run: python -m pytest -m "not sdk and not gpu and not daqiri"
         env:
@@ -89,7 +92,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install build "setuptools>=77"
+      - run: python -m pip install -c requirements-dev.txt build setuptools
       - run: python -m build --wheel -o dist
       - name: Install into a fresh venv and import from outside the checkout
         run: |
@@ -110,6 +113,10 @@ jobs:
           path: dist/*.whl
 
   gpu:
+    # Requires a self-hosted GPU runner; define the repository variable ENABLE_GPU_CI=true after
+    # provisioning one. Push only (after merge), never pull_request: untrusted PR code must not
+    # execute on persistent self-hosted GPU runners.
+    if: ${{ github.event_name == 'push' && vars.ENABLE_GPU_CI == 'true' }}
     runs-on: [self-hosted, linux, gpu]
     env:
       IMAGE: holoscan-finance-ci:${{ github.sha }}

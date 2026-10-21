@@ -126,9 +126,10 @@ def serve(a):
 
         def do_POST(self):
             try:
-                body = json.loads(
-                    self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}"
-                )
+                size = int(self.headers.get("Content-Length", 0))
+                if not 0 <= size <= 4096:  # bodies are {"pps": N}; never read an unbounded one
+                    raise ValueError("request body too large")
+                body = json.loads(self.rfile.read(size) or b"{}")
                 if self.path == "/start":
                     self._reply(200, ctl.start(int(body["pps"])))
                 elif self.path == "/stop":

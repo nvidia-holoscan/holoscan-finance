@@ -43,9 +43,12 @@ With the Holoscan CLI (`holoscan run equity_analytics <mode>`), on any GPU host:
 | `smoke` | CI: a small synthetic day, unpaced and headless; exits non-zero if the run fails, no window is analyzed or a comparison disagrees |
 | `plan` | compiles and checks the plan rules only, and writes `equity_analytics.plan.json` |
 
-`holoscan run` starts the container on the host network and the dashboard modes serve on
-`--host 0.0.0.0`, so after `holoscan run equity_analytics replay` open
-<http://localhost:8080/>. Inside the dev container (`holoscan run-container`), add
+`holoscan run` starts the container on the host network and the dashboard serves on the
+default `--host 127.0.0.1`, so after `holoscan run equity_analytics replay` open
+<http://localhost:8080/> on that host, or from another machine through an SSH tunnel
+(`ssh -N -L 8080:127.0.0.1:8080 <host>`). The dashboard has no authentication and its `POST`
+endpoints control the run: pass `--run-args "--host 0.0.0.0"` only on a trusted, isolated
+network ([SECURITY.md](../../SECURITY.md)). Inside the dev container (`holoscan run-container`), add
 `--local`. `GET /plan` returns the compiled lanes, edges and clocks, and `/snapshot`
 carries them as `engine`.
 

@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .directory import ReplayDirectory
 
+# What the replay sender reports on /feedstatus (tools.replay_sender).
+SENDER_STATUS_KEYS = ("seek_seq", "generation", "position", "sent", "loops")
+
 
 class FeedControl:
     """The replay sender's pace, pause and seek cursor, and its last status report."""
@@ -57,7 +60,12 @@ class FeedControl:
                 and type(payload.get("seek_seq")) is int
                 and 0 <= payload["seek_seq"] <= self._control["seek_seq"]
             ):
-                self.sender = payload
+                # Only the sender's report fields, numbers only: /snapshot serves this back.
+                self.sender = {
+                    k: v
+                    for k, v in payload.items()
+                    if k in SENDER_STATUS_KEYS and type(v) in (int, float)
+                }
         return {"status": "received"}
 
     def resume(self) -> dict:

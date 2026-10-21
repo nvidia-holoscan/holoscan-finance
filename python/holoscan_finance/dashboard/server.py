@@ -118,7 +118,8 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
         async def hold_gil(payload: dict):
             """Fault injection: hold the interpreter lock for ``seconds``, as a Python thread
             blocked in the kernel does (the full-day stalls). ctypes.PyDLL keeps the GIL."""
-            seconds = min(float(payload.get("seconds", 1.0)), 10.0)
+            # Clamped both ways: usleep() takes an unsigned count, so a negative value would wrap.
+            seconds = min(max(float(payload.get("seconds", 1.0)), 0.0), 10.0)
             await anyio.to_thread.run_sync(ctypes.PyDLL(None).usleep, int(seconds * 1e6))
             return {"held_s": seconds}
 

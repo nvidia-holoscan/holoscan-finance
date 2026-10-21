@@ -45,28 +45,28 @@
       "replay": {
         "description": "The full GPU chain on any GPU host, no NIC: a synthetic day replayed from GPU memory, looping, each pass a new generation; dashboard on port 8080",
         "run": {
-          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth --symbols 1000 --packets 400000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth/day.pcap --tape <holohub_data_dir>/synth/tape --replay-pps 2000 --replay-loops 0 --analytics-backend compare --host 0.0.0.0\"",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth --symbols 1000 --packets 400000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth/day.pcap --tape <holohub_data_dir>/synth/tape --replay-pps 2000 --replay-loops 0 --analytics-backend compare\"",
           "workdir": "holohub_bin"
         }
       },
       "replay_pcap": {
         "description": "A recorded NYQ day (nyq/day.pcap and its prepared tape nyq/tape in the data directory) replayed from GPU memory at 200,000 packets/s",
         "run": {
-          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --replay-pps 200000 --analytics-backend compare --host 0.0.0.0",
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --replay-pps 200000 --analytics-backend compare",
           "workdir": "holohub_bin"
         }
       },
       "udp": {
         "description": "Kernel UDP ingest, GPU risk with a CPU cross-check; start python3 -m holoscan_finance.tools.replay_sender separately",
         "run": {
-          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend compare --host 0.0.0.0",
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend compare",
           "workdir": "holohub_bin"
         }
       },
       "udp_cpu": {
         "description": "Kernel UDP ingest with CPU analytics only (the CPU baseline)",
         "run": {
-          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend cpu --host 0.0.0.0",
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend cpu",
           "workdir": "holohub_bin"
         }
       },

@@ -63,6 +63,9 @@ class FullDayController:
         reply (up to 60 s), so HTTP calls it from a worker thread."""
         if not self.replay_control:
             raise ValueError("no replay controller configured (--replay-control)")
+        # The controller's own range, checked here so a bad request never pauses the feed.
+        if type(pps) is not int or not 1 <= pps <= 250_000:
+            raise ValueError("pps must be an integer in 1..250000")
         with self._lock:
             if self._fullday and self._fullday["status"] in ("starting", "running"):
                 raise ValueError("a full-day replay is already running")

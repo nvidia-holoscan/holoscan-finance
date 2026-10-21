@@ -105,6 +105,14 @@ def test_without_a_controller_nothing_can_start():
         fd.start(200_000)
 
 
+@pytest.mark.parametrize("pps", [0, -1, 250_001, 2.0e5, "200000", True])
+def test_a_bad_rate_is_refused_before_the_sender_pauses(controller, pps):
+    c = controller
+    with pytest.raises(ValueError, match="pps"):
+        c.fd.start(pps)
+    assert not c.feed.control()["paused"] and c.requests == [] and c.fd.status() is None
+
+
 def test_start_pauses_the_sender_and_asks_the_controller(controller):
     c = controller
     f = c.fd.start(200_000)

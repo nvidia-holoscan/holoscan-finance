@@ -37,9 +37,13 @@ loopback() {
 snap() { curl -s --max-time 10 "$U/snapshot" | python3 -c "
 import json,sys; d=json.load(sys.stdin); n=d['network']; l=d.get('live') or {}
 print(n['packets'],n['decoded_messages'],n['sequence_gaps'],n['ring_dropped'],n['stale_packets'],n['malformed_packets'],l.get('receive_to_result_ms') or 0)"; }
+# Host sysctls the udp mode changes (receive buffer, local delivery and reverse-path filter for
+# frames returning through the PHY loopback).
+SYSCTLS=(net.core.rmem_max "net.ipv4.conf.$NIC.accept_local" "net.ipv4.conf.$NIC.rp_filter" net.ipv4.conf.all.rp_filter)
+saved=()
 cleanup() {
     docker logs receiver-bench > "$work/receiver.log" 2>&1 || true; docker rm -f receiver-bench >/dev/null 2>&1 || true
-    root sysctl -q -w net.core.rmem_max=212992 "net.ipv4.conf.$NIC.accept_local=0" "net.ipv4.conf.$NIC.rp_filter=2" "net.ipv4.conf.all.rp_filter=2" || true
+    if ((${#saved[@]})); then root sysctl -q -w "${saved[@]}" || true; fi   # the values found at start
     echo "logs: $work"
 }
 trap cleanup EXIT
@@ -59,7 +63,12 @@ for mode in $MODES; do
         --host 127.0.0.1 --port 8080 --udp-port 26400 --analytics-backend "$BACKEND" "${extra[@]}" >/dev/null
     for _ in $(seq 120); do curl -s --max-time 2 -o /dev/null "$U/feedrate" && break; sleep 2; done
     sleep 10; loopback; sleep 3
-    [[ "$mode" == udp ]] && root sysctl -q -w net.core.rmem_max=268435456 "net.ipv4.conf.$NIC.accept_local=1" "net.ipv4.conf.$NIC.rp_filter=0" "net.ipv4.conf.all.rp_filter=0"
+    if [[ "$mode" == udp ]]; then
+        if ((${#saved[@]} == 0)); then   # record before the first change; cleanup restores these
+            for k in "${SYSCTLS[@]}"; do saved+=("$k=$(root sysctl -n "$k")"); done
+        fi
+        root sysctl -q -w net.core.rmem_max=268435456 "net.ipv4.conf.$NIC.accept_local=1" "net.ipv4.conf.$NIC.rp_filter=0" "net.ipv4.conf.all.rp_filter=0"
+    fi
     for rate in $RATES; do
         PORTN=$((PORTN + 1)); n=$((rate * DUR)); ((n > total)) && n=$total
         tcpdump -r "$BASE_PCAP" -c "$n" -w "$work/cut.pcap" 2>/dev/null
