@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Slow analytics skip windows without ever blocking the bars (port of 4.3
-``test_slow_risk_skips_windows_without_blocking_bars``).
+"""Slow analytics skip windows without ever blocking the bars.
 
 The real ``QuoteBarsOp(cpu)`` in lane ``ingest`` closes one bar per batch and feeds a 30 ms
 clocked consumer in lane ``analytics`` over the production ``LATEST`` edge. The bars must

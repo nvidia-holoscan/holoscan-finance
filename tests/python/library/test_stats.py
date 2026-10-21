@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Stats objects: ``IngestStats`` buckets, ring views, readiness and the drained predicate;
-the stall helpers (from 4.3 ``GpuMitchSourceOp``); ``BarsStats`` and ``RiskStats``."""
+the stall helpers; ``BarsStats`` and ``RiskStats``."""
 
 from __future__ import annotations
 

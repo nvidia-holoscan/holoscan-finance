@@ -6,8 +6,8 @@ Ports: ``risk`` (in, validated ``RiskUpdate`` with ``rows_host``) -> ``compariso
 ``RiskComparison``). Edges: in, ``lossless(2)`` from ``RollingRiskOp.validate`` (another
 lane; the gate keeps one in flight); out, ``lossless(2)`` to the ``CallbackSinkOp`` that
 publishes comparisons and releases the gate, same lane. Lane: the entry of ``crosscheck``.
-It polls every ``poll_period_us`` (5 ms, 4.3 ``PublishOp``) for the spawned ``cpu_window``
-worker. Processor: ``analytics.crosscheck.CpuCrossCheck``.
+It polls every ``poll_period_us`` (5 ms) for the spawned ``cpu_window`` worker. Processor:
+``analytics.crosscheck.CpuCrossCheck``.
 """
 
 from __future__ import annotations

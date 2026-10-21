@@ -312,7 +312,7 @@ def replayed_ports(frames: PcapFrames, sender_port: int | None, loops: int) -> l
 
 
 def test_a_loop_re_sources_only_the_feed_frames(tmp_path):
-    """4.3 ``tcprewrite --portmap feed:new``: another sender's frames keep their port, so
+    """Like ``tcprewrite --portmap feed:new``: another sender's frames keep their port, so
     they stay stale in every pass instead of joining the feed's session from pass 1."""
     frames = mixed_capture(tmp_path, payloads(40), payloads(5, seed=9))
     ports = replayed_ports(frames, None, loops=2)  # the feed: the most common port

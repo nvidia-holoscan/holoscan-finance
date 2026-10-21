@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """HTTP for the dashboard and the replay tools, and the uvicorn run loop.
 
-``make_app`` keeps the 4.3 endpoints, bodies and 422 mapping (``ValueError``,
-``TypeError``, ``KeyError``) and adds ``GET /plan`` and ``GET /healthz``. Handlers are
+``make_app`` serves the dashboard endpoints, bodies and 422 mapping (``ValueError``,
+``TypeError``, ``KeyError``), including ``GET /plan`` and ``GET /healthz``. Handlers are
 ``async def`` (no thread-pool hop per request: measured sub-ms tails under load); only the
 blocking full-day start and the GIL fault injection go to worker threads. ``serve`` is
 pattern B: uvicorn owns the main thread and SIGINT, the FastAPI lifespan owns the
 ``RunSession`` (stopped in about 1 ms on shutdown, but waited for without a bound, so the
 report and exit code always see a stopped graph). The port is bound before the graph
-starts, and uvicorn's own exit statuses never leak. From 4.3 ``web_app`` and ``main``.
+starts, and uvicorn's own exit statuses never leak.
 FastAPI is imported here so the pure-tier HTTP tests can use ``make_app``; Holoscan only
 inside ``serve``.
 """
@@ -53,7 +53,7 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
     ``lifespan`` (used by ``serve``) owns the graph session."""
     app = FastAPI(title="NYQ equity price, volatility and correlation", lifespan=lifespan)
     # Handlers carry no return annotation: one would make FastAPI validate every snapshot
-    # against a response model instead of 4.3's plain JSON encoding.
+    # against a response model instead of plain JSON encoding.
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
@@ -169,7 +169,7 @@ def serve(
                 ctx.status.from_session(session)
                 if not session.is_running:
                     # It ended by itself (failed, or completed). Without --exit-when-drained
-                    # the dashboard stays up to show why, as 4.3's did.
+                    # the dashboard stays up to show why.
                     ctx.stop_reason = ctx.stop_reason or "terminated"
                     if exit_when_drained:
                         server.should_exit = True

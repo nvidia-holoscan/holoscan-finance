@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""GPU MITCH decode of one staged device slot buffer (was 4.3 ``EquityState.decode_gpu``).
+"""GPU MITCH decode of one staged device slot buffer.
 
 Packets from a sender port other than the directory's are stale and never reach pass 2;
 accepted packets of one call become one ``GpuReplayBatch`` whose columns stay on the GPU.
 Both GPU sources own one decoder each (through ``ingest.gpu_ingest.GpuIngest``), which reads
-the directory immediately before decoding, as 4.3 did. ``PacketView`` is the per-packet
-record a latency capture counts (4.3 ``_PacketView``).
+the directory immediately before decoding. ``PacketView`` is the per-packet record a
+latency capture counts.
 """
 
 from __future__ import annotations

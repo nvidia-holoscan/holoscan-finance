@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """``CovarianceEngine`` on the CPU against an independent NumPy oracle, settling to zero
-eligibility, and the cached GPU name (from 4.3 ``test_equities``; the ``gpu`` param of the
-oracle test is ``gpu/test_gpu_covariance.py``)."""
+eligibility, and the cached GPU name (the ``gpu`` param of the oracle test is
+``gpu/test_gpu_covariance.py``)."""
 
 from __future__ import annotations
 

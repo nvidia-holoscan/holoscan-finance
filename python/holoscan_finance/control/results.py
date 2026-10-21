@@ -5,10 +5,10 @@
 ``CallbackSinkOp`` hands each ``RiskUpdate`` to ``on_risk`` (analytics lane) and each
 ``RiskComparison`` to ``on_comparison`` (crosscheck lane), which releases the cross-check
 gate only after the comparison is published, so every validated GPU result has its CPU
-pair. Publication is on the risk lane right after compute (4.3 polled every 5 ms), and
-``receive_to_result_ms`` keeps 4.3's formula. ``lock`` covers dict building only; the
-generation filter reads the directory's knob, never its lock (the lock order in docs/ARCHITECTURE.md). The
-formatting is 4.3 ``EquityState.publish_gpu`` and ``publish_comparison``, verbatim.
+pair. Publication is on the risk lane right after compute, and ``receive_to_result_ms``
+is the publication wall time minus the receive stamp of the packet that closed the newest
+bar. ``lock`` covers dict building only; the generation filter reads the directory's knob,
+never its lock (the lock order in docs/ARCHITECTURE.md).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Keys of a comparison failure's per-backend detail (4.3 publish_comparison).
+# Keys of a comparison failure's per-backend detail.
 _FAILURE_KEYS = (
     "method",
     "added_bars",
@@ -201,7 +201,7 @@ class ResultsStore:
             self.error = "CPU/GPU comparison failed; inspect /snapshot before using timings"
 
     def _fail(self, msg: str) -> None:
-        # 4.3 disabled its publisher on the first exception.
+        # Publication stops at the first exception.
         logger.error("%s", msg)
         with self.lock:
             self.error = msg
@@ -243,7 +243,7 @@ class ResultsStore:
 
 
 def _work(update: RiskUpdate) -> dict:
-    """The 4.3 work dict ``LatencyCapture`` records from. ``rows`` was materialized (and
+    """The work dict ``LatencyCapture`` records from. ``rows`` was materialized (and
     cached on the window) by the risk operator, so this costs no GPU work."""
     w = update.window
     work = dict(rows=w.rows, times=w.times, generation=w.generation, recv_ns=w.recv_ns)

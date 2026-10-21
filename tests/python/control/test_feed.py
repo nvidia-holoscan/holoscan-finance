@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""FeedControl: the 4.3 sender pacing rules (/feedrate, /feedstatus, /replay/resume)."""
+"""FeedControl: the sender pacing rules (/feedrate, /feedstatus, /replay/resume)."""
 
 from __future__ import annotations
 

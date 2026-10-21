@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Host packet-sequence rules in front of ``QuoteBars``: the one host copy of 4.3
-``EquityState.observe`` (it also replaces ``gpu_validate._observe_host``).
+"""Host packet-sequence rules in front of ``QuoteBars``: the one host copy (used by the bars
+processor, ``gpu_validate`` and ``HostReference``).
 
 Per generation, a packet whose sequence is below the expected one is stale and skipped,
 and a gap flushes the pending packets and resets the marks, so no bar return spans
@@ -33,7 +33,7 @@ class SequenceTracker:
         self.stale_packets = self.sequence_gaps = 0
 
     def observe(self, bars: QuoteBars, batches: list[ReplayBatch]) -> None:
-        """Feed ``batches`` (one per packet) to ``bars`` under the 4.3 stale and gap rules."""
+        """Feed ``batches`` (one per packet) to ``bars`` under the stale and gap rules."""
         pending: list[ReplayBatch] = []
         for batch in batches:
             if batch.generation != self.generation or batch.sequence < self.expected:

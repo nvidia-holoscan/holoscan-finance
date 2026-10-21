@@ -10,8 +10,7 @@ input edge from inside the lane, and may have more from other lanes. Two entries
 once anything is partitioned automatically (``graphs/test_lane_rule.py``). Every operator
 goes into a lane, so nothing is partitioned automatically. ``ingest`` runs on
 ``CpuSets.ingest`` (busy-polled only with ``--ingest-busy-poll``), every other lane on
-``CpuSets.helper``, so no lane runs on a DAQIRI lcore (4.3 ``_isolate_cores`` and
-``MultiThreadScheduler`` workers).
+``CpuSets.helper``, so no lane runs on a DAQIRI lcore.
 """
 
 from __future__ import annotations

@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Ethernet II / IPv4 / UDP framing and pcap files, on the host.
 
-``strip_udp_datagram`` is the host strip path (verbatim from 4.3 ``marketdata.daqiri``); the
-``gather_frame`` kernel applies the same checks on the GPU. ``udp_frame`` and
-``write_pcap`` build synthetic captures, and ``PcapFrames`` holds a capture as one
-contiguous buffer, as the NIC-free replay source uploads it to the GPU (was
-``gpu_validate.read_pcap``). Source-port offsets are IHL-aware, unlike 4.3
-``bench_replay``.
+``strip_udp_datagram`` is the host strip path; the ``gather_frame`` kernel applies the same
+checks on the GPU. ``udp_frame`` and ``write_pcap`` build synthetic captures, and
+``PcapFrames`` holds a capture as one contiguous buffer, as the NIC-free replay source
+uploads it to the GPU. Source-port offsets are IHL-aware, so frames with IP options parse
+correctly.
 """
 
 from __future__ import annotations

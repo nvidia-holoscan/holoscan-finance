@@ -91,7 +91,7 @@ def test_dashboard_contract_while_replaying(tmp_path):
             plan = client.get("/plan").json()
             assert {lane["name"] for lane in plan["lanes"]} >= {"ingest", "analytics", "crosscheck"}
 
-            # The tools' calls: re-posting the current generation is a no-op (4.3 rule).
+            # The tools' calls: re-posting the current generation is a no-op.
             def registered():
                 x = snapshot()
                 return x if x and x["generation"] else None
@@ -118,7 +118,7 @@ def test_dashboard_contract_while_replaying(tmp_path):
 
             s = wait_until(full_window, timeout=120)
             assert s is not None, "no full return window was analyzed"
-            assert s["network"]["ingest"] == "replay" and s["network"]["ingest_mode"] == "replay"
+            assert s["network"]["ingest"] == "replay"
             assert s["engine"]["lanes"] and s["engine"]["termination"] == "RUNNING"
             assert s["error"] is None and s["observations"]["events"] > 0
             status = client.post("/capture", json={"seconds": 1}).json()

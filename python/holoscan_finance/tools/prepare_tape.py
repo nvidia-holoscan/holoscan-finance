@@ -5,9 +5,9 @@
     python -m holoscan_finance.tools.prepare_tape --data 'DAY/*.parquet' --output TAPE
         [--memory 2GB] [--threads 2]
 
-The CLI of 4.3 ``equities.data`` (same flags) around ``nyq.tape.prepare``: a DuckDB external
-sort into ``events.bin`` plus ``manifest.json``, the format ``open_tape``, the replay sender
-and the replay source read. Needs duckdb and pyarrow; CPU only.
+The CLI around ``nyq.tape.prepare``: a DuckDB external sort into ``events.bin`` plus
+``manifest.json``, the format ``open_tape``, the replay sender and the replay source read.
+Needs duckdb and pyarrow; CPU only.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
-    # prepare() reports its progress as log records (4.3 printed them).
+    # prepare() reports its progress as log records.
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     prepare(a.data, a.output, memory=a.memory, threads=a.threads)
     return 0

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Receiver image for the Thor launchers (igx_ano_run.sh, gpu_ingest_bench/sweep.sh): Holoscan
+# Receiver image for the Thor launchers (igx_run.sh, gpu_ingest_bench/sweep.sh): Holoscan
 # SDK 5.0, NVIDIA DAQIRI (DPDK engine + Python binding) built from source with the Thor
 # steering patch, and the app dependencies. Build from the repository root:
 #   docker build -f deploy/igx_thor/Dockerfile -t holoscan-finance:hsdk5-daqiri .
@@ -13,7 +13,7 @@
 # Holoscan; it shares glibc, CPython 3.12 and CUDA 13 with the base image.
 
 ARG HOLOSCAN_IMAGE=nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13
-# DOCA apt repo for rdma-core: 3.3.0 gives 2601.0.7, the userspace validated on Thor with 4.3;
+# DOCA apt repo for rdma-core: 3.3.0 gives 2601.0.7, the userspace validated on Thor;
 # 3.2.1 gives 2510.0.11 (Thor's DOCA-OFED 25.10). The base image ships 59.1.
 ARG DOCA_VERSION=3.3.0
 

@@ -6,8 +6,7 @@ Markers (``pyproject.toml``): ``sdk`` skips unless ``import holoscan`` works, ``
 CuPy sees a CUDA device, ``daqiri`` unless ``import daqiri`` works. ``slow`` and ``timing``
 are never skipped here; commands deselect them with ``-m``. A test module that cannot even be
 imported because its tier's dependency is missing is skipped as well, so the pure tier can
-collect every module. The 4.3 conftest installed a 4.x ``holoscan`` stub and edited
-``holoscan.__path__``; in the 5.0 image that hid the real SDK, so neither exists any more.
+collect every module. There is no ``holoscan`` stub: it would shadow the installed SDK.
 Shared test doubles live in ``fakes/``, not in fixtures.
 """
 

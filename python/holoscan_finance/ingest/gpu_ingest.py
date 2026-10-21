@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuIngest``: the processor of both GPU sources (the 4.3 ``GpuMitchSourceOp`` body).
+"""``GpuIngest``: the processor of both GPU sources.
 
 Per burst it accounts the 7-column receive header (``ReceiveAccounting.observe_burst``) and
 admits the accepted rows into a queue of ``ring_size`` packets. Per batch it stages up to
@@ -9,7 +9,8 @@ decodes MITCH on the GPU under the directory read just before, synchronizes the 
 stream and only then releases the ring rows to the drain: decode is the single consumer of
 each lease, in FIFO order. No payload byte reaches the host. Records drains (native,
 replay) are pulled from the source's lane; the Python drain pushes bursts from its thread.
-GPU_INGEST: lossless at 200k packets/s (6.6M msgs/s) with 131072-message batches.
+Sized for 200k packets/s (6.6M msgs/s) with 131072-message batches (the paced NIC-free
+gate, docs/VALIDATION.md).
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ class GpuIngest:
         start: int | None = None,
         end: int | None = None,
     ) -> None:
-        """Account one burst and queue its accepted rows for decode (4.3 ``_account``).
+        """Account one burst and queue its accepted rows for decode.
 
         Rows beyond ``ring_size`` queued packets are counted as ``ring_dropped`` messages
         (their sequences were consumed at receipt). A records burst with nothing kept is
@@ -123,8 +124,8 @@ class GpuIngest:
             self._drain.release(release)
 
     def pull(self) -> None:
-        """Account every burst the records drain published since the last call (4.3
-        ``_pull_native``); every 100 ms also copy its stall and replay statistics."""
+        """Account every burst the records drain published since the last call; every
+        100 ms also copy its stall and replay statistics."""
         drain, stats = self._drain, self.stats
         if drain is None:  # the Python drain accounts from its own thread
             return

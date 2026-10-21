@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The feed directory of one replay generation: symbols, sender port, market day.
 
-``validate_manifest`` applies every 4.3 ``EquityState.set_manifest`` check (verbatim) and
-resolves the market midnight, so an invalid date is rejected before the active generation
-is replaced. The result is an immutable ``FeedDirectory`` that ``ReplayDirectory``
+``validate_manifest`` applies every manifest check and resolves the market midnight, so an
+invalid date is rejected before the active generation is replaced. The result is an immutable ``FeedDirectory`` that ``ReplayDirectory``
 publishes through a ``Knob``; decode and bars read it once per activation without a lock.
 Generation ordering and sender-port reuse are the directory's checks, not this module's.
 """
@@ -39,7 +38,7 @@ class FeedDirectory:
 
 
 def validate_manifest(payload: dict) -> FeedDirectory:
-    """Every 4.3 ``set_manifest`` check plus the market day; ValueError on any failure."""
+    """Every manifest check plus the market day; ValueError on any failure."""
     if not isinstance(payload, dict):
         raise ValueError("invalid NYQ directory or generation")
     symbols = payload.get("symbols")

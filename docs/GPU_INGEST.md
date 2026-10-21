@@ -1,38 +1,37 @@
 # GPUDirect ingest: NIC → GPU memory → GPU decode → GPU quote bars
 
-`--ingest gpudirect` (4.3: `--ingest gpu`) keeps market data on the GPU from the network
-card onward. DAQIRI receives MITCH packets straight into GPU memory (GPUDirect RDMA over
-dma-buf), and CUDA kernels gather the UDP payloads, decode MITCH and maintain the
-five-second quote bars. The rolling covariance/correlation analytics then run in the
-receiving process on the device-resident window (`RollingRiskOp`); the CPU comparator
-and the dashboard are the same as on the host paths.
+`--ingest gpudirect` keeps market data on the GPU from the network card onward. DAQIRI
+receives MITCH packets straight into GPU memory (GPUDirect RDMA over dma-buf), and CUDA
+kernels gather the UDP payloads, decode MITCH and maintain the five-second quote bars. The
+rolling covariance/correlation analytics then run in the receiving process on the
+device-resident window (`RollingRiskOp`); the CPU comparator and the dashboard are the
+same as on the host paths.
 
 The front end is one flag on the same graph (`applications/equity_analytics`):
 
 ```bash
---ingest udp          # kernel UDP socket; Python decode                        (4.3: async)
---ingest daqiri-host  # DAQIRI kernel bypass into pinned host memory; Python decode (4.3: ano)
---ingest gpudirect    # DAQIRI GPUDirect into GPU memory; CUDA gather, decode and quote bars (4.3: gpu)
+--ingest udp          # kernel UDP socket; Python decode
+--ingest daqiri-host  # DAQIRI kernel bypass into pinned host memory; Python decode
+--ingest gpudirect    # DAQIRI GPUDirect into GPU memory; CUDA gather, decode and quote bars
 --ingest replay       # pcap frames staged in GPU memory, then the gpudirect chain (no NIC)
 ```
 
-The measurements in this document were made with the Holoscan SDK 4.3 version of the
-code. The 5.0 port keeps the kernels and the native drain byte for byte, and the GPU
-path's batch, burst, buffer and ring sizes; what has been re-run on 5.0 so far is in
-[Holoscan 5.0 revalidation](#holoscan-50-revalidation).
+The GPU path is sized for 200,000 packets/s (6.6M MITCH messages/s), a full trading day
+of 2.88M packets in about 14.4 s: 131,072-message batches, 4,096-packet DAQIRI bursts with
+a 20 ms partial-burst timeout, 114,688 NIC buffers, a 1,048,576-slot device ring and a
+receive drain in a native thread ([design parameters](#design-parameters)).
 
-On IGX Thor (Holoscan 4.3) the GPU path receives, decodes, bars and analyzes
-**200,000 packets/s (6.6M MITCH messages/s) in real time, with zero loss in 242 of 250 full-day runs: the
-entire recorded trading day, 92,178,039 observations, in 14.4 s, with market data never
-leaving GPU memory.**
-That is ~44× the highest rate the host-decode path (`daqiri-host`) keeps up with in
-real time (4,500 packets/s); the kernel-socket path (`udp`) already loses packets at
-4,500. Decode and bars match the CPU implementation bit for bit over the
-full recorded day (returns within 1 ULP).
+NIC-free results (2026-10-20; Holoscan SDK 5.0.0 image on IGX Thor with the RTX PRO 6000;
+a full-size synthetic day of 2,880,001 packets replayed from GPU memory through the same
+gather, ring, decode and bars code; [VALIDATION.md](VALIDATION.md)): **lossless and real
+time at 200,000 packets/s in 3 of 3 full-day runs, 62.1M MITCH messages/s median unpaced,
+and decode and bars bit-identical to the CPU implementation** (returns within 1 ULP). NIC
+results of this code are not recorded yet ([status](#status)).
 
 **Read this before attributing the gain to the GPU:** the host-decode path is limited
-by interpreted Python, and a compiled CPU decoder is ~100× faster than it on one core.
-See [Is it the GPU, or is it removing Python?](#is-it-the-gpu-or-is-it-removing-python)
+by interpreted Python, and a compiled CPU decoder is ~130× faster than it on one core
+(36.1M vs 0.27M messages/s, `decode_bench`, 2026-10-20). See
+[Is it the GPU, or is it removing Python?](#is-it-the-gpu-or-is-it-removing-python)
 
 ## Data path
 
@@ -60,8 +59,7 @@ flowchart LR
 Receive, bars and analytics are the operators `GpuMitchSourceOp` →
 `QuoteBarsOp(backend="gpu")` → `RollingRiskOp` ([operators](../operators/README.md)); the
 application adds the MITCH-to-NYQ directory, the dashboard and the CPU cross-check
-(`RiskCrossCheckOp`). In 4.3 they were `GpuMitchSourceOp` → `GpuQuoteBarsOp` →
-`GpuRollingRiskOp`. Source and bars share one thread (the `ingest` lane), so the
+(`RiskCrossCheckOp`). Source and bars share one thread (the `ingest` lane), so the
 per-packet path crosses no thread boundary; see [architecture](ARCHITECTURE.md).
 
 **No market data is copied to or computed on the CPU in this mode**: packet payloads,
@@ -77,12 +75,11 @@ counters) and the dashboard's compact results. Three things made that true:
   into a preallocated device ring, copies the per-packet header to pinned host memory and
   returns the burst to the NIC, without taking the Python interpreter lock and without
   allocating. It accepts DAQIRI's own burst objects, so it is compiled against the
-  installed DAQIRI and CUDA headers into the kernel cache (~5 s once); in 5.0 it is built
-  before the NIC is initialized. If it cannot be built, a Python drain thread does the
-  same work (`HOLOSCAN_FINANCE_NATIVE_DRAIN=0` selects it;
-  `HOLOSCAN_FINANCE_NATIVE=0` disables the native helper). In 4.3 that fallback fetched a
-  burst's addresses in one call through a second helper, `daqiri_frames.cpp`; 5.0 removed
-  it, so the 5.0 fallback reads each packet through the binding.
+  installed DAQIRI and CUDA headers into the kernel cache (~5 s once); it is built before
+  the NIC is initialized. If it cannot be built, a Python drain thread does the same work
+  (`HOLOSCAN_FINANCE_NATIVE_DRAIN=0` selects it; `HOLOSCAN_FINANCE_NATIVE=0` disables the
+  native helper). The fallback reads each packet's address through the binding (one call
+  per packet).
 - **Device-resident bars.** Closed bars stay on the GPU and the window is a tuple of CuPy
   vectors, stacked only by the analytics, instead of copying each bar to the host.
 - **In-process GPU analytics.** `RollingRiskOp` runs in the receiving process and accepts
@@ -102,17 +99,18 @@ accepted, so the NIC starts last.
 
 The GPU code reproduces the host implementation it replaces, including every
 rejection rule. [`gpu_validate`](../python/holoscan_finance/tools/gpu_validate.py) replays
-a capture of the MITCH wire packets through both implementations and compares them; the
-table is its Holoscan 4.3 result on the recorded day.
+a capture of the MITCH wire packets through both implementations and compares them. The
+table is its result on a full-size synthetic day (2026-10-20, Holoscan SDK 5.0.0 image;
+[VALIDATION.md, step 2](VALIDATION.md#2-library-bit-identity-gpu-vs-host-decode-and-bars)).
 
 | Check | Scope | Result |
 | --- | --- | --- |
-| MITCH decode, recorded day | 2,880,565 packets → 92,178,039 observations | **Bit-identical**: accept/reject stage, counts, sequences and every field (floats compared as raw bits) |
-| MITCH decode, mutated packets | 240,000 packets: 62,588 accepted, 60,023 framing rejects, 117,389 decode rejects | **Identical** decisions and fields |
-| Price decoding above 2⁵³ | Sign-magnitude prices up to 2⁶³−1 | Correctly rounded, identical to Python's integer division |
-| Quote bars, recorded day | 4,680 bars, 4,196 analytics windows; 54,852,087 quotes, 37,310,311 trades, 873,332 invalid quotes | Marks, quote times, trades, volumes, counters: **bit-identical** |
-| Returns | 11,612,346 finite returns | 518 differ by **1 ULP** (CUDA `log` vs NumPy `log`); NaN pattern identical |
-| Loss handling | Every 5,000th packet dropped over 1M packets | 6,568 sequence gaps, identical recovery and state |
+| MITCH decode | 2,880,001 packets → 92,160,001 observations | **Bit-identical**: accept/reject stage, counts, sequences and every field (floats compared as raw bits) |
+| MITCH decode, mutated packets | 240,000 packets: 60,518 accepted, 60,036 framing rejects, 119,446 decode rejects | **Identical** decisions and fields |
+| Price decoding above 2⁵³ | Sign-magnitude prices up to 2⁶³−1 (`tests/python/gpu/test_gpu_decode.py`) | Correctly rounded, identical to Python's integer division |
+| Quote bars | 4,680 bars, 4,660 analytics windows | Marks, quote times, trades, volumes, the final per-symbol state and every counter: **bit-identical** |
+| Returns | 13,414,033 finite returns | 41 differ by **1 ULP** (CUDA `log` vs NumPy `log`), none by more; NaN pattern identical |
+| Loss handling | Every 5,000th packet dropped over the full day | 19,011 sequence gaps on both sides, identical recovery and state; 39 of 11,434,555 returns differ by 1 ULP |
 | Receive accounting | Gaps, reordering, duplicates, session changes, framing rejects, non-UDP frames, ring overflow | Counters identical to the host-memory sources' per-packet rules (one `ReceiveAccounting`, `tests/python/library/test_accounting.py`) |
 
 The 1-ULP return differences come from the math libraries' `log` rounding and are
@@ -134,242 +132,149 @@ holoscan run market_data_bench check                                            
 
 ## Performance
 
-IGX Thor Developer Kit (14 Arm cores), RTX PRO 6000 Blackwell Max-Q, ConnectX-7 in
-PHY local loopback, Holoscan SDK 4.3, measured 2026-09-30. The GPU is shared with
-the analytics.
+The NIC-free throughput, pacing and latency results of this code are in
+[VALIDATION.md](VALIDATION.md); this section describes how the NIC path is measured and
+why it is built the way it is.
 
-**NIC to GPU memory.** DAQIRI's own benchmark (`daqiri_bench_raw_gpudirect`, TX and
-RX buffers both in GPU memory) moved 908.9M packets in 45 s: ~20 Mpps, ~188 Gbit/s,
-with 0.003% missed during startup. This is the transport ceiling, not the
-application's.
+### NIC sweep method
 
-**Decode and bars in isolation** (warm, one batch = ~500 packets / 16k messages):
-decode 0.47 ms, bars 0.62 ms, about 15M messages/s. Over the whole recorded day,
-GPU decode alone took 0.54 s versus 84 s for the Python decoder spread over six CPU
-processes.
+The sweep ([`deploy/igx_thor/gpu_ingest_bench`](../deploy/igx_thor/gpu_ingest_bench/README.md))
+feeds the receiver a capture of the replay sender's own MITCH wire packets with `tcpreplay`
+at fixed rates, 15 s per rate, on the same host through the ConnectX-7 in PHY local
+loopback. Loss counters come from the NIC, the receiver's sequence accounting and the
+application's ring. "No loss" is checked end to end: the observations that reach the
+quote-bar stage must equal the count the CPU reference decoder produces from the same
+packets. Arrival-to-result is the dashboard's live value at the end of each run: a single
+sample, not a percentile.
 
-**First version vs host decode.** The same receiver and analytics, fed the captured day's
-real packets by `tcpreplay` at fixed rates, 15 s per rate. Loss counters come from
-the NIC, the receiver's sequence accounting and the application's ring.
-Arrival-to-result is a **single sample**: the dashboard's live value at the end of
-each run, not a percentile.
+Two definitions matter, and a sweep reports both:
 
-| Rate, packets/s (MITCH msgs/s) | `--ingest gpu` | `--ingest ano` (host decode) |
+- A path **keeps up in real time** at a rate when its backlog does not grow during the
+  run.
+- A path has **no loss in a 15 s run** when every packet is delivered, even if its backlog
+  grows.
+
+A path can lose nothing within 15 s while falling seconds behind, so it cannot sustain
+that rate; the real-time ceiling is the one that matters for a live feed.
+
+Overload is never silent. Packets beyond `ring_size` queued in the receiver are counted as
+`ring_dropped` (in messages). As in the socket and host-memory sources, their sequence
+numbers were consumed at receipt, so the analytics see them as missing
+(`analytics_sequence_gaps`) and invalidate the affected marks. When the GPUDirect drain
+finds the device ring full it holds the burst instead, so the excess shows up as NIC drops
+and sequence gaps.
+
+### Design parameters
+
+| Parameter | Value | Why |
 | --- | --- | --- |
-| 4,500 (149k) | 0 loss · 30 ms | 0 loss · 109–140 ms |
-| 6,000 (198k) | — | 0 loss · **4.3 s behind** |
-| 7,500 (248k) | — | 0 loss · **7.3 s behind** |
-| 10,000 (330k) | 0 loss · 25 ms | 442k messages dropped · 12 s behind |
-| 20,000 (661k) | 0 loss · 58 ms | 5.8M dropped · 15 s behind |
-| 50,000 (1.65M) | 0 loss · 23 ms | 21.6M dropped · 20 s behind |
-| **75,000 (2.48M)** | **0 loss · 27–64 ms** | 34.4M dropped (92%) · 23 s behind |
-| 100,000 (3.30M) | NIC: 0 lost; app sustains ~2.0–2.6M msgs/s, excess counted as ring drops | — |
-| 200,000 (6.60M) | NIC: 0 lost (all 2,880,565 packets received); excess counted as ring drops | — |
-
-"0 loss" is checked end to end: for the 4,500–7,500 (host) and 75,000 (GPU) rows, the
-observations that reached the quote-bar stage equal exactly the count the CPU
-reference decoder produces from the same packets (e.g. 36,000,000 of 36,000,000 at
-75,000 packets/s).
-
-Two definitions matter. Between 6,000 and 7,500 packets/s the host path loses
-nothing within a 15 s run, but its backlog grows by seconds, so it cannot sustain
-those rates; its first ring drops appear near 10,000. The GPU path at 75,000 shows
-no growing backlog. Comparing the highest rate each path **keeps up with in real
-time** gives ~17× (75,000 vs 4,500); comparing the highest rate with **no loss in a
-15 s run** gives at least 10× (75,000 vs 7,500). Neither ceiling is pinned exactly:
-the GPU path was not tested between 75,000 and 100,000, nor the host path between
-7,500 and 10,000.
-
-The real-time ceiling rises from ~149k to at least 2.48M messages/s. Beyond it, the
-NIC still receives every packet (no wire-level sequence gaps); the overload is
-counted when the receiver's 65,536-packet ring is full (`ring_dropped`). As in the
-socket and host-memory sources, those packets' sequence numbers are consumed at
-receipt, so the analytics then see them as missing (`analytics_sequence_gaps`) and
-invalidate the affected marks. Nothing is dropped silently. In this first version the
-remaining limit was Python-side orchestration (per-packet frame addresses, per-batch
-control flow and scheduling), which shared one interpreter lock across the receive,
-decode and bar threads; the changes below removed it.
-
-**All-GPU path (4.3).** Same method, after the three changes above, at two
-batch limits (`--batch-messages`; 131,072 is the default for `gpudirect`).
-"Observations to bars" is checked against the CPU reference decoder's count for the
-same packets.
-
-| Rate, packets/s (MITCH msgs/s) | 16,384-message batches | 131,072-message batches |
-| --- | --- | --- |
-| 75,000 (2.48M) | 0 loss · 40 ms | 0 loss · 53 ms |
-| 100,000 (3.30M) | 17.9M messages dropped (ring) | 0 loss · 66 ms |
-| 150,000 (4.95M) | 32.3M dropped | 0 loss · 48 ms |
-| **200,000 (6.60M)** | 48.2M dropped | **0 loss · 29 ms: all 92,178,039 observations of the day** |
-| sender maximum (~211k average) | — | 4.8M messages lost before the ring (receive), 135k ring drops |
-
-Larger batches are the main lever: each compute call then covers ~4,000 packets, so
-per-batch Python and kernel-launch overhead is amortized. The native frame fetch (the
-4.3 `daqiri_frames.cpp` helper, since replaced by the native drain) is what made the
-200,000 run lossless. With it disabled (131,072-message batches), 150,000 is
-still lossless (77 ms) but 200,000 loses 11,542 packets (0.4%) at the receiver, as the
-per-packet calls add ~1.9 s of drain-thread Python per 15 s. Above ~200,000 the
-`tcpreplay` sender itself (one core) can no longer hold a steady rate, so the ceiling
-there is not pinned down.
-
-**Repeatability at 200,000 (October 17, 2026).** The rows above are single runs, measured
-with 1,024-packet DAQIRI bursts (5 ms timeout), 51,200 NIC buffers and a 65,536-packet
-ring. Repeating the full day through the dashboard's full-day button showed the 200,000
-result was not reliable: roughly 1 run in 5–20 lost packets, which DAQIRI counted as
-missed, because the NIC queue ran out of buffers while the Python drain thread fell
-behind. Three causes were found:
-
-1. Each burst costs the drain several interpreter-lock round trips; with the decode, bar,
-   analytics and HTTP threads competing, each could take ~1 ms. The drain now takes
-   bursts of up to 4,096 packets with a 20 ms timeout (~50 bursts/s instead of ~200).
-2. irqbalance can place the local `tcpreplay` sender's transmit-completion interrupts on
-   the DAQIRI RX core. Forcing that lost 4–35% of a burst. The launcher bans the DAQIRI
-   cores from IRQ placement while the receiver runs.
-3. Thor's integrated GPU runtime-suspends after 0.5 s idle, and while it is suspended any
-   new CUDA memory allocation in the receiver (device or pinned) wakes it, taking
-   0.13–0.56 s with the interpreter lock held. The button idles the GPU for the ~3.4 s
-   `tcpreplay` preload, so every burst started with this stall. The launcher keeps the
-   iGPU powered while the receiver runs.
-
-The receiver also keeps 114,688 NIC buffers (~0.57 s at 200,000 packets/s; the RTX PRO
-6000's 256 MiB BAR1 window bounds this) and a 262,144-packet ring, and moves its other
-threads off the DAQIRI cores. With all of this, 242 of 250 `compare`-mode runs (October
-17–19, with the dashboard's `/snapshot` polling) delivered every packet in order; the
-first 40 ran consecutively with the longest gap between NIC bursts 0.38 s. The 4.3
-operator chain (`GpuMitchSourceOp` → `GpuQuoteBarsOp` → `GpuRollingRiskOp`) ran 50 of
-them, 47 clean. Interleaved in blocks of 10 with the previous version, which ran the
-analytics inside the application, each version had 19 of 20 clean runs and similar
-stall times.
-
-Five runs lost 1.9–4.0% of packets to receiver stalls of up to ~1.1 s, longer than the
-NIC buffers cover. One rejected 35 packets that the replay tool sent with a previous
-generation's source port. In two, one on each analytics version, every packet arrived
-but 26 and 41 arrived out of order and were discarded as stale; whether the replay tool
-or the receive path reorders them is not established. During the instrumented runs a
-5 ms host-wide heartbeat on other cores never stalled more than 23 ms, so the stalls are
-confined to the receiver.
-Sampling the receiver's thread stacks during them showed a Holoscan worker thread inside
-the kernel page allocator (`munmap` and page faults, in `rmqueue_bulk`) for hundreds of
-milliseconds; a thread blocked there still holds the interpreter lock, so the drain
-thread stops too. The host was not short of memory (no reclaim or compaction). What
-contends for the allocator is not yet established, and stopping `fwupd-refresh.timer` did
-not prevent it. Without the start stall, first-to-last arrival is 14.4 s (the earlier 14.3 s figure
-started timing after the stall).
+| Batch size | 131,072 messages (`--batch-messages`) | each compute call covers about 4,000 packets, so per-batch Python, scheduling and kernel-launch overhead is amortized; sources never wait to fill a batch |
+| DAQIRI bursts | up to 4,096 packets, 20 ms partial-burst timeout | few, large bursts (about 50/s at 200,000 packets/s) keep the drain's fixed per-burst cost low; the timeout bounds the wait at rates that do not fill a burst |
+| NIC buffers | 114,688 in GPU memory (`--nic-num-bufs`) | about 0.57 s at 200,000 packets/s; the RTX PRO 6000's 256 MiB BAR1 window bounds the count |
+| Device ring | 1,048,576 slots of 2 KiB (`--ring-size`) | about 5 s at 200,000 packets/s: a consumer stall is absorbed while the native drain keeps recycling NIC buffers |
+| DAQIRI cores | lcores 3 and 9, banned from IRQ placement while the receiver runs | irqbalance can place the local `tcpreplay` sender's transmit-completion interrupts on the DAQIRI RX core, which costs received packets |
+| Other threads | lanes, drains and helpers placed off the DAQIRI cores; `isolate_cores` sweeps the rest after `daqiri_init` | nothing competes with the DPDK lcores |
+| Thor iGPU | kept powered by the launcher while the receiver runs (`INGEST=gpudirect`) | the iGPU runtime-suspends when idle, and the first new CUDA allocation in the receiver then blocks every CUDA call of the process for about 130 ms ([VALIDATION.md](VALIDATION.md#anomalies-and-findings)) |
 
 ### Native drain
 
-**October 20, 2026 (Holoscan 4.3).** The lossy runs above match a Python thread stalling with the
-interpreter lock held. Holding the lock for 1.1 s four seconds into a burst
-(`POST /debug/hold_gil`, enabled by `HOLOSCAN_FINANCE_FAULTS=1`) lost ~3.8% of the
-packets in 3 of 3 runs with the Python drain, with DAQIRI reporting `Rx: Dropped`. The
-drain now runs in a C++ thread that never takes the lock and gathers each burst into a
-1,048,576-slot device ring (~5 s at 200,000 packets/s); see the
-[operator](../operators/gpu_mitch_source_op/README.md). With it, 8 of 9 runs with a 1.1 s
-hold and 3 of 3 with a 3 s hold delivered every packet; the ring peaked at ~232,000 and
-~620,000 packets. In 20 normal runs per drain, interleaved in blocks of 10, both drains
-delivered every packet in all 20, which at a ~2% loss rate cannot tell them apart.
-The Python drain in this A/B used the 4.3 `burst_frames` helper; on 5.0 the same switch
-compares the native drain with a per-packet Python drain, a weaker baseline.
+The receive drain is a C++ thread,
+[daqiri_drain.cpp](../python/holoscan_finance/ingest/native/daqiri_drain.cpp), that never
+takes the Python interpreter lock. A Python thread that stalls while holding the lock (a
+thread blocked in the kernel still holds it) therefore cannot stop NIC buffers from being
+recycled: the drain keeps gathering bursts into the 1,048,576-slot device ring (about 5 s
+at 200,000 packets/s), and `compute()` catches up after the stall. The Python drain
+(`HOLOSCAN_FINANCE_NATIVE_DRAIN=0`, or `native_drain=False` on the operator) needs the lock
+for every burst and reads each packet's address through the binding, so a stall longer
+than the NIC buffers cover (about 0.57 s) costs packets; see the
+[operator](../operators/gpu_mitch_source_op/README.md).
 
-The ninth 1.1 s run lost 36,607 packets (1.3%) at the NIC, so the drain thread itself was
-paused for longer than the NIC buffers cover. A second stall mode can do that: in one
-normal run the drain thread went 324 ms without polling the NIC, during a 415 ms
-process-wide stall, in code that makes no Python or CUDA calls. Other stalls of up to
-434 ms left it polling every 2–3 ms. What pauses the whole process is not yet
-established. Of 89 stalls over 100 ms recorded in the October 19–20 series, 48 began
-within 2 s of a burst's first packet, when the replay sender on the same host has just
-loaded the 3.5 GB capture and the receiver has reset for the new generation; whether the
-sender contributes is not established either.
+Fault injection checks this on the NIC. Start the receiver with
+`HOLOSCAN_FINANCE_FAULTS=1`, which enables `POST /debug/hold_gil` with
+`{"seconds": s}`: a server thread holds the interpreter lock for `s` seconds (at most 10).
+During a full-day burst at 200,000 packets/s, hold it for 1.1 s (longer than the NIC
+buffers cover) and for 3 s, a few seconds after the first packet, with each drain in turn,
+and compare DAQIRI's `Rx: Dropped`, the sequence gaps and the ring peak (`ring_peak()`).
+Interleave the runs of the two drains in blocks so that host conditions affect both
+alike. Results for this code are not recorded yet ([status](#status)).
 
 ## Is it the GPU, or is it removing Python?
 
 To separate the two, a third decoder compiles the same algorithm for the CPU with
-numba ([cpu_mitch.py](../python/holoscan_finance/tools/cpu_mitch.py)). It is bit-identical
-to the Python reference over the full recorded day (92,178,039 observations) and the
-240,000 mutated packets. The benchmark
+numba ([cpu_mitch.py](../python/holoscan_finance/tools/cpu_mitch.py)).
+`gpu_validate --decoder cpu` checks it bit for bit against the Python reference, including
+the mutated packets. The benchmark
 ([decode_bench.py](../python/holoscan_finance/tools/decode_bench.py)) feeds all three
 decoders the same 200,000 captured packets (6.6M MITCH messages), starting from where
 each receive path leaves the packets and staged in groups of ≥16,384 messages as the
 live sources do. Compilation is excluded; GPU timing includes the per-packet header
-copy back and a synchronize. IGX Thor, Holoscan 4.3 image, demo stopped, other host load
-present.
+copy back and a synchronize.
 
-| Decoder | Decode, M msgs/s | Decode + quote bars, M msgs/s |
-| --- | --- | --- |
-| Python (current host path), 1 core | 0.28 | 0.25 |
-| Compiled CPU (numba), 1 core | **27.0** | 4.8 |
-| Compiled CPU, 4 cores | 78.0 | 4.8 |
-| Compiled CPU, 8 cores | 124.7 | 5.1 |
-| Compiled CPU, 12 cores | 132.1 | 5.1 |
-| GPU (RTX PRO 6000 Max-Q) | 43.5 | **17.7** |
+Results on 2026-10-20 (Holoscan SDK 5.0.0 image through `scripts/dev5.sh` on IGX Thor,
+RTX PRO 6000; the first 200,000 packets of the full-size synthetic day, 6,601,587 messages;
+`--threads 1,4,8,12`; one run each; [VALIDATION.md, step 3](VALIDATION.md#3-offline-kernels-timing-pass)),
+in M messages/s:
 
-With larger groups (≥131,072 messages) the GPU decoder reaches 303M messages/s
-(compiled CPU, 8 cores: 104M) and GPU decode + bars 76M (CPU: 5.3M). The CPU
-"decode + bars" column is limited by the existing NumPy quote bars, which are
-single-threaded; a compiled CPU bars stage was not written.
+| Decoder | Decode, 16k groups | Decode + bars, 16k | Decode, 131k groups | Decode + bars, 131k |
+| --- | --- | --- | --- | --- |
+| Python (the host path), 1 core | 0.27 | 0.25 | 0.27 | 0.24 |
+| Compiled CPU (numba), 1 thread | **36.1** | 5.8 | 33.7 | 5.7 |
+| Compiled CPU, 4 threads | 94.0 | 5.6 | 103.5 | 6.0 |
+| Compiled CPU, 8 threads | 140.1 | 5.9 | 151.4 | 6.3 |
+| Compiled CPU, 12 threads | 26.7 | 5.7 | 97.8 | 6.2 |
+| GPU (RTX PRO 6000 Max-Q) | 43.1 | **17.6** | **306.1** | **66.4** |
+
+The numba multi-thread rows are noisy (timed steps of 40-250 ms): the 12-thread 16k figure
+was 26.7, 49.0 and 38.1M messages/s in three runs. The other rows are stable. The CPU
+"decode + bars" columns are limited by the NumPy quote bars, which are single-threaded; a
+compiled CPU bars stage was not written. `decode_bench` times one pass per process, so its
+GPU decode + bars figure includes a one-time first-pass cost; the applications pay it in
+the operators' `start()` warm-up, before data.
 
 What this shows:
 
-- **Removing Python is the dominant effect.** Compiled decoding is ~100× faster than
+- **Removing Python is the dominant effect.** Compiled decoding is ~130× faster than
   the Python decoder on one core.
-- **At the live batch size the GPU decoder is not faster than the CPU.** It is ~1.6×
-  one core and slower than four.
-- **In the first version, the live ceiling was set by neither decoder.** It topped
-  out at ~2.5M messages/s, far below every decode stage here, because of Python
-  orchestration (per-packet frame addresses, scheduling, per-batch control flow).
-  Larger batches and the native frame fetch lifted it to ≥6.6M (above).
-- **The GPU's own advantage is throughput at scale:** large batches, and bars that do
-  not depend on single-threaded NumPy.
+- **At the live 16k batch size the GPU decoder is barely faster than the CPU.** It is
+  about 1.2× one numba thread and slower than four.
+- **The GPU's own advantage is throughput at scale and the bars.** At 131k-message groups
+  GPU decode reaches 306.1M messages/s against 151.4M for eight numba threads, and GPU
+  decode + bars 66.4M against at most 6.3M for compiled CPU decode with NumPy bars.
 
-For the first version (75,000 packets/s, ~2.5M messages/s) it was therefore not
-established that a GPU was needed at all. The all-GPU path now sustains 6.6M
-messages/s live, above what the compiled CPU decoder plus the existing NumPy quote bars
-reach even offline with no network or scheduling (4.8–5.3M messages/s on 1–12 cores),
-so that CPU combination could not sustain this rate. A CPU path with compiled
-(multi-core) bars was not written; whether one could match it remains open.
+The paced gate of 6.6M messages/s is above what compiled CPU decode plus the NumPy quote
+bars reach even offline, with no network or scheduling (5.6–6.3M messages/s on 1–12
+threads), so that CPU combination could not sustain the line rate. A CPU path with
+compiled (multi-core) bars was not written; whether one could match the GPU path remains
+open.
 
-## Holoscan 5.0 revalidation
+## Status
 
-The 5.0 port keeps `gpu_mitch.py`'s and `gpu_bars.py`'s kernels and compile flags and
-`daqiri_drain.cpp` byte for byte (pinned by SHA-256 in
-`tests/python/library/test_kernel_sources_verbatim.py`), along with the batch, burst,
-buffer and ring sizes above. What changed around them is the graph: source and bars now
-share one thread, risk polls every 1 ms, and the dashboard reads host mirrors
-([porting notes](PORTING_TO_5_0.md)). The NIC-free checks run the same gather, ring,
-decode and bars code from pcap frames staged in GPU memory, through
-`GpuMitchReplaySourceOp`; the NIC runs need approval to use the ConnectX port on the test
-host and have not been repeated.
-
-| Check | 4.3 result | 5.0 status |
-| --- | --- | --- |
-| Decode and bars bit identity (`gpu_validate`) | bit-identical; returns ≤ 1 ULP (recorded day) | NIC-free, on a full-size synthetic day: [VALIDATION.md](VALIDATION.md) |
-| Bars bit identity inside the graph (`market_data_bench --check`, with and without drops) | (new in 5.0) | NIC-free: [VALIDATION.md](VALIDATION.md) |
-| Lossless at 200,000 packets/s | 242 of 250 full-day NIC runs | NIC-free paced gate (`market_data_bench paced`): [VALIDATION.md](VALIDATION.md); NIC series pending approval |
-| Throughput headroom | 76M msgs/s offline (decode + bars) | NIC-free gate ≥ 13.2M msgs/s (2× line rate): [VALIDATION.md](VALIDATION.md) |
-| Packet arrival → GPU result | 34.22 / 49.83 ms p50 / p99 (host ingest, NIC) | NIC-free replay chain: [VALIDATION.md](VALIDATION.md); NIC pending approval |
-| Native drain under injected interpreter-lock stalls | 8 of 9 (1.1 s), 3 of 3 (3 s) clean | pending approval (the 5.0 baseline is the per-packet Python drain) |
-| NIC smoke run with the 5.0 receiver image (`deploy/igx_thor/Dockerfile`) | - | pending approval |
-
-The replay drain is a Python thread, so NIC-free results say nothing about resilience to
-interpreter-lock stalls; those claims stay tied to the native drain on the NIC.
+The NIC-free checks and their results are in [VALIDATION.md](VALIDATION.md): bit identity
+of decode and bars (library and in-graph), the paced lossless gate at 200,000 packets/s,
+the throughput gate and the full chain with the CPU cross-check, all through
+`GpuMitchReplaySourceOp`, which runs the same gather, ring, decode and bars code from pcap
+frames staged in GPU memory. The NIC smoke run with the receiver image
+(`deploy/igx_thor/Dockerfile`), the full-day NIC series and the fault-injection runs need
+approval to use the ConnectX port on the test host and are not recorded for this code. The
+replay drain is a Python thread, so NIC-free runs say nothing about resilience to
+interpreter-lock stalls; that claim stays with the native drain on the NIC.
 
 ## Caveats
 
-- **Replay traffic.** Packets are the replay sender's own MITCH wire bytes, captured
-  once and replayed with `tcpreplay` at a **uniform** rate. Real feeds are bursty; the
-  receive ring absorbs bursts, but burst behaviour was not measured.
+- **Replay traffic.** The NIC sweep replays the replay sender's own MITCH wire bytes,
+  captured once, with `tcpreplay` at a **uniform** rate, and the NIC-free source paces a
+  capture uniformly too. Real feeds are bursty; the receive ring absorbs bursts, but burst
+  behaviour is not measured.
 - **One host, PHY loopback.** Sender and receiver share the Thor and a single
   ConnectX-7 port in internal PHY loopback; this is not an external-link test.
-- **Latency.** Arrival-to-result values are single samples at the end of each run, not
-  percentiles. They include the 5 ms DAQIRI partial-burst timeout used for these tables;
-  the current 20 ms timeout adds up to ~15 ms at rates that do not fill a burst.
-- **Analytics unchanged.** The 9.55× CPU/GPU analytics speedup in the README is a
-  separate measurement and is not affected by the ingest mode.
+- **Latency.** The arrival stamp is taken when the drain takes a DAQIRI burst, after the
+  20 ms partial-burst timeout, so at rates that do not fill a 4,096-packet burst it adds
+  up to 20 ms to arrival-to-result. The sweep's arrival-to-result values are single
+  samples at the end of each run, not percentiles.
 - **CPU work that remains.** One native frame-address call per burst, vectorized
   per-burst loss accounting on a small header array, per-batch control flow, Holoscan
   scheduling and the HTTP dashboard. No market data is processed on the CPU.
-- **Batch size.** Larger batches trade a little latency at moderate rates (53 ms vs
-  40 ms at 75,000 packets/s) for a much higher ceiling. Sources never wait to fill a
-  batch, so low rates are unaffected.
+- **Batch size.** Larger batches trade a little latency at moderate rates for a much
+  higher ceiling. Sources never wait to fill a batch, so low rates are unaffected.
 
 Reproduce the sweep with [`deploy/igx_thor/gpu_ingest_bench`](../deploy/igx_thor/gpu_ingest_bench/README.md).

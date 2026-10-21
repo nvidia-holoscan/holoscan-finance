@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Event-time quote midpoint bars; no trades mixed into the return estimator.
 
-``QuoteBars`` is verbatim from 4.3 ``holoscan.marketdata.bars``: it is the host oracle that
-``GpuQuoteBars`` matches (marks, times, trades, volumes and counters identical; returns
-within 1 ULP). Only methods are added, mirroring ``GpuQuoteBars``: ``window_parts`` (the
-window without stacking), ``reset_marks`` (was the sequence-gap writes in 4.3
-``EquityState.observe``), and the host views ``counts`` and ``symbol_arrays``.
+``QuoteBars`` is the host oracle that ``GpuQuoteBars`` matches (marks, times, trades,
+volumes and counters identical; returns within 1 ULP). Methods mirroring ``GpuQuoteBars``:
+``window_parts`` (the window without stacking), ``reset_marks`` (the sequence-gap mark
+reset), and the host views ``counts`` and ``symbol_arrays``.
 """
 
 from __future__ import annotations

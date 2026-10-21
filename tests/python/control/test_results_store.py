@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""ResultsStore: 4.3 publish_gpu/publish_comparison formatting, filters, gate and failures."""
+"""ResultsStore: publication formatting, filters, gate and failures."""
 
 from __future__ import annotations
 
@@ -137,7 +137,7 @@ def test_results_of_another_generation_are_counted_but_not_published():
     assert store.live is None and store.received_risk == 2
 
 
-def test_on_comparison_formats_the_4_3_comparison_and_timings():
+def test_on_comparison_formats_the_comparison_and_timings():
     store, _ = make_store()
     update = gpu_update(window(), validated=True)
     store.on_risk(update)
@@ -278,7 +278,7 @@ def test_reset_generation_clears_the_published_state_only():
     directory.set_manifest(manifest(2, 50002))
     assert store.live is None and store.comparison is None
     assert not store.history and not store.timings
-    assert store.comparisons == 1 and store.comparison_failure is not None  # as 4.3
+    assert store.comparisons == 1 and store.comparison_failure is not None
 
 
 def test_view_copies_what_the_snapshot_shows():

@@ -8,8 +8,7 @@ is the one sink of the module: risk results and comparisons go to the dashboard'
 items (any pyobject) → callback(item)
 ```
 
-Derived from the publication half of 4.3 `PublishOp`. Results are published as soon as risk
-emits them, where 4.3 polled every 5 ms.
+Results are published as soon as risk emits them.
 
 ## Ports
 

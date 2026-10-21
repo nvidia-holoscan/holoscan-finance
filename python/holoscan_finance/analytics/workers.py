@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Spawn-worker functions: the CPU comparator and the separate-process GPU worker.
 
-``cpu_window`` and ``gpu_window`` are verbatim from 4.3 ``equities.analytics``. Each keeps a
-persistent incremental engine per process and generation, so a worker pays the full rebuild
-only on a new generation; ``cpu_window`` tunes the BLAS thread count over {1, 2, 4, 8, all}
-at start and at the first full window (the 4.3 9.55x CPU/GPU method). Workers run in
-spawned processes so BLAS and CUDA work never holds the pipeline's GIL (in-process, 30%
-decoder duty added 45% to the engine time); ``start_worker_pool`` starts one before data
-flows. Its initializer leaves SIGINT and SIGTERM to the parent, pins the worker
-(``pin_worker``, the 4.3 ``keep_off_cores``) and ends it with the parent.
+``cpu_window`` and ``gpu_window`` each keep a persistent incremental engine per process and
+generation, so a worker pays the full rebuild only on a new generation; ``cpu_window`` tunes
+the BLAS thread count over {1, 2, 4, 8, all} at start and at the first full window (the
+separate-runs CPU/GPU method, docs/METHODOLOGY.md). Workers run in spawned processes so BLAS
+and CUDA work never holds the pipeline's GIL (in-process, 30% decoder duty added 45% to the
+engine time); ``start_worker_pool`` starts one before data flows. Its initializer leaves
+SIGINT and SIGTERM to the parent, pins the worker (``pin_worker``) and ends it with the
+parent.
 """
 
 from __future__ import annotations

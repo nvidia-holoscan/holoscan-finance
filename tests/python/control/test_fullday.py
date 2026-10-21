@@ -208,7 +208,7 @@ def test_status_is_frozen_once_another_generation_takes_over(controller):
 
 
 def test_cpu_validation_pauses_during_a_full_day_burst(controller):
-    # From 4.3 test_equities: the CPU comparator competes with ingest during a burst.
+    # The CPU comparator competes with ingest during a burst.
     c = controller
     gate = CrossCheckGate(allowed=c.fd.validation_allowed)
     assert gate.try_claim()

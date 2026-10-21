@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""DAQIRI helpers: the RX config shape (4.3 plus the DPDK engine) and the binding checks of
-the host and GPUDirect sources (from 4.3 ``test_ano_source_op``)."""
+"""DAQIRI helpers: the RX config shape (one flow-isolated queue, DPDK engine) and the binding
+checks of the host and GPUDirect sources."""
 
 from __future__ import annotations
 

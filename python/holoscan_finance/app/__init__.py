@@ -6,6 +6,6 @@
 run), ``placement`` (authored lanes and their CPU placement), ``plan`` (rules checked on
 ``plan.json()`` before a run), ``runner`` (process set-up, compile, headless run, report)
 and ``drained`` (when a finite run has nothing left in flight); ``bench`` is
-``market_data_bench``'s. This was 4.3 ``equities.stream.main``. The modules import
-Holoscan only inside functions, and this package imports none of them.
+``market_data_bench``'s. The modules import Holoscan only inside functions, and this
+package imports none of them.
 """

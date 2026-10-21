@@ -5,10 +5,9 @@
 The dashboard's button pauses the paced sender and asks the replay controller
 (``deploy/igx_thor/gpu_ingest_bench/replay_control.py``) to start; the burst's manifest
 moves the run from ``starting`` to ``running`` and sets the base counters, and the status
-reports first-to-last packet arrival from the exact per-batch ``BarCounters`` (4.3 read the
-GPU bars operator directly). The CPU cross-check is paused during a burst: it competes with
-ingest for cores and memory bandwidth. From 4.3 ``start_fullday``, ``fullday_status``,
-``validation_allowed`` and ``replay_request`` (verbatim rules and output).
+reports first-to-last packet arrival from the exact per-batch ``BarCounters``. The CPU
+cross-check is paused during a burst: it competes with ingest for cores and memory
+bandwidth.
 """
 
 from __future__ import annotations

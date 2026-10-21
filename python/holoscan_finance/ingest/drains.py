@@ -9,9 +9,8 @@ publishes one record per burst; the GPU source releases ring space once decode h
 synchronized. ``daqiri_drain.cpp`` implements this protocol without the GIL;
 ``DeviceReplayDrain`` implements it over pcap frames resident in device memory, with the
 same gather kernel, ring and DAQIRI burst cadence, so everything after the drain is the
-production code; ``PythonGpuDrain`` is the 4.3 per-packet-binding drain (fallback and A/B
-switch). Allocations come from 4.3 ``GpuMitchSourceOp._start_native``. CuPy is imported
-inside functions.
+production code; ``PythonGpuDrain`` is the per-packet-binding fallback drain (and the switch
+for drain comparisons). CuPy is imported inside functions.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ DRAIN_FIELDS = (
     "t_free",
     "wait_ns",
 )
-# The 4.3 native Drain.stats() keys.
+# The native Drain.stats() keys.
 DRAIN_STATS_KEYS = (
     "running",
     "bursts",
@@ -143,8 +142,8 @@ class DeviceFrames:
 
         The feed is the frames from ``sender_port`` when the capture carries that port, else
         those from its most common UDP source port, rewritten to ``sender_port`` here.
-        ``set_src_port`` re-sources the feed only, as 4.3's ``tcprewrite --portmap
-        feed:new``: frames of another sender stay stale in every pass."""
+        ``set_src_port`` re-sources the feed only, like ``tcprewrite --portmap feed:new``:
+        frames of another sender stay stale in every pass."""
         import cupy as cp
 
         rel = frames.udp_src_port_offsets()
@@ -498,11 +497,11 @@ class DeviceReplayDrain:
 
 
 class PythonGpuDrain:
-    """The 4.3 Python drain (thread ``gpu-mitch-drain``): per-packet ``get_packet_ptr`` and
+    """The Python drain (thread ``gpu-mitch-drain``): per-packet ``get_packet_ptr`` and
     ``get_packet_length`` calls, the gather into a slot buffer per burst on its own stream,
     and the accounting from this thread. The fallback when the native helper cannot be
-    built and the A/B switch for it; unlike the native drain it needs the GIL for every
-    burst, so a stalled Python thread delays NIC buffer recycling.
+    built and the switch for drain comparisons; unlike the native drain it needs the GIL for
+    every burst, so a stalled Python thread delays NIC buffer recycling.
     """
 
     _BURST_STEPS = ("frames", "alloc", "h2d_kernel", "d2h", "sync", "free", "account")

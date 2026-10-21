@@ -3,7 +3,7 @@
 """``GpuIngest.pull()`` on host arrays with ``FakeNativeDrain``: the records path accounts
 like the host receivers, releases ring space for bursts with nothing to decode, copies the
 drain's stall statistics (every ``poll_gaps_*`` key) and replay statistics, and
-reports drain errors and the end of input. CPU only, as 4.3's native-records test was.
+reports drain errors and the end of input. CPU only.
 """
 
 from __future__ import annotations

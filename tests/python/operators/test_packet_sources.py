@@ -3,7 +3,7 @@
 """``UdpPacketSourceOp`` and ``DaqiriPacketSourceOp`` under the harness and in tiny placed
 graphs: the emitted ``PacketBatch``es decode (through ``HostMitchDecoder``) to what was
 sent, DAQIRI bursts are freed and gaps counted, failures fail the run with their message,
-and threads keep their masks (from 4.3 ``test_ano_source_op``).
+and threads keep their masks.
 
 The receiver and drain threads start under the process mask, never a narrowed lane mask,
 and the lane mask survives a ``daqiri_init`` that re-pins its caller. CPU only.

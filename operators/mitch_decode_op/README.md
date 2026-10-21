@@ -2,15 +2,14 @@
 
 The Python reference MITCH decoder of the host front ends. Each `PacketBatch` from
 `UdpPacketSourceOp` or `DaqiriPacketSourceOp` is decoded under the current feed directory into
-one `ReplayBatch` per accepted packet. This is the 0.28M msgs/s host baseline; the GPU front
-ends decode inside the source instead.
+one `ReplayBatch` per accepted packet. This is the host baseline, about 0.27M msgs/s on one
+core (`decode_bench`, 2026-10-20); the GPU front ends decode inside the source instead.
 
 ```text
 packets (PacketBatch) → sender-port check → MIT303 unit parse → NYQ mapping → events (list[ReplayBatch])
 ```
 
-Processor: `holoscan_finance.nyq.host_decoder.HostMitchDecoder`. Derived from 4.3
-`EquityState.decode` and the decode loop of `AsyncUdpSourceOp`.
+Processor: `holoscan_finance.nyq.host_decoder.HostMitchDecoder`.
 
 ## Ports
 
@@ -29,7 +28,7 @@ Contract: `OnEach(packets)`.
 | `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`, normally the source's; private if empty |
 | `tap` | `Ref` | `Ref()` | `Ref(CaptureTap)`; an active capture records every decoded list |
 
-## Rules (4.3, unchanged)
+## Rules
 
 - No directory, or a sender port other than `directory.sender_port`: the packet is stale.
 - Otherwise `nyq.mapping.decode_packet` runs under the directory's generation, market

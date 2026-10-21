@@ -89,16 +89,16 @@ microstructure noise ([Aït-Sahalia and Yu](https://arxiv.org/abs/0906.1444)).
 The receiver, MITCH decode and the quote bars run on one Holoscan lane (thread); the
 risk operator and its publisher run on a second, and in `compare` mode the CPU
 cross-check and its publisher on a third ([architecture](ARCHITECTURE.md)). On the host
-front ends (`udp`, `daqiri-host`; 4.3 `async`, `ano`) the GPU and CPU analytics each run
-in a spawned process; on the GPU front ends (`gpudirect`, `replay`; 4.3 `gpu`) the GPU
-analytics (`RollingRiskOp`) run in-process on the device-resident window.
+front ends (`udp`, `daqiri-host`) the GPU and CPU analytics each run in a spawned
+process; on the GPU front ends (`gpudirect`, `replay`) the GPU analytics
+(`RollingRiskOp`) run in-process on the device-resident window.
 
 The bars hand each new window to risk through a latest-only mailbox, so a slow analysis
 skips windows instead of delaying the bars. The risk operator checks for a new window
 every 1 ms (`--risk-poll-us`), keeps only the newest, and starts an analysis once a new
 bar has closed and at least the minimum interval (50 ms, `--interval`) has passed since
-the previous start. This is 4.3's rule (run on arrival, at a bounded rate), with at most
-1 ms added. One matched comparison is in flight at a time: in `compare` mode, risk
+the previous start. So an analysis runs on arrival at a bounded rate; the 1 ms poll adds
+at most 1 ms. One matched comparison is in flight at a time: in `compare` mode, risk
 claims the comparison slot for a window, sends the CPU cross-check a host copy of it,
 and waits for that comparison to be published before analyzing the next window. CPU
 BLAS thread tuning runs at startup and when the first full window exists.
@@ -118,31 +118,32 @@ MITCH carries no sender wall-clock time, so sender-to-receiver latency is unavai
 - **Live `compare` mode:** the CPU recomputes each validated GPU window; every
   comparison checks volatilities, covariance probes and the heatmap, and failures are
   kept in `/snapshot` as `comparison_failure`. The CPU job starts when the GPU result is
-  ready (4.3's host modes started both together), so its timing ratio is not the
-  headline benchmark.
-- **Packet arrival to result:** from the drain of the packet that closes the newest
-  bar to publication (GPU) or worker completion (CPU). Results are published on the
-  risk lane as soon as the analysis returns (4.3 polled for them every 5 ms). The
-  arrival timestamp is taken when the drain takes a DAQIRI burst, after the
-  partial-burst timeout, or in `replay` mode when the software NIC gathers the burst; it
-  is not a NIC hardware timestamp and excludes browser refresh.
+  ready, and both run on the same host at once, so its timing ratio is not the
+  separate-runs benchmark below.
+- **Packet arrival to result:** from the drain of the packet that closes the newest bar to
+  publication (GPU) or worker completion (CPU). Results are published on the risk lane as
+  soon as the analysis returns. The arrival timestamp is taken when the drain takes a DAQIRI
+  burst, after the partial-burst timeout, or in `replay` mode when the software NIC gathers
+  the burst; it is not a NIC hardware timestamp and excludes browser refresh.
 
 ## Separate CPU-only and GPU-only benchmark
 
-The 9.55× headline comes from two separate streaming runs on Holoscan 4.3. On Thor
-(with the 5.0 receiver image and module paths):
+The separate-runs CPU/GPU speedup comes from two separate streaming runs, one with CPU
+analytics only and one with GPU analytics only, with the launcher's default host-memory
+ingest (`INGEST=daqiri-host`). On Thor (`fin-equities-receiver` is the launchers' default
+`APP_NAME`):
 
 ```bash
 for backend in cpu gpu; do
-    bash deploy/igx_thor/igx_ano_down.sh
-    ANALYTICS_BACKEND="$backend" bash deploy/igx_thor/igx_ano_run.sh
-    docker exec fin-equities-ano bash deploy/igx_thor/ano_python.sh \
+    bash deploy/igx_thor/igx_down.sh
+    ANALYTICS_BACKEND="$backend" bash deploy/igx_thor/igx_run.sh
+    docker exec fin-equities-receiver bash deploy/igx_thor/run_python.sh \
         -m holoscan_finance.tools.measure --seconds 120 --rate 75000 \
         --output "/tmp/$backend-only.json"
-    docker cp "fin-equities-ano:/tmp/$backend-only.json" "/tmp/$backend-only.json"
+    docker cp "fin-equities-receiver:/tmp/$backend-only.json" "/tmp/$backend-only.json"
 done
-bash deploy/igx_thor/igx_ano_down.sh
-ANALYTICS_BACKEND=compare bash deploy/igx_thor/igx_ano_run.sh
+bash deploy/igx_thor/igx_down.sh
+ANALYTICS_BACKEND=compare bash deploy/igx_thor/igx_run.sh
 
 PYTHONPATH=python python3 -m holoscan_finance.tools.compare_runs \
     --cpu /tmp/cpu-only.json --gpu /tmp/gpu-only.json \

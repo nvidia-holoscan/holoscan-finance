@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``HostMitchDecoder``: the 4.3 ``EquityState.decode`` rules per packet batch (stale sender
-ports, no directory, malformed units) and outputs equal to ``decode_packet``."""
+"""``HostMitchDecoder``: the host decode rules per packet batch (stale sender ports, no
+directory, malformed units) and outputs equal to ``decode_packet``."""
 
 from __future__ import annotations
 

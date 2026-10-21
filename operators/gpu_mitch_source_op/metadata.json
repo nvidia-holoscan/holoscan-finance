@@ -18,8 +18,7 @@
     ],
     "version": "0.2.0",
     "changelog": {
-      "0.1.0": "GPUDirect MITCH receive: DAQIRI places packets in GPU memory (dma-buf), CUDA kernels gather the UDP payloads and check MITCH framing, and a pluggable GPU decoder emits device-resident batches; host-side receive accounting and stall diagnostics.",
-      "0.2.0": "Holoscan SDK 5.0 port: declarative operator with typed Params and an OnClock contract; decode fused through GpuIngest and GpuMitchDecoder; the native drain is built before daqiri_init; lane masks restored after daqiri_init and drains started under the process mask."
+      "0.2.0": "Holoscan SDK 5.0 operator with typed ports, Params and a temporal contract."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

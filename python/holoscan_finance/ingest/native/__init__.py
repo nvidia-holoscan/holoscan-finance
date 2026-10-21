@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The GIL-free native drain, built on first use into a writable cache directory.
 
-``load_daqiri_drain()`` compiles ``daqiri_drain.cpp`` (byte-identical to 4.3)
-against the installed DAQIRI (``DAQIRI_ROOT``, default ``/opt/daqiri``), the CUDA driver API
+``load_daqiri_drain()`` compiles ``daqiri_drain.cpp`` against the installed DAQIRI (``DAQIRI_ROOT``, default ``/opt/daqiri``), the CUDA driver API
 (linked against the stub; CuPy loads the driver) and pybind11, then imports it. The headers
 must match ``_daqiri``'s pybind11 internals, so the system headers (apt ``pybind11-dev``)
 come before a pip ``pybind11``: ``HOLOSCAN_FINANCE_PYBIND11_INCLUDE``, then ``/usr/include``,
@@ -133,7 +132,7 @@ def _build() -> type:
 def load_daqiri_drain() -> type | None:
     """The native ``Drain`` class, or None (logged) if disabled or the build fails.
 
-    Same contract as 4.3: built once per process, cached on disk across processes."""
+    Built once per process, cached on disk across processes."""
     for var in _SWITCHES:  # ablation and troubleshooting
         if os.environ.get(var, "1") == "0":
             logger.info("native daqiri_drain disabled by %s=0", var)

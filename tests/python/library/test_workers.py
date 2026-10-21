@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""CPU spawn workers: the persistent engine across a roll and a seek (from 4.3
-``test_equities``), the pre-spawn ``ping``, the pinned worker reporting its CPU set, and
-the worker leaving SIGINT/SIGTERM to the parent without outliving it."""
+"""CPU spawn workers: the persistent engine across a roll and a seek, the pre-spawn ``ping``,
+the pinned worker reporting its CPU set, and the worker leaving SIGINT/SIGTERM to the parent
+without outliving it."""
 
 from __future__ import annotations
 

@@ -6,8 +6,8 @@
         [--seconds 600] [--seed 7] [--sender-port 40000] [--drop-every 0]
         [--max-events-per-packet 32] [--reuse]
 
-``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the 4.3 replay
-packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
+``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the replay
+sender's packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
 counts and expected totals (``capture``: what a lossless receiver of the pcap counts).
 ``--reuse`` keeps an existing directory made with identical arguments. CPU-only, so every
 test and the NIC-free validation run without licensed data.

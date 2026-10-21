@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuMitchDecoder`` keeps the 4.3 ``decode_gpu`` contract: stale sender ports never reach
-pass 2, accepted packets become one device batch whose per-packet metadata and columns equal
-the host decode, and malformed packets are counted. Also the decode warm-up."""
+"""``GpuMitchDecoder`` keeps its contract: stale sender ports never reach pass 2, accepted
+packets become one device batch whose per-packet metadata and columns equal the host decode,
+and malformed packets are counted. Also the decode warm-up."""
 
 from __future__ import annotations
 

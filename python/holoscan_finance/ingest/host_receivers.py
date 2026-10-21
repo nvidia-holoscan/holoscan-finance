@@ -6,9 +6,7 @@ A drain thread copies every datagram into a ring of ``ring_size`` packets after 
 header peek (``ReceiveAccounting.observe_packet``), so decode load can never make the
 kernel or the NIC drop packets; overload is counted as ``ring_dropped`` instead. The
 source's lane takes ``PacketBatch``es of up to ``batch_size`` messages out of the ring, and
-``MitchDecodeOp`` decodes them. These are the published host baselines (0.28M msgs/s Python
-decode; 4,500 packets/s through DAQIRI host memory). From 4.3 ``equities.host_sources``
-(``AsyncUdpSourceOp``, ``AnoSourceOp``), with decode moved out.
+``MitchDecodeOp`` decodes them. These are the front ends of the host (CPU) path.
 """
 
 from __future__ import annotations
@@ -115,7 +113,7 @@ class _HostReceiver:
         raise NotImplementedError
 
     def _enqueue(self, data: bytes, recv_ns: int, peer: tuple[str, int] | None) -> None:
-        """Account one datagram and admit it to the ring (4.3 ``_enqueue_packet``)."""
+        """Account one datagram and admit it to the ring."""
         stats = self._stats
         try:
             session, seq, count = mitch_packet_header(data, peer)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU sets and thread masks: the DAQIRI lcores run only DPDK, helpers never inherit a lane mask.
 
-Every thread of the process stays off the DPDK master and RX lcores (4.3 ``_isolate_cores``
+Every thread of the process stays off the DPDK master and RX lcores (``keep_off_cores``
 and the analytics worker initializer). The Holoscan 5 runtime never re-applies a lane's
 placement, so a mask change made in ``start()`` persists for the whole lane: around
 ``daqiri_init``, ``thread_mask`` always restores and checks the caller's mask, and drain
@@ -61,7 +61,7 @@ class CpuSets:
     ) -> CpuSets:
         """``ingest`` defaults to ``app``. Only a busy-polled, narrowed ingest set is carved
         out of ``helper`` (= ``worker``), so by default every set but ``ingest`` is ``app``,
-        the 4.3 ``keep_off_cores`` set."""
+        the ``keep_off_cores`` set."""
         start = frozenset(os.sched_getaffinity(0))
         lcores = frozenset(reserved) & start
         app = start - lcores
@@ -111,8 +111,8 @@ def keep_off_cores(reserved: Iterable[int]) -> int:
     inside ``reserved``) alone; threads created later inherit the mask. A Python or CUDA
     thread scheduled onto the RX core takes CPU time from the NIC poll loop.
 
-    Returns the number of threads whose mask changed (4.3 ``_isolate_cores``; threads already
-    off the lcores are left untouched instead of re-set to the same mask).
+    Returns the number of threads whose mask changed (threads already off the lcores are
+    left untouched).
     """
     reserved = set(reserved)
     if not reserved or not hasattr(os, "sched_setaffinity"):

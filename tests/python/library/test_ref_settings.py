@@ -16,12 +16,9 @@ from holoscan_finance.ref import Knob, Ref
 from holoscan_finance.settings import (
     DAQIRI_INGEST_MODES,
     GPU_INGEST_MODES,
-    INGEST_ALIASES,
     INGEST_MODES,
-    LEGACY_INGEST_TOKEN,
     BarSettings,
     IngestDefaults,
-    canonical_ingest,
 )
 
 
@@ -64,7 +61,7 @@ def test_package_root_resolves_names_lazily():
         holoscan_finance.NotAName
 
 
-def test_bar_settings_are_the_4_3_defaults_and_rules():
+def test_bar_settings_defaults_and_rules():
     s = BarSettings()
     assert s.as_params() == dict(
         bar_seconds=5, window_seconds=300, stale_seconds=30, min_bars=20, max_spread_bps=100.0
@@ -91,18 +88,12 @@ def test_ingest_defaults_are_the_measured_gpudirect_settings():
     assert (d.interval_s, d.burst_packets, d.rx_timeout_us) == (0.05, 4096, 20000)
 
 
-def test_ingest_names_and_legacy_tokens():
+def test_ingest_mode_names():
     assert INGEST_MODES == ("udp", "daqiri-host", "gpudirect", "replay")
-    for mode in INGEST_MODES:
-        assert canonical_ingest(mode) == (mode, False)
-    for alias, mode in INGEST_ALIASES.items():
-        assert canonical_ingest(alias) == (mode, True)
-        assert LEGACY_INGEST_TOKEN[mode] == alias  # /snapshot keeps the 4.3 token
-    assert LEGACY_INGEST_TOKEN["replay"] == "replay"
     assert set(GPU_INGEST_MODES) | set(DAQIRI_INGEST_MODES) == {
         "daqiri-host",
         "gpudirect",
         "replay",
     }
-    with pytest.raises(ValueError, match="unknown ingest mode"):
-        canonical_ingest("rdma")
+    assert set(GPU_INGEST_MODES) <= set(INGEST_MODES)
+    assert set(DAQIRI_INGEST_MODES) <= set(INGEST_MODES)

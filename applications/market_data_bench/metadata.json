@@ -16,7 +16,7 @@
     "language": ["Python"],
     "version": "0.2.0",
     "changelog": {
-      "0.2.0": "Holoscan SDK 5.0: finite, headless benchmark composed from holoscan.finance operators."
+      "0.2.0": "Holoscan SDK 5.0 application composed from holoscan.finance operators."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

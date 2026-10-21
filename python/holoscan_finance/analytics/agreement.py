@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """When a CPU and a GPU risk result agree, and when their timings may be compared.
 
-``agreement`` is verbatim from 4.3 ``equities.analytics`` (the tolerances behind every
-published CPU/GPU comparison): the same eligible and displayed instruments, and volatilities,
-covariance probes and heatmap correlations within tolerance. ``compare_results`` adds the
-4.3 ``publish_comparison`` rules: the work matched (same method, window and incremental
-additions/expirations), and a speedup is usable only if both agree on at least two names.
+``agreement``: the same eligible and displayed instruments, and volatilities, covariance
+probes and heatmap correlations within tolerance. ``compare_results`` adds the publication
+rules: the work matched (same method, window and incremental additions/expirations), and a
+speedup is usable only if both agree on at least two names.
 """
 
 from __future__ import annotations

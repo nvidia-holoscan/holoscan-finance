@@ -11,9 +11,8 @@ the active replay manifest, and each generation needs a fresh port:
     inspect   list source ports in a capture; verify one port's MITCH sequence continuity
     register  post a new generation for a given source port (same payload replay_sender sends)
 
-From 4.3 ``equities.bench_replay`` (same flags). Source ports and payloads are found from
-each frame's IPv4 header length, so frames with IP options parse correctly (4.3 assumed
-IHL 5). CPU only.
+Source ports and payloads are found from each frame's IPv4 header length, so frames with
+IP options parse correctly. CPU only.
 """
 
 from __future__ import annotations

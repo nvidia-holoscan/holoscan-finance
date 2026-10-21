@@ -3,16 +3,16 @@
 The CPU twin of every validated GPU risk window. Each validated `RiskUpdate` carries a host
 copy of its window; the operator recomputes it with `cpu_window` in one spawned worker
 (pinned, BLAS threads tuned over {1, 2, 4, 8, all}) and emits the comparison with the GPU
-result. The dashboard's live CPU/GPU speedup (`rolling_timing`) comes from these pairs; the
-published 9.55x was measured in separate CPU-only and GPU-only runs of the same workers.
+result. The dashboard's live CPU/GPU speedup (`rolling_timing`) comes from these pairs;
+separate CPU-only and GPU-only runs of the same workers give the separate-runs speedup
+([methodology](../../docs/METHODOLOGY.md#separate-cpu-only-and-gpu-only-benchmark)).
 
 ```text
 risk (validated RiskUpdate) → FIFO → spawned cpu_window → comparison (RiskComparison)
 ```
 
-Processor: `holoscan_finance.analytics.crosscheck.CpuCrossCheck`. Derived from the compare
-branch of 4.3 `PublishOp` (spawn pool, `cpu_window`, 5 ms poll) and the rules of
-`publish_comparison` (`analytics.agreement.compare_results`).
+Processor: `holoscan_finance.analytics.crosscheck.CpuCrossCheck`. The agreement rules are
+`analytics.agreement.compare_results`.
 
 ## Ports
 
@@ -21,10 +21,10 @@ branch of 4.3 `PublishOp` (spawn pool, `cpu_window`, 5 ms poll) and the rules of
 | `risk` (in) | `RiskUpdate` | validated, with `rows_host` (any other update fails the run) |
 | `comparison` (out) | `RiskComparison` | `update`, `cpu` (the `cpu_window` result), `agreement`, `matched_work`, `usable`, `error` |
 
-`agreement`: same eligible and displayed instruments, and volatilities, covariance probes and
-heatmap correlations within the 4.3 tolerances. `matched_work`: same method, window and
-incremental additions/expirations. `usable` (timings comparable): both, and at least two
-eligible names. A worker exception gives `cpu=None` and `error`.
+`agreement`: same eligible and displayed instruments, and volatilities, covariance probes
+and heatmap correlations within the agreement tolerances (relative 1e-8). `matched_work`:
+same method, window and incremental additions/expirations. `usable` (timings comparable):
+both, and at least two eligible names. A worker exception gives `cpu=None` and `error`.
 
 Contract: `OnClock(poll_period_us).input(risk, DrainAll())`.
 
@@ -35,8 +35,8 @@ Contract: `OnClock(poll_period_us).input(risk, DrainAll())`.
 | `bar_seconds` | int | `5` | annualizes volatility |
 | `cpu_threads` | int | `0` | BLAS threads; `0` tunes at start and at the first full window |
 | `full_window_bars` | int | `60` | bars of a full window |
-| `poll_period_us` | int | `5000` | the poll clock (4.3 `PublishOp` period) |
-| `worker_cpus` | list | `[]` | CPUs of the worker (`pin_worker`); `[]` inherits. The apps pass `CpuSets.worker`, the 4.3 core set |
+| `poll_period_us` | int | `5000` | the poll clock |
+| `worker_cpus` | list | `[]` | CPUs of the worker (`pin_worker`); `[]` inherits. The apps pass `CpuSets.worker` |
 | `stats` | `Ref` | `Ref()` | `Ref(RiskStats)`: writes `crosschecks_submitted` and `crosschecks_done` only; private if empty |
 
 ## Edges and lane

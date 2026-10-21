@@ -11,21 +11,20 @@ ConnectX → DAQIRI RX buffers in GPU memory (dma-buf)
            GPU MITCH decode, legacy-stream sync, ring release → events (list[GpuReplayBatch])
 ```
 
-The drain ([daqiri_drain.cpp](../../python/holoscan_finance/ingest/native/daqiri_drain.cpp),
-byte-identical to 4.3) is a C++ thread that never takes the Python interpreter lock. It
-polls DAQIRI bursts, gathers them into a preallocated ring of `ring_size` device slots,
-copies the per-packet header to pinned host memory and returns the burst to the NIC, with
-no allocation in steady state. A Python thread that stalls while holding the lock therefore
-cannot stop NIC buffers from being recycled: the ring absorbs the stall and `compute()`
-catches up. When the ring is full the drain holds the burst, so overflow shows up as NIC
-drops and sequence gaps, never as silently discarded packets. Decode is fused into the
-source: ring rows stay leased until decode has synchronized, so the lease has exactly one
-consumer. On IGX Thor this sustains 200,000 packets/s (6.6M MITCH messages/s, measured on
-Holoscan 4.3); see [GPUDirect ingest](../../docs/GPU_INGEST.md).
+The drain ([daqiri_drain.cpp](../../python/holoscan_finance/ingest/native/daqiri_drain.cpp))
+is a C++ thread that never takes the Python interpreter lock. It polls DAQIRI bursts,
+gathers them into a preallocated ring of `ring_size` device slots, copies the per-packet
+header to pinned host memory and returns the burst to the NIC, with no allocation in steady
+state. A Python thread that stalls while holding the lock therefore cannot stop NIC buffers
+from being recycled: the ring absorbs the stall and `compute()` catches up. When the ring is
+full the drain holds the burst, so overflow shows up as NIC drops and sequence gaps, never
+as silently discarded packets. Decode is fused into the source: ring rows stay leased until
+decode has synchronized, so the lease has exactly one consumer. It is sized for 200,000
+packets/s (6.6M MITCH messages/s); see [GPUDirect ingest](../../docs/GPU_INGEST.md), and for
+NIC-free results [VALIDATION.md](../../docs/VALIDATION.md).
 
 Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with
-`holoscan_finance.marketdata.gpu_decoder.GpuMitchDecoder`. Derived from the 4.3 operator of
-the same name, `EquityState.decode_gpu` and `warmup.py`.
+`holoscan_finance.marketdata.gpu_decoder.GpuMitchDecoder`.
 
 ## Requirements
 
@@ -91,7 +90,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
   sweep, the interface lookup, and the drain, started under `helper_mask(helper_cpus)`. A
   failure after a successful `daqiri_init` (the mask check included) stops a started drain
   and shuts DAQIRI down before it propagates.
-- **Accounting.** Per burst, vectorized for one contiguous session (4.3 rules): sequence gaps
+- **Accounting.** Per burst, vectorized for one contiguous session: sequence gaps
   (`dropped`, in messages), reordering, framing rejects, non-UDP frames; rows beyond
   `ring_size` queued packets count as `ring_dropped` messages.
 - **Staging.** Consecutive ring rows are decoded through one zero-copy view; rejected rows,
@@ -102,8 +101,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
   (`PendingEmits`); a compute with a backlog emits nothing new.
 - **Fallback.** Without the native helper the Python drain `gpu-mitch-drain` does the same
   with one binding call per packet and the GIL per burst (`frame_fetch = "per-packet
-  binding"`); the 4.3 `burst_frames` helper is gone, so the native-vs-Python A/B now compares
-  against this weaker baseline.
+  binding"`).
 
 ## Edges and lane
 
@@ -118,7 +116,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
 
 ## Telemetry
 
-`IngestStats` (4.3 names): `packets`, `received_messages`, `messages`, `dropped`,
+`IngestStats`: `packets`, `received_messages`, `messages`, `dropped`,
 `ring_dropped`, `malformed_packets`, `decode_malformed`, `stale_packets`,
 `out_of_order_packets`, `non_udp_frames`, `bursts`, `last_packet_wall_ns`, `drain_host_ns`,
 `frame_fetch`, `event_batches`, `retries`, `held`, `eof`, `error`, `lane_cpus`, and

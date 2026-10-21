@@ -7,8 +7,7 @@ and older batches turn stale, but messages of the bars' generation still in flig
 knob moved are built first; ``emit_windows=False`` declares no ``window`` port; counters are
 mirrored per batch and the symbol snapshot at its cadence; ``stop()`` publishes the final
 state. gpu: windows equal ``GpuQuoteBars`` + ``apply_sequence`` through a stale generation, a
-gap and a reset, with device-resident parts (from 4.3
-``test_quote_bars_op_windows_match_gpu_quote_bars``); the bar kernels warm in ``start()``
+gap and a reset, with device-resident parts; the bar kernels warm in ``start()``
 unless ``warmup=False``; the cpu backend fed the same ``GpuReplayBatch``es builds the same
 bars."""
 
@@ -250,7 +249,7 @@ def _to_slots(cp, payloads: list[bytes]):
 
 
 def gpu_batches(cp, generation: int = 1) -> list:
-    """The synthetic stream decoded on the GPU in 97-packet batches (4.3 ``_gpu_batches``)."""
+    """The synthetic stream decoded on the GPU in 97-packet batches."""
     from holoscan_finance.marketdata.gpu_bars import GpuReplayBatch
     from holoscan_finance.marketdata.gpu_mitch import decode_packets
 
@@ -334,6 +333,6 @@ def test_the_cpu_backend_fed_gpu_batches_builds_the_same_bars():
         a, b = g.rows.get(), c.rows
         np.testing.assert_array_equal(np.isnan(a), np.isnan(b))
         ulps = np.abs(a.view(np.int64) - b.view(np.int64))[~np.isnan(a)]
-        assert ulps.max(initial=0) <= 1  # CUDA log vs NumPy log (GPU_INGEST: within 1 ULP)
+        assert ulps.max(initial=0) <= 1  # CUDA log vs NumPy log: within 1 ULP
     assert timeless(gpu_stats.counters) == timeless(cpu_stats.counters)
     assert_same_snapshot(gpu_stats.symbol_snapshot, cpu_stats.symbol_snapshot)

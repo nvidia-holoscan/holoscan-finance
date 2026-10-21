@@ -7,12 +7,11 @@ from ``MitchDecodeOp``) -> ``window`` (out, ``BarWindow``; only with ``emit_wind
 in, ``lossless(4)`` from a GPU source or ``lossless(16)`` from decode, same lane; out,
 ``LATEST`` to risk in another lane (bars never block on analytics) or ``lossless(64)`` to a
 same-lane sink when every window matters. Lane: the source's (``ingest``). A new directory
-generation resets the bars at the first batch decoded under it (4.3: at the HTTP call), so
-batches still in flight under the old one are built, not stale. Per batch the exact
+generation resets the bars at the first batch decoded under it, so batches still in flight
+under the old one are built, not stale. Per batch the exact
 counters go to ``BarsStats.counters`` (GPU: one 40-byte D2H), and a ``SymbolSnapshot`` at most
 every ``snapshot_period_ms``, so the dashboard never touches CUDA. The cpu backend also takes
-GPU batches (one D2H each): the bench's reference only. Processor: ``BarBuilder`` (4.3
-``GpuQuoteBarsOp``, the host ``BarsOp`` and ``EquityState.observe``).
+GPU batches (one D2H each): the bench's reference only. Processor: ``BarBuilder``.
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ class QuoteBarsOp(hs.Operator):
         self._snapshot_ns = self._snapshot_due = 0
 
     def setup(self, spec: hs.OperatorSpec) -> None:
-        self._settings()  # the 4.3 QuoteBars rules: ValueError at graph.op
+        self._settings()  # the QuoteBars rules: ValueError at graph.op
         spec.input(self.events)
         if self.emit_windows:
             spec.output(self.window)

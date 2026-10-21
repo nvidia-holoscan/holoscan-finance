@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """``CovarianceEngine("gpu")``: the NumPy oracle test on the GPU backend, and device windows
-consumed in place (from 4.3 ``test_equities`` and ``test_equities_gpu``)."""
+consumed in place."""
 
 from __future__ import annotations
 

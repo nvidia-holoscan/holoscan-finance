@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run plumbing: process set-up, compile against the app's rules, headless run, report.
 
-``prepare_process`` applies the 4.3 settings before any other thread exists: the 1 ms GIL
-switch interval and the main thread masked to ``helper`` plus the 4.3 sweep, so the
-runtime's threads, uvicorn, the stall heartbeat, CuPy and spawned workers all inherit that
+``prepare_process`` applies the process settings before any other thread exists: the 1 ms
+GIL switch interval and the main thread masked to ``helper``, plus a sweep of earlier
+threads (``keep_off_cores``), so the runtime's threads, uvicorn, the stall heartbeat, CuPy and spawned workers all inherit that
 mask. ``helper`` is ``app`` (off the DPDK lcores in DAQIRI modes) unless a busy-polled
 ingest set is carved out, which then keeps every other thread off the polled CPUs
 (``cpu_sets`` is the same computation with no side effects). ``compile_plan`` stops before
 anything starts if the plan is rejected or breaks a rule.
 ``run_headless`` is the ``--port 0`` loop: ``run_async`` with a bounded wait, Python signal
 handlers (Holoscan installs none), and ``request_stop`` once ``until`` (a
-``DrainedCondition``) holds. From 4.3 ``equities.stream.main``.
+``DrainedCondition``) holds.
 """
 
 from __future__ import annotations
@@ -74,14 +74,15 @@ def cpu_sets(args: argparse.Namespace) -> CpuSets:
 
 def prepare_process(args: argparse.Namespace) -> CpuSets:
     """Interpreter, logging and CPU sets for this process; call it before any thread starts."""
-    sys.setswitchinterval(0.001)  # 4.3: Python threads hand the GIL over every 1 ms
+    sys.setswitchinterval(0.001)  # Python threads hand the GIL over every 1 ms
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(threadName)s %(name)s: %(message)s"
     )
     cpus = cpu_sets(args)
     if cpus.helper != cpus.all:  # DAQIRI lcores reserved and/or a busy-polled ingest carve-out
         os.sched_setaffinity(0, cpus.helper)
-        keep_off_cores(cpus.all - cpus.helper)  # the 4.3 sweep, plus the busy-polled CPUs
+        # sweep earlier threads off the lcores and the busy-polled CPUs
+        keep_off_cores(cpus.all - cpus.helper)
     return cpus
 
 

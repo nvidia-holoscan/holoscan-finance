@@ -1,6 +1,7 @@
 # Test, benchmark and tooling dependencies on top of the Holoscan SDK 5.0 image, which already
-# ships NumPy, CuPy, pytest and cuda-python. The SDK itself is never a pip dependency (PyPI tops
-# out at 4.6), and neither is pybind11: the native drain must share DAQIRI's pybind11 2.x ABI.
+# ships NumPy, CuPy, pytest and cuda-python. The SDK itself is never a pip dependency (Holoscan
+# SDK 5.0 is not published on PyPI), and neither is pybind11: the native drain must share
+# DAQIRI's pybind11 2.x ABI.
 # Pinned exactly (the versions validated in the receiver image); CI uses this file as constraints.
 scipy==1.18.1
 threadpoolctl==3.7.0

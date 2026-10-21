@@ -44,7 +44,6 @@ from holoscan_finance.dashboard.server import make_app  # noqa: E402
 REPO = Path(__file__).parents[3]
 MIDNIGHT = day_start_ns("2025-04-01")
 PLAN = {"lanes": [], "edges": [], "clocks": [], "automatic_partitions": [], "sdk": "5.0.0"}
-LEGACY_TOKEN = {"udp": "async", "daqiri-host": "ano", "gpudirect": "gpu", "replay": "replay"}
 FINISH_COMPARE = {
     "start_ns", "end_ns", "finished_ns", "seconds", "generation", "valid", "observations",
     "packets", "wire_messages", "received_observations_per_second", "sequence_gaps",
@@ -118,7 +117,7 @@ def test_index_serves_the_dashboard_page():
 
 def test_snapshot_before_the_source_opens():
     s = client_for(make_ctx("udp")).get("/snapshot").json()
-    assert s["network"] == {"ready": False, "status": "starting", "ingest": "async"}
+    assert s["network"] == {"ready": False, "status": "starting", "ingest": "udp"}
     assert s["graph_status"] == "starting" and s["generation"] == 0
 
 
@@ -232,18 +231,18 @@ def test_capture_lifecycle_and_finish_contract():
     time.sleep(max(0.0, (status["end_ns"] - time.time_ns()) / 1e9) + 0.05)
     result = client.post("/capture/finish").json()
     assert set(result) == FINISH_COMPARE | FINISH_ADDED
-    assert result["ingest"] == "gpu" and result["wire_protocol"] == PROTOCOL
+    assert result["ingest"] == "gpudirect" and result["wire_protocol"] == PROTOCOL
     assert result["settings"] == ctx.settings.as_params()
     assert result["minimum_update_interval_seconds"] == 0.05
     assert client.get("/capture").json()["closed"] is True
 
 
 @pytest.mark.parametrize("mode", ["udp", "daqiri-host", "gpudirect", "replay"])
-def test_finish_capture_reports_the_legacy_ingest_token(mode):
+def test_finish_capture_reports_the_ingest_mode(mode):
     ctx = make_ctx(mode, "gpu")
     ctx.tap.capture = LatencyCapture(1, 1, start_ns=time.time_ns() - 2 * 10**9, backend="gpu")
     result = client_for(ctx).post("/capture/finish").json()
-    assert result["ingest"] == LEGACY_TOKEN[mode]  # compare_runs.py reads cpu["ingest"]
+    assert result["ingest"] == mode  # compare_runs.py reads cpu["ingest"]
     assert FINISH_ADDED <= set(result) and result["analytics_backend"] == "gpu"
 
 

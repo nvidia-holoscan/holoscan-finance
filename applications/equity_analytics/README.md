@@ -3,8 +3,7 @@
 A live NYQ equity dashboard on Holoscan SDK 5. The MITCH feed flows into five-second quote
 bars, then rolling volatility, covariance and correlation on the GPU, then a web page. In
 the default `compare` mode, a CPU worker recomputes every validated window alongside, so
-each published GPU result has a matched CPU result. This is the Holoscan 5 port of the 4.3
-application, `equity_demo.py` and the `holoscan.equities.stream` module it ran.
+each published GPU result has a matched CPU result.
 
 The application is one plain composition of `holoscan.finance` operators
 ([`equity_analytics.py`](equity_analytics.py), with no operator classes of its own). Only
@@ -26,9 +25,8 @@ crosscheck  risk.validate ─lossless(2)─► crosscheck ─lossless(2)─► p
 topics      risk ─LATEST─► risk_summary ─LATEST─► holomq://finance.risk                  --topics only
 ```
 
-The 4.3 names `--ingest async|ano|gpu` and the `--ano-*` flags still work for this release,
-with a deprecation warning. GPU front ends always run GPU analytics (`compare` or `gpu`), so
-market data never reaches the CPU.
+GPU front ends always run GPU analytics (`compare` or `gpu`), so market data never reaches
+the CPU.
 
 ## Run
 
@@ -68,7 +66,7 @@ the dashboard.
 
 **NIC modes are not in `metadata.json`.** `gpudirect` and `daqiri-host` need DAQIRI, a
 ConnectX NIC, root and hugepages. They run only through
-[`deploy/igx_thor/igx_ano_run.sh`](../../deploy/igx_thor/README.md) (private IPC,
+[`deploy/igx_thor/igx_run.sh`](../../deploy/igx_thor/README.md) (private IPC,
 `--shm-size=4g`), never through `holoscan run`, which starts an image without DAQIRI and
 always adds `--ipc=host`.
 
@@ -99,7 +97,7 @@ and the placement as JSON. `--expect-windows N` requires N analyzed windows (and
 - `OnClock` sources with hold-and-retry on `BLOCKING` edges, and a lossless same-lane
   `OnEach` chain: no thread hop per packet.
 - A `DROP_OLDEST`/1 latest-only edge from bars into an `OnClock(1 ms)` + `DrainAll` risk
-  operator, which keeps 4.3's run-on-arrival latency and minimum update interval.
+  operator, so analysis runs on arrival at a bounded rate (the minimum update interval).
 - Authored lanes with `ThreadPlacement`; `--ingest-cpus` and `--ingest-busy-poll` place
   the ingest lane, and no lane runs on the DAQIRI lcores.
 - Plan rules checked on `plan.json()` before the run (`--plan-only`, `--plan-json`,

@@ -18,7 +18,7 @@
     ],
     "version": "0.2.0",
     "changelog": {
-      "0.2.0": "Holoscan SDK 5.0 port"
+      "0.2.0": "Holoscan SDK 5.0 operator with typed ports, Params and a temporal contract."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

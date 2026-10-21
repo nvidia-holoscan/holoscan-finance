@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Device-resident quote bars match the host ``QuoteBars`` through a sequence gap, on the
-fused and the general path (from 4.3 ``test_equities_gpu``), and the batched host mirrors
-``counts()`` and ``symbol_arrays()`` are exact."""
+fused and the general path, and the batched host mirrors ``counts()`` and
+``symbol_arrays()`` are exact."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def ulps(a, b):
 
 
 def stream_groups(packets=900, group=97):
-    """The 4.3 synthetic stream with a three-packet wire loss, in 97-packet groups."""
+    """The synthetic stream with a three-packet wire loss, in 97-packet groups."""
     payloads = synthetic_stream(np.random.default_rng(99), packets, UNIVERSE, MIDNIGHT)
     del payloads[400:403]  # wire loss: the gap path must reset marks identically
     for lo in range(0, len(payloads), group):

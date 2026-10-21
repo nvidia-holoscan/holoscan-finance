@@ -17,9 +17,9 @@ equality over a full recorded trading day.
 out of the raw Ethernet frames DAQIRI DMA'd into GPU memory, applying
 ``strip_udp_datagram``'s IPv4/UDP checks and then the ``inspect_unit`` framing check.
 
-Verbatim from 4.3 ``holoscan.marketdata.gpu_mitch``: the kernel source and the compile
-flags (``--device-int128 --fmad=false``) are byte-identical, pinned by SHA-256 digests in
-``test_kernel_sources_verbatim``.
+The module compiles with ``--device-int128`` (the exact 128-bit error in the correctly
+rounded price division) and ``--fmad=false`` (no FMA contraction), so the decode stays
+bit-identical to the host decoder.
 """
 
 from __future__ import annotations

@@ -67,7 +67,7 @@ python3 applications/market_data_bench/market_data_bench.py \
 | `--pcap`, `--tape` | the capture and the prepared tape of its day (the manifest: symbols, date) |
 | `--pps` (200000), `--loops` (1) | replay rate (0: unpaced, as fast as the ring and the graph allow); passes over the capture, each later pass a new generation from a new source port |
 | `--burst-packets` (4096), `--rx-timeout-us` (20000), `--nic-bufs` (0) | DAQIRI's burst rule; the NIC buffer model (0: the drain holds instead of dropping) |
-| `--batch-messages`, `--ring-size`, `--gpu-device` | the measured 4.3 GPUDirect sizes by default |
+| `--batch-messages`, `--ring-size`, `--gpu-device` | the GPUDirect defaults (`IngestDefaults`: 131,072-message batches, a 1,048,576-slot ring; device 0) |
 | `--bar-seconds` ... `--max-spread-bps` | the bar settings, as in `equity_analytics` |
 | `--check`, `--risk {none,gpu}`, `--interval` | verification; the risk lane and its minimum interval |
 | `--ingest-cpus`, `--ingest-busy-poll` | placement of the ingest lane |

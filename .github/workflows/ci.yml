@@ -6,7 +6,7 @@
 #   unit-sdk   the Holoscan 5.0 image on a CPU runner, with a stub libcuda: operator harness
 #              tests on CPU backends, every application plan, CPU graphs
 #   gpu        a self-hosted GPU runner: GPU and slow tests, CTest, smoke runs, the wheel
-# The Holoscan SDK is not on PyPI (it tops out at 4.6), so the SDK tiers run in the 5.0 image.
+# Holoscan SDK 5.0 is not published on PyPI, so the SDK tiers run in the 5.0 image.
 # Inside a container holoscan-cli always runs with --local: its container mode needs a docker
 # daemon. `timing` tests never run in CI (shared runners make them flaky).
 name: CI

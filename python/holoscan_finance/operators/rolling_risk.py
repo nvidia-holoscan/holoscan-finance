@@ -7,9 +7,10 @@ Ports: ``window`` (in, ``BarWindow``) -> ``risk`` (out, ``RiskUpdate``) and, onl
 ``LATEST`` from ``QuoteBarsOp`` in another lane; ``risk`` -> ``CallbackSinkOp``
 ``lossless(8)``, same lane; ``validate`` -> ``RiskCrossCheckOp`` ``lossless(2)``. Lane: the
 entry of ``analytics``. It polls every ``poll_period_us`` (1 ms) and keeps the newest window
-in a slot, analyzing it as soon as ``min_interval_us`` has passed: 4.3's run-on-arrival
-timing (pick-up p50 0.99 ms, measured). ``executor="process"`` runs the analysis in a spawned
-worker (host front ends: off the decoder's GIL). Processor: ``analytics.rolling.RollingRisk``.
+in a slot, analyzing it as soon as ``min_interval_us`` has passed: run-on-arrival timing at
+a bounded rate (pick-up p50 0.99 ms, measured). ``executor="process"`` runs the analysis in
+a spawned worker (host front ends: off the decoder's GIL). Processor:
+``analytics.rolling.RollingRisk``.
 """
 
 from __future__ import annotations
@@ -38,7 +39,11 @@ class RollingRiskOp(hs.Operator):
     )
     bar_seconds = hs.Param(5, range=(1, 3600), description="annualizes the volatility")
     gpu_device = hs.Param(0, range=(0, 63))
-    min_interval_us = hs.Param(50_000, range=(1000, 60_000_000), description="4.3 --interval")
+    min_interval_us = hs.Param(
+        50_000,
+        range=(1000, 60_000_000),
+        description="--interval: at most one analysis per interval",
+    )
     poll_period_us = hs.Param(1000, range=(100, 100_000))
     host_variance = hs.Param(False, description="inline: rank by host NumPy variance")
     cross_check = hs.Param(False, description="claim the gate and emit validated updates")

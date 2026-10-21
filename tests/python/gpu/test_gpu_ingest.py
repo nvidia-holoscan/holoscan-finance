@@ -3,7 +3,7 @@
 """``GpuIngest`` on device ring rows published through ``FakeNativeDrain``: staging (one
 zero-copy view of consecutive ring rows, a copy otherwise, including across the ring end),
 decode equal to the host decoder, ring release only after the legacy stream synchronized,
-the batch size, stale packets and the capture tap (from 4.3 ``test_gpu_source_accounting``).
+the batch size, stale packets and the capture tap.
 """
 
 from __future__ import annotations

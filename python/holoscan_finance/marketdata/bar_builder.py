@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Quote bars for one feed generation on the GPU or with NumPy: the processor of ``QuoteBarsOp``.
 
-Merges 4.3 ``GpuQuoteBarsOp.compute`` (gpu: ``GpuQuoteBars`` + ``apply_sequence``) and the
-host ``EquityState.observe`` (cpu: ``QuoteBars`` + ``SequenceTracker``). Batches of other
-generations are stale, a sequence gap resets the marks, and a window is produced only when a
-bar closed. ``counters()`` and ``symbol_snapshot()`` give the immutable host mirrors that
-the bars lane publishes, so the HTTP thread never touches CUDA (gpu: one 40-byte D2H per
-batch; one batched D2H per snapshot).
+gpu: ``GpuQuoteBars`` + ``apply_sequence``; cpu: ``QuoteBars`` + ``SequenceTracker``.
+Batches of other generations are stale, a sequence gap resets the marks, and a window is
+produced only when a bar closed. ``counters()`` and ``symbol_snapshot()`` give the immutable
+host mirrors that the bars lane publishes, so the HTTP thread never touches CUDA (gpu: one
+40-byte D2H per batch; one batched D2H per snapshot).
 """
 
 from __future__ import annotations
@@ -136,7 +135,7 @@ class BarBuilder:
         )
 
     def _arrived(self) -> None:
-        # First and last arrival of the current generation (burst timing, 4.3 _arrived).
+        # First and last arrival of the current generation (burst timing).
         now = time.monotonic_ns()
         self._first_ns = self._first_ns or now
         self._last_ns = now

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The 4.3 command-line tools under ``holoscan_finance.tools``: the replay sender's wire
-packets, ``bench_replay inspect``/``register``, and every CLI's ``--help`` without the SDK."""
+"""The command-line tools under ``holoscan_finance.tools``: the replay sender's wire packets,
+``bench_replay inspect``/``register``, and every CLI's ``--help`` without the SDK."""
 
 from __future__ import annotations
 

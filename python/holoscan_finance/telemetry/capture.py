@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exact empirical latency percentiles for a bounded, explicitly timed capture.
 
-``percentiles`` and ``LatencyCapture`` are verbatim from 4.3 ``equities.capture``: every
-packet in the interval is counted by its receive stamp and every completed calculation is
-kept, with no rolling averages or HTTP sampling, so the published receive-to-result
-percentiles stay comparable. ``CaptureTap`` holds the active capture for the decode sites
-(``record_*``), ``ResultsStore`` and the HTTP endpoints (was ``EquityState.capture``).
+``percentiles`` and ``LatencyCapture``: every packet in the interval is counted by its
+receive stamp and every completed calculation is kept, with no rolling averages or HTTP
+sampling, so the published receive-to-result percentiles are exact and comparable between
+runs. ``CaptureTap`` holds the active capture for the decode sites (``record_*``),
+``ResultsStore`` and the HTTP endpoints.
 """
 
 from __future__ import annotations
@@ -328,7 +328,7 @@ class CaptureTap:
                 capture.record_packet(batch)
 
     def record_gpu_batch(self, batch: GpuReplayBatch) -> None:
-        """Count every packet of a device batch (the 4.3 ``_PacketView`` loop)."""
+        """Count every packet of a device batch."""
         capture = self.capture
         if capture is not None:
             for view in GpuMitchDecoder.capture_views(batch):

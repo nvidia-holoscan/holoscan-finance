@@ -61,8 +61,7 @@ def test_every_metadata_file_validates_against_the_cli_schemas_without_warnings(
 
 
 def test_every_metadata_file_is_a_holoscan_5_entry_with_the_module_authors():
-    # One author list for the module, its operators and its applications: the 4.3 authors
-    # of the GPU ingest work and the 5.0 port.
+    # One author list for the module, its operators and its applications.
     authors = [a["name"] for a in MODULE["authors"]]
     assert authors == ["Bruce Hashemian", "Jake Goldberg"]
     files = sorted(validate_metadata.iter_metadata_files(REPO))

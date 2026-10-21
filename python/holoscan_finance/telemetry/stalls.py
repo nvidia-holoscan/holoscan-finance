@@ -6,8 +6,7 @@ A 5 ms ticker thread (``stall-heartbeat``) measures how late it wakes: a late ti
 the whole process lost the GIL or the CPU, the full-day burst failure mode (a stall longer
 than the NIC buffer pool drops packets). Ticks later than ``threshold_ms`` (50 ms) are
 recorded as ``heartbeat`` stall events on the ingest stats. A ``gc.callbacks`` hook times
-collections; it runs in whichever thread collects, so it takes no lock. From 4.3
-``EquityState.start_heartbeat``, ``_gc_timer`` and ``_stalls``.
+collections; it runs in whichever thread collects, so it takes no lock.
 """
 
 from __future__ import annotations
@@ -60,7 +59,7 @@ class StallMonitor:
         self.heartbeat.update(max_ms=0.0, at_s=None)
 
     def stalls(self, analytics_max_ms: float) -> dict:
-        """The 4.3 ``fullday.stalls`` dict: the source's stall record plus these monitors and
+        """The ``fullday.stalls`` dict: the source's stall record plus these monitors and
         the slowest analytics window."""
         return dict(
             self.ingest.stalls_view(),

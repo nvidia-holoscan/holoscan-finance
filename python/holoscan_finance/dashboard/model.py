@@ -1,14 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The ``/snapshot`` JSON: every 4.3 key and value, built from host objects only.
+"""The ``/snapshot`` JSON, built from host objects only.
 
-4.3 held ``state.lock`` (shared with the bars operator) across four D2H copies per request;
-here the bars lane publishes exact counters per batch and a symbol snapshot at most every
+The bars lane publishes exact counters per batch and a symbol snapshot at most every
 250 ms, so a snapshot (about 1-3 ms of Python) never touches CUDA, never takes a
-data-plane lock, and reads the directory without a lock. The ``network`` constants are
-4.3's verbatim (``index.html``, ``measure.py`` and ``compare_runs.py`` read them); the
-``engine`` block is new and additive. From 4.3 ``EquityState.snapshot``, ``network``,
-``start_capture`` and ``finish_capture``.
+data-plane lock, and reads the directory without a lock. ``index.html``, ``measure.py``
+and ``compare_runs.py`` read the ``network`` constants; ``network.ingest`` is the
+canonical ingest mode (``udp``, ``daqiri-host``, ``gpudirect`` or ``replay``).
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from ..nyq.mapping import PROTOCOL
-from ..settings import GPU_INGEST_MODES, LEGACY_INGEST_TOKEN
+from ..settings import GPU_INGEST_MODES
 
 TRANSPORT = "MITCH (MIT303 11.9) / UDP · NYQ replay mapping"
 MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
@@ -46,7 +44,7 @@ class DashboardModel:
         self.ctx = ctx
 
     def snapshot(self) -> dict:
-        """``GET /snapshot``: every 4.3 key, plus ``engine``."""
+        """``GET /snapshot`` (including ``engine``)."""
         c = self.ctx
         d = c.directory.current  # one lock-free read: every part below uses this generation
         view = c.results.view()
@@ -69,9 +67,9 @@ class DashboardModel:
             profile={k: d.manifest[k] for k in PROFILE_KEYS} if d is not None else {},
             universe=list(d.symbols) if d is not None else [],
         )
-        if d is not None:  # 4.3 had bars (and so observations) from the first manifest on
+        if d is not None:  # observations exist from the first manifest on
             # One read: the bars lane replaces the counters per batch and drops them at a
-            # generation change. Before this generation's first batch, 4.3's fresh zeros.
+            # generation change. Before this generation's first batch: zeros.
             counters = c.bars_stats.counters
             current = counters is not None and counters.generation == d.generation
             result["observations"] = {
@@ -90,7 +88,7 @@ class DashboardModel:
         return result
 
     def _prices(self, generation: int, live: dict | None) -> list[dict] | None:
-        """The 30 most volatile eligible instruments, as 4.3 ranked them."""
+        """The 30 most volatile eligible instruments, ranked by annual volatility."""
         snap = self.ctx.bars_stats.symbol_snapshot
         if (
             not live
@@ -114,13 +112,12 @@ class DashboardModel:
         ]
 
     def network(self) -> dict:
-        """``/snapshot.network``: receive counters, the arrival-rate buckets and the 4.3
-        constants. Before the source opens it is exactly 4.3's starting dict."""
+        """``/snapshot.network``: receive counters, the arrival-rate buckets and the
+        transport constants. Before the source opens it is the starting dict."""
         c = self.ctx
         s, bars, mode = c.ingest_stats, c.bars_stats, c.args.ingest
-        token = LEGACY_INGEST_TOKEN[mode]
         if not s.opened:
-            return {"ready": False, "status": "starting", "ingest": token}
+            return {"ready": False, "status": "starting", "ingest": mode}
         now = time.time_ns()
         buckets = s.feed_buckets(last=100)
         boundary = now // 100_000_000 * 100
@@ -132,8 +129,7 @@ class DashboardModel:
             else "idle"
             if age is not None
             else "waiting",
-            ingest=token,
-            ingest_mode=mode,
+            ingest=mode,
             transport=TRANSPORT,
             wire_protocol=PROTOCOL,
             message_count_scope=MESSAGE_COUNT_SCOPE,
@@ -190,7 +186,7 @@ class DashboardModel:
         )
 
     def start_capture(self, payload: dict) -> dict:
-        """``POST /capture``: needs a full return window, as 4.3 did. ValueError otherwise."""
+        """``POST /capture``: needs a full return window. ValueError otherwise."""
         c = self.ctx
         seconds = float(payload.get("seconds", 120))
         if c.tap.active:
@@ -201,11 +197,11 @@ class DashboardModel:
         return c.tap.start(seconds, c.directory.generation, c.args.analytics_backend)
 
     def finish_capture(self) -> dict:
-        """``POST /capture/finish``: the capture's result plus 4.3's run description
+        """``POST /capture/finish``: the capture's result plus the run description
         (``compare_runs.py`` reads ``ingest``). ValueError if no capture was started."""
         c = self.ctx
         result = c.tap.finish()
-        result["ingest"] = LEGACY_INGEST_TOKEN[c.args.ingest]
+        result["ingest"] = c.args.ingest
         result["settings"] = c.settings.as_params()
         result["wire_protocol"] = PROTOCOL
         result["minimum_update_interval_seconds"] = c.args.interval

@@ -167,7 +167,8 @@ def test_every_combination_compiles_as_designed(
         assert carved not in params["source"]["helper_cpus"]
     if ingest in DAQIRI_INGEST_MODES:
         assert cpus.reserved == set(mask[-2:])
-        assert params["source"]["init_cpus"] == sorted(cpus.all)  # 4.3: init on the full mask
+        # daqiri_init runs on the full mask
+        assert params["source"]["init_cpus"] == sorted(cpus.all)
         assert params["source"]["master_core"] == mask[-2]
 
     risk = params["risk"]

@@ -5,9 +5,9 @@
 Ports: ``items`` (in, any pyobject). Edges: ``lossless(8)`` from risk, ``lossless(2)`` from
 the cross-check, ``lossless(64)`` from bars when every window matters (bench, tests). Lane:
 the producer's; fed only from another lane it would be that lane's second entry operator.
-The publication half of 4.3 ``PublishOp``: results publish as soon as risk emits them,
-where 4.3 polled every 5 ms. An exception from the callback fails the run; callbacks that
-must not stop the graph (``ResultsStore.on_risk``, ``on_comparison``) catch internally.
+Results publish as soon as risk emits them. An exception from the callback fails the run;
+callbacks that must not stop the graph (``ResultsStore.on_risk``, ``on_comparison``) catch
+internally.
 """
 
 from __future__ import annotations

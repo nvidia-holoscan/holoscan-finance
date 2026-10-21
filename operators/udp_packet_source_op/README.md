@@ -9,8 +9,8 @@ activation emits the oldest packets as one `PacketBatch` for `MitchDecodeOp`:
 socket → udp-drain: recvfrom, receive accounting, ring → packets (PacketBatch) → MitchDecodeOp
 ```
 
-Processor: `holoscan_finance.ingest.host_receivers.UdpReceiver`. Derived from 4.3
-`AsyncUdpSourceOp`, with decode moved into `MitchDecodeOp`.
+Processor: `holoscan_finance.ingest.host_receivers.UdpReceiver`. Decode is the separate
+`MitchDecodeOp`.
 
 ## Ports
 
@@ -37,9 +37,9 @@ Contract: `OnClock(poll_period_us)`.
 
 ## Behaviour
 
-- **Accounting** (4.3 rules, per datagram): sessions are keyed by sender address and MITCH
-  group; a sequence above the expected one adds the gap to `dropped` (messages), one below it
-  is out of order; malformed units are counted and not queued.
+- **Accounting** (per datagram, `ReceiveAccounting`): sessions are keyed by sender address
+  and MITCH group; a sequence above the expected one adds the gap to `dropped` (messages),
+  one below it is out of order; malformed units are counted and not queued.
 - **Backpressure.** A full edge to the decoder is held and retried at the next activation;
   a compute with a backlog emits nothing new.
 - **End of input.** With `keep_alive` off, `stats.eof` is set once the socket was silent for

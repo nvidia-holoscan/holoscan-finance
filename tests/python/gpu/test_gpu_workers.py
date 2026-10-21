@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Spawned CPU and GPU workers agree after a roll and a seek (4.3
-``test_persistent_workers_match_after_roll_and_seek``, which failed on 5.0 under the old
-``holoscan.equities`` package and passes here), and ``gpu_window`` runs in a pinned worker."""
+"""Spawned CPU and GPU workers agree after a roll and a seek, and ``gpu_window`` runs in a
+pinned worker."""
 
 from __future__ import annotations
 

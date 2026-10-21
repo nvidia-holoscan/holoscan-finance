@@ -1,17 +1,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The /snapshot contract: 4.3 key sets per ingest mode, backend and state, and pinned values.
+"""The /snapshot contract: expected key sets per ingest mode, backend and state, and pinned
+values.
 
-The golden lists come from the 4.3 code paths (``EquityState.snapshot`` and ``network``);
-``engine`` and ``network.ingest_mode`` are the only additions. Tools read the pinned values:
-``measure.py`` and ``ano_runtime.wait`` read ``network.ingest``, ``index.html`` prints
-``network.transport``. Every field ``index.html`` reads must be present. The context is the
-``EquityContext`` attribute set over the real control and telemetry objects.
+Tools read the pinned values: ``measure.py`` and ``preflight.wait`` read ``network.ingest``
+(the canonical ingest mode), ``index.html`` prints ``network.transport``. Every field
+``index.html`` reads must be present. The context is the ``EquityContext`` attribute set
+over the real control and telemetry objects.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -38,7 +39,7 @@ from holoscan_finance.payloads import (
     SymbolSnapshot,
 )
 from holoscan_finance.ref import Knob
-from holoscan_finance.settings import BarSettings
+from holoscan_finance.settings import INGEST_MODES, BarSettings
 from holoscan_finance.telemetry.capture import CaptureTap
 from holoscan_finance.telemetry.stalls import StallMonitor
 from holoscan_finance.telemetry.stats import BarsStats, IngestStats, RiskStats, SourceProbe
@@ -49,14 +50,13 @@ INDEX_HTML = Path(__file__).parents[3] / "python/holoscan_finance/dashboard/webu
 MIDNIGHT = day_start_ns("2025-04-01")
 SYMBOLS = [f"SYM{i}" for i in range(40)]
 
-# ---- golden 4.3 key sets ------------------------------------------------------------------
+# ---- expected key sets -------------------------------------------------------------------
 TOP = {
     "graph_status", "error", "comparison_failure", "settings",
     "minimum_update_interval_seconds", "analytics_backend", "feed_control", "sender_status",
     "generation", "live", "comparison", "comparisons", "history", "capture", "profile",
-    "universe", "network", "fullday", "fullday_available",
+    "universe", "network", "fullday", "fullday_available", "engine",
 }  # fmt: skip
-ADDED_TOP = {"engine"}
 SETTINGS = {"bar_seconds", "window_seconds", "stale_seconds", "min_bars", "max_spread_bps"}
 FEED_CONTROL = {"speed", "rate", "paused", "seek", "seek_seq"}
 PROFILE = {"date", "events", "profile", "start_ns", "end_ns"}
@@ -70,7 +70,6 @@ NETWORK = {
     "malformed_packets", "out_of_order_packets", "stale_packets", "error", "buckets",
     "gpu_ingest",
 }  # fmt: skip
-ADDED_NETWORK = {"ingest_mode"}
 GPU_INGEST = {
     "bursts", "non_udp_frames", "drain_host_ms", "frame_fetch", "ring_peak", "payload_path",
 }  # fmt: skip
@@ -104,8 +103,7 @@ ENGINE = {
     "sdk", "lanes", "edges", "clocks", "termination", "lane_cpus", "risk", "source", "replay",
 }  # fmt: skip
 
-# ---- pinned values (4.3 constants, verbatim) ----------------------------------------------
-LEGACY_TOKEN = {"udp": "async", "daqiri-host": "ano", "gpudirect": "gpu", "replay": "replay"}
+# ---- pinned values -----------------------------------------------------------------------
 TRANSPORT = "MITCH (MIT303 11.9) / UDP · NYQ replay mapping"
 WIRE_PROTOCOL = "mit303-11.9-nyq-replay-v1"
 MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
@@ -285,7 +283,7 @@ def reach(ctx, state):
 
 
 def expected_top(ctx, state):
-    keys = TOP | ADDED_TOP
+    keys = set(TOP)
     if state != "before_manifest":
         keys |= {"observations"}
     if state in ("live", "live_comparison"):
@@ -314,14 +312,14 @@ def test_snapshot_key_sets(mode, backend, state):
     assert s["analytics_backend"] == backend and s["minimum_update_interval_seconds"] == 0.05
     assert s["fullday"] is None and s["fullday_available"] is False
     if state == "before_manifest":
-        assert s["network"] == {"ready": False, "status": "starting", "ingest": LEGACY_TOKEN[mode]}
+        assert s["network"] == {"ready": False, "status": "starting", "ingest": mode}
         assert (s["generation"], s["profile"], s["universe"]) == (0, {}, [])
         assert s["live"] is None and s["comparisons"] == 0 and s["history"] == []
         assert s["graph_status"] == "starting" and s["error"] is None
         return
     n = s["network"]
-    assert set(n) == NETWORK | ADDED_NETWORK
-    assert n["ingest_mode"] == mode and n["ready"] is True and n["status"] == "receiving"
+    assert set(n) == NETWORK
+    assert n["ingest"] == mode and n["ready"] is True and n["status"] == "receiving"
     if mode in ("gpudirect", "replay"):
         assert set(n["gpu_ingest"]) == GPU_INGEST
         assert n["gpu_ingest"]["payload_path"] == PAYLOAD_PATH[mode]
@@ -351,16 +349,16 @@ def test_snapshot_key_sets(mode, backend, state):
 def test_pinned_network_values(mode):
     ctx = make_ctx(mode, "gpu")
     model = DashboardModel(ctx)
-    assert model.network() == {"ready": False, "status": "starting", "ingest": LEGACY_TOKEN[mode]}
+    assert model.network() == {"ready": False, "status": "starting", "ingest": mode}
     open_source(ctx)
     n = model.network()
-    assert n["ingest"] == LEGACY_TOKEN[mode]
+    assert n["ingest"] == mode
     assert n["transport"] == TRANSPORT
     assert n["wire_protocol"] == WIRE_PROTOCOL == PROTOCOL
     assert n["message_count_scope"] == MESSAGE_COUNT_SCOPE
 
 
-def test_network_counters_follow_the_4_3_definitions():
+def test_network_counters_follow_their_definitions():
     ctx = make_ctx("udp", "compare")
     open_source(ctx)
     ctx.ingest_stats.dropped, ctx.ingest_stats.ring_dropped = 5, 6
@@ -531,6 +529,12 @@ def test_every_field_index_html_reads_is_present(monkeypatch):
     f = DashboardModel(ctx).snapshot()["fullday"]
     assert f["status"] == "done" and set(FULLDAY_READS) <= set(f)
     assert all(f"f.{name}" in html for name in FULLDAY_READS)
+
+
+def test_index_html_branches_on_the_snapshot_ingest_modes():
+    # The network detail and the GPU device rows are picked by network.ingest.
+    tokens = set(re.findall(r"n\.ingest===?'([^']*)'", INDEX_HTML.read_text()))
+    assert tokens == {"daqiri-host", "gpudirect", "replay"} and tokens <= set(INGEST_MODES)
 
 
 def test_snapshot_imports_no_cupy(monkeypatch):

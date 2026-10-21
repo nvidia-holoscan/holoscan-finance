@@ -4,8 +4,7 @@
 
 Same checks as the GPU decoder: golden bytes, randomized streams, mutated packets
 exercising every rejection rule, sign-magnitude prices above 2**53, and every
-thread count. Needs numba>=0.68, not a GPU; skipped without it (from 4.3
-``test_equities_cpu_decode``).
+thread count. Needs numba>=0.68, not a GPU; skipped without it.
 """
 
 from __future__ import annotations

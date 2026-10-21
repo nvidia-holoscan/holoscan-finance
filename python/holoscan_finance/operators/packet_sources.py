@@ -6,10 +6,8 @@ Port: ``packets`` (out, ``PacketBatch`` of up to ``batch_size`` messages). Contr
 ``OnClock(poll_period_us)``. Edge: ``packets -> MitchDecodeOp.packets`` with ``lossless(16)``
 in the same lane; the source is the entry of ``ingest``. A drain thread copies datagrams
 into a host ring after a header peek, so decode load never drops packets at the socket or
-NIC (overload is ``ring_dropped``); decode is the separate ``MitchDecodeOp``. These carry
-the published host baselines (0.28M msgs/s Python decode; 4,500 packets/s through DAQIRI
-host memory). Processors: ``ingest.host_receivers``. From 4.3 ``AsyncUdpSourceOp`` and
-``AnoSourceOp``.
+NIC (overload is ``ring_dropped``); decode is the separate ``MitchDecodeOp``. Processors:
+``ingest.host_receivers``.
 """
 
 from __future__ import annotations
@@ -146,7 +144,7 @@ class UdpPacketSourceOp(_HostPacketSourceBase):
 
 class DaqiriPacketSourceOp(_HostPacketSourceBase):
     """DAQIRI receive into pinned host memory (thread ``daqiri-host-drain``): the NIC DMAs
-    flow-matched frames to the host and the drain copies each one out (4.3 ``ano``)."""
+    flow-matched frames to the host and the drain copies each one out."""
 
     pcie_address = hs.Param("0004:03:00.0", description="NIC PCIe address")
     daqiri_config = hs.Param(
@@ -162,7 +160,7 @@ class DaqiriPacketSourceOp(_HostPacketSourceBase):
     rx_timeout_us = hs.Param(5000, range=(0, 1_000_000), description="DAQIRI partial-burst timeout")
     daqiri_log_level = hs.Param("warn", allowed=LOG_LEVELS)
     isolate_cores = hs.Param(
-        False, description="move this process's threads off the lcores (4.3 ano never did)"
+        False, description="move this process's threads off the lcores (off by default)"
     )
     init_cpus = hs.Param(
         [], description="mask to widen to around daqiri_init; the lane mask is always restored"

@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""MIT303 byte fixtures, sign-magnitude prices, message layouts and fail-closed framing
-(from 4.3 ``test_mitch``)."""
+"""MIT303 byte fixtures, sign-magnitude prices, message layouts and fail-closed framing."""
 
 from __future__ import annotations
 

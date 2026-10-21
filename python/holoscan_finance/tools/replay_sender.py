@@ -5,12 +5,12 @@
     python -m holoscan_finance.tools.replay_sender --data TAPE [--host 127.0.0.1] [--port 26400]
         [--control-url http://127.0.0.1:8080] [--loops 0]
 
-The external feed of the ``udp``, ``daqiri-host`` and ``gpudirect`` front ends (from 4.3
-``equities.replay``, same flags). Every seek or loop is a new generation from a fresh UDP
-source port, registered with ``POST /manifest`` before its first packet, so the receiver
-can tell old packets from new ones. The pacing (``/feedrate``) is polled every 200 ms; the
-final Status marker of a pass closes the last regular-session bar. The Python sender tops
-out at a few thousand packets/s; ``bench_replay`` covers higher rates. CPU only.
+The external feed of the ``udp``, ``daqiri-host`` and ``gpudirect`` front ends. Every seek
+or loop is a new generation from a fresh UDP source port, registered with ``POST /manifest``
+before its first packet, so the receiver can tell old packets from new ones. The pacing
+(``/feedrate``) is polled every 200 ms; the final Status marker of a pass closes the last
+regular-session bar. The Python sender tops out at a few thousand packets/s;
+``bench_replay`` covers higher rates. CPU only.
 """
 
 from __future__ import annotations

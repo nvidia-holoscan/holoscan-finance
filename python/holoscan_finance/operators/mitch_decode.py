@@ -5,9 +5,9 @@
 Ports: ``packets`` (in, ``PacketBatch``) -> ``events`` (out, ``list[ReplayBatch]``, one
 batch per accepted packet). Edges: ``lossless(16)`` from the source and ``lossless(16)``
 into ``QuoteBarsOp(backend="cpu")``, all in the ``ingest`` lane (no hop per packet). The
-directory is read once per batch, immediately before decoding, as 4.3 ``EquityState.decode``
-did, so a ``POST /manifest`` reaches the next batch; packets from another sender port are
-stale. Processor: ``nyq.host_decoder.HostMitchDecoder`` (the 0.28M msgs/s host baseline).
+directory is read once per batch, immediately before decoding, so a ``POST /manifest``
+reaches the next batch; packets from another sender port are stale. Processor:
+``nyq.host_decoder.HostMitchDecoder`` (the host reference path).
 """
 
 from __future__ import annotations

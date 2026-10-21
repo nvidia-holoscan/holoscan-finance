@@ -6,8 +6,7 @@ Specification: https://docs.londonstockexchange.com/sites/default/files/document
 Prices use SIGN-MAGNITUDE, including the sign bit, per Appendix B. They are
 not two's-complement integers despite the specification's "signed" shorthand.
 This codec implements a subset, not an exchange connection/recovery service.
-Verbatim from 4.3 ``holoscan.marketdata.mitch``; the ``gpu_mitch`` kernels reproduce its
-framing and parsing rules.
+The ``gpu_mitch`` kernels reproduce its framing and parsing rules.
 """
 
 from __future__ import annotations

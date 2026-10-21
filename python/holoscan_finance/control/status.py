@@ -3,9 +3,8 @@
 """The run's state as ``/snapshot``, ``/healthz`` and the reports show it.
 
 The runner (or the dashboard's watcher) mirrors the ``RunSession`` here, so HTTP handlers
-never touch the session. A failed run reports its first error-severity diagnostic, the 5.0
-replacement for 4.3's ``state.error = str(exc)`` around ``graph.run()``. No Holoscan
-import: the session's enums are read by name.
+never touch the session. A failed run reports its first error-severity diagnostic. No
+Holoscan import: the session's enums are read by name.
 """
 
 from __future__ import annotations

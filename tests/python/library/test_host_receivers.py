@@ -3,8 +3,8 @@
 """Host receivers: the UDP socket over loopback and DAQIRI host memory through the fake
 ``daqiri`` (frame stripping, sequence accounting, the ring, failures, thread masks).
 
-From 4.3 ``test_ano_source_op`` and ``test_mitch`` (socket and DAQIRI receive identical
-units). Mask changes run in helper threads, so the test process keeps its own mask.
+Socket and DAQIRI receive identical units. Mask changes run in helper threads, so the test
+process keeps its own mask.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Separate streaming speedups require the predefined inputs and equivalent work
-(``tools.compare_runs``; from 4.3 ``test_equity_separate_runs``)."""
+(``tools.compare_runs``)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def runs():
         settings={"bar_seconds": 5},
         source_date="2025-04-01",
         requested_rate=75000,
-        ingest="ano",
+        ingest="daqiri-host",
         minimum_update_interval_seconds=0.05,
         valid=True,
         created_utc="2026-09-12",

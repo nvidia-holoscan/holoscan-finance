@@ -6,8 +6,7 @@ No custom GPU kernels. Maintain sum(r) and sum(r r.T); additions and expirations
 are BLAS matrix products. Missing returns never become displayed zero returns:
 only instruments valid throughout the current window enter the reported matrix.
 The CPU uses incremental BLAS too, rather than an artificially slow Python loop.
-Verbatim from 4.3 ``holoscan.marketdata.covariance`` (the eligibility and display rules
-behind the 4.3 CPU/GPU agreement checks).
+Its eligibility and display rules are the ones the CPU/GPU agreement checks assume.
 """
 
 from __future__ import annotations

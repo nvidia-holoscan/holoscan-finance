@@ -16,8 +16,7 @@
     "language": ["Python"],
     "version": "0.2.0",
     "changelog": {
-      "0.1.0": "NYQ trade/quote UDP replay into rolling price, volatility and correlation analytics with matched CPU/GPU measurements",
-      "0.2.0": "Holoscan SDK 5.0 port: one composition of holoscan.finance operators for every front end (udp, daqiri-host, gpudirect, NIC-free GPU replay), placed lanes, plan rules"
+      "0.2.0": "Holoscan SDK 5.0 application composed from holoscan.finance operators."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

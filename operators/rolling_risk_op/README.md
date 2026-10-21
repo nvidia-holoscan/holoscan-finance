@@ -12,9 +12,7 @@ Only instruments with returns throughout the window enter the matrix; missing re
 never treated as zero. The engine is
 [covariance.py](../../python/holoscan_finance/marketdata/covariance.py).
 
-Processor: `holoscan_finance.analytics.rolling.RollingRisk`. Derived from 4.3
-`GpuRollingRiskOp` (inline GPU), the host `RiskOp` with `gpu_window`/`cpu_window` (process
-executor) and `validate_next` (the cross-check gate).
+Processor: `holoscan_finance.analytics.rolling.RollingRisk`.
 
 ## Ports
 
@@ -35,9 +33,9 @@ Contract: `OnClock(poll_period_us).input(window, DrainAll())`, plus
 
 ## Why a 1 ms poll with an internal minimum interval
 
-4.3 ran risk as soon as a window was available *and* `--interval` had passed since the last
-run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms and enforcing
-`min_interval_us` in the operator measured a 0.99 ms pick-up at about 0.01 core.
+Risk should run as soon as a window is available *and* `--interval` has passed since the
+last run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms and
+enforcing `min_interval_us` in the operator measured a 0.99 ms pick-up at about 0.01 core.
 
 ## Params
 
@@ -47,7 +45,7 @@ run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms a
 | `executor` | str | `"inline"` | `inline` (in the lane) or `process` (one spawned worker; the host front ends use it to keep BLAS and CUDA off the decoder's GIL). `cpu`+`inline` is for tests: SciPy holds the GIL |
 | `bar_seconds` | int | `5` | annualizes volatility (252 days of 6.5 hours) |
 | `gpu_device` | int | `0` | CUDA device |
-| `min_interval_us` | int | `50000` | at most one analysis per interval (4.3 `--interval 0.05`) |
+| `min_interval_us` | int | `50000` | at most one analysis per interval (`--interval 0.05`) |
 | `poll_period_us` | int | `1000` | the poll clock |
 | `host_variance` | bool | `False` | inline: rank and select instruments by the NumPy variance of a host copy, as a NumPy reference would |
 | `cross_check` | bool | `False` | claim `gate` per analysis and emit claimed (validated) updates on `validate`; requires `gate` and `backend="gpu"` |
@@ -67,8 +65,8 @@ run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms a
 - Outputs go through hold-and-retry: on `BackpressuredError` the update is retried at the
   next poll, before any new analysis.
 - Process executor: the worker is spawned and pinged in `start()`; a worker exception sets
-  `RiskStats.error` (`"Analytics failed: ..."`) and stops further analyses, as 4.3 did, and
-  releases the gate if that window was validated (no comparison will come for it).
+  `RiskStats.error` (`"Analytics failed: ..."`) and stops further analyses, and releases the
+  gate if that window was validated (no comparison will come for it).
   `host_variance` needs the inline executor: the workers rank by their own variance.
   An inline exception fails the run.
 
@@ -78,7 +76,7 @@ run. A 50 ms clock alone would add 28 ms at p50 (measured); polling every 1 ms a
 - `risk` → `CallbackSinkOp` (`ResultsStore.on_risk`): `lossless(8)`, same lane.
 - `validate` → `RiskCrossCheckOp.risk`: `lossless(2)`, the `crosscheck` lane.
 - Lane: the entry operator of `analytics`. It waits on GPU syncs or futures, which release
-  the GIL. Inline GPU work runs on the legacy stream, as in 4.3.
+  the GIL. Inline GPU work runs on the legacy stream.
 
 ## Telemetry
 

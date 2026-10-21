@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``import holoscan`` in the tests is the installed Holoscan 5 SDK.
 
-The 4.3 conftest installed a 4.x ``holoscan`` stub and put the checkout on
-``holoscan.__path__``; in the 5.0 image that hid the SDK from every operator test. This
-fails if a stub or a checkout copy of ``holoscan`` ever comes back.
+This fails if a stub or a checkout copy of ``holoscan`` ever shadows the installed SDK.
 """
 
 from __future__ import annotations

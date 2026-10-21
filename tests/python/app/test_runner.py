@@ -195,7 +195,7 @@ def test_prepare_process_moves_the_process_off_the_daqiri_lcores(tmp_path: Path)
     assert out["switch"] == pytest.approx(0.001)
     assert out["reserved"] == lcores
     assert out["main"] == out["app"] == mask[:-2]  # what later threads inherit
-    assert out["early"] == mask[:-2]  # the 4.3 sweep moved a thread started before
+    assert out["early"] == mask[:-2]  # the sweep moved a thread started before
 
 
 @pytest.mark.parametrize("case", ["busypoll", "daqiri-busypoll"])

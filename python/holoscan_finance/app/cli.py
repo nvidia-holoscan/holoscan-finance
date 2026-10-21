@@ -2,51 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """The ``equity_analytics`` flags, their checks, and the flag groups the bench shares.
 
-Every 4.3 ``equities.stream`` flag is kept: ``--ingest async|ano|gpu`` and ``--ano-*`` still
-work for one release, as deprecated aliases of ``udp|daqiri-host|gpudirect`` and ``--nic-*``.
-``normalize`` fills the defaults that depend on the front end (the measured 4.3 GPUDirect
-batch and ring sizes) and rejects what cannot run, among them a GPU front end with CPU
-analytics, which would put market data on the CPU (invariant 3). A rejected flag exits
-with status 2, as argparse does. ``nic_params`` builds the DAQIRI Params of the NIC sources.
+``--ingest`` takes ``udp|daqiri-host|gpudirect|replay`` and the NIC flags are ``--nic-*``.
+``normalize`` fills the defaults that depend on the front end (the ``IngestDefaults``
+GPUDirect batch and ring sizes) and rejects what cannot run, among them a GPU front end
+with CPU analytics, which would put market data on the CPU (invariant 3). A rejected flag
+exits with status 2, as argparse does. ``nic_params`` builds the DAQIRI Params of the NIC
+sources.
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import warnings
 
 from ..ingest.affinity import CpuSets, parse_cpu_list
-from ..settings import (
-    GPU_INGEST_MODES,
-    INGEST_ALIASES,
-    INGEST_MODES,
-    BarSettings,
-    IngestDefaults,
-    canonical_ingest,
-)
+from ..settings import GPU_INGEST_MODES, INGEST_MODES, BarSettings, IngestDefaults
 from .runner import usage_error
-
-_DEPRECATED_NIC_PREFIX = "--ano-"
-
-
-class _NicFlag(argparse.Action):
-    """Store the value; remember a 4.3 ``--ano-*`` spelling so ``normalize`` can warn."""
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: str | None = None,
-    ) -> None:
-        setattr(namespace, self.dest, values)
-        if option_string and option_string.startswith(_DEPRECATED_NIC_PREFIX):
-            namespace.deprecated_flags = (*namespace.deprecated_flags, option_string)
 
 
 def add_bar_flags(p: argparse.ArgumentParser) -> None:
-    """The five quote-bar settings (4.3 defaults from ``BarSettings``)."""
+    """The five quote-bar settings (defaults from ``BarSettings``)."""
     d = BarSettings()
     g = p.add_argument_group("quote bars")
     g.add_argument("--bar-seconds", type=int, default=d.bar_seconds)
@@ -84,7 +59,6 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="NYQ MITCH -> quote bars -> rolling risk -> web dashboard on Holoscan 5."
     )
-    p.set_defaults(deprecated_flags=())
 
     g = p.add_argument_group("dashboard")
     g.add_argument("--host", default="127.0.0.1")
@@ -99,35 +73,30 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--ingest",
         default="udp",
-        choices=INGEST_MODES + tuple(INGEST_ALIASES),
-        metavar="{" + ",".join(INGEST_MODES) + "}",
+        choices=INGEST_MODES,
         help="udp: kernel UDP socket; daqiri-host: DAQIRI into pinned host memory; gpudirect: "
         "DAQIRI GPUDirect into GPU memory, GPU gather + MITCH decode + quote bars; replay: pcap "
-        "frames from GPU memory through that same GPU chain, no NIC (4.3 names: async, ano, gpu)",
+        "frames from GPU memory through that same GPU chain, no NIC",
     )
     g.add_argument("--udp-host", default="127.0.0.1")
     g.add_argument("--udp-port", type=int, default=26400)
 
     g = p.add_argument_group("NIC (daqiri-host, gpudirect)")
-    g.add_argument("--nic-pcie", "--ano-pcie", default="0004:03:00.0", action=_NicFlag)
+    g.add_argument("--nic-pcie", default="0004:03:00.0")
     g.add_argument(
         "--nic-config",
-        "--ano-config",
         default="",
         metavar="YAML",
         help="DAQIRI config file; empty: build it from these flags",
-        action=_NicFlag,
     )
-    g.add_argument("--nic-master-core", "--ano-master-core", type=int, default=3, action=_NicFlag)
-    g.add_argument("--nic-rx-core", "--ano-rx-core", type=int, default=9, action=_NicFlag)
+    g.add_argument("--nic-master-core", type=int, default=3)
+    g.add_argument("--nic-rx-core", type=int, default=9)
     g.add_argument(
         "--nic-num-bufs",
-        "--ano-num-bufs",
         type=int,
         default=IngestDefaults().gpu_num_bufs,
         help="(gpudirect) NIC receive buffers: ~0.57 s of a 200k pkt/s burst; the GPU's BAR1 "
         "window bounds it (256 MiB holds ~120k 2 KiB buffers); ignored with --nic-config",
-        action=_NicFlag,
     )
 
     g = p.add_argument_group("replay (NIC-free GPU chain)")
@@ -225,19 +194,12 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
 
 
 def bar_settings(args: argparse.Namespace) -> BarSettings:
-    """The bar flags as ``BarSettings``; ValueError under the 4.3 ``QuoteBars`` rules."""
+    """The bar flags as ``BarSettings``; ValueError under the ``QuoteBars`` rules."""
     return BarSettings(**{f.name: getattr(args, f.name) for f in dataclasses.fields(BarSettings)})
 
 
 def normalize(args: argparse.Namespace) -> argparse.Namespace:
-    """Canonical names, front-end defaults and cross-flag checks (exit 2 when rejected)."""
-    ingest = args.ingest
-    args.ingest, alias = canonical_ingest(ingest)
-    if alias:
-        _deprecated(f"--ingest {ingest}", f"--ingest {args.ingest}")
-    for flag in vars(args).pop("deprecated_flags", ()):
-        _deprecated(flag, "--nic-" + flag.removeprefix(_DEPRECATED_NIC_PREFIX))
-
+    """Front-end defaults and cross-flag checks (exit 2 when rejected)."""
     gpu_front_end = args.ingest in GPU_INGEST_MODES
     defaults = IngestDefaults()
     if args.batch_messages is None:
@@ -278,8 +240,8 @@ def normalize(args: argparse.Namespace) -> argparse.Namespace:
 def nic_params(args: argparse.Namespace, cpus: CpuSets, *, gpudirect: bool) -> dict:
     """DAQIRI Params of ``GpuMitchSourceOp`` (``gpudirect``) or ``DaqiriPacketSourceOp``.
 
-    ``daqiri_init`` runs widened to every start-up CPU, as in 4.3, and its caller's mask is
-    restored afterwards; ``num_bufs`` only applies to GPUDirect.
+    ``daqiri_init`` runs widened to every start-up CPU, and its caller's mask is restored
+    afterwards; ``num_bufs`` only applies to GPUDirect.
     """
     params = dict(
         pcie_address=args.nic_pcie,
@@ -291,8 +253,3 @@ def nic_params(args: argparse.Namespace, cpus: CpuSets, *, gpudirect: bool) -> d
     if gpudirect:
         params["num_bufs"] = args.nic_num_bufs
     return params
-
-
-def _deprecated(old: str, new: str) -> None:
-    # stacklevel 3: the warning names normalize()'s caller, the application's main()
-    warnings.warn(f"{old} is deprecated; use {new}", DeprecationWarning, stacklevel=3)

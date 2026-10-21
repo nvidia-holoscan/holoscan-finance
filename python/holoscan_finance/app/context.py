@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Everything one run shares outside the graph: control plane, telemetry, results, status.
 
-``EquityContext.from_args`` builds the objects that 4.3's ``EquityState`` held in one
-class. Operators reach them only as ``Ref`` Params, the dashboard reads them, and none of
-them is a port. The directory listeners keep 4.3's order (results, capture, full day), and
-the cross-check gate pauses while a full-day burst runs. ``register_replay`` publishes the
-first replay generation as 4.3 ``replay.py`` did over ``POST /manifest``, and hands back the
-hook that registers a new generation on a new sender port for every further pass.
+``EquityContext.from_args`` builds the run's control and telemetry objects. Operators
+reach them only as ``Ref`` Params, the dashboard reads them, and none of them is a port.
+The directory listeners run in a fixed order (results, capture, full day), and the
+cross-check gate pauses while a full-day burst runs. ``register_replay`` publishes the
+first replay generation, as ``tools.replay_sender`` does over ``POST /manifest``, and hands
+back the hook that registers a new generation on a new sender port for every further pass.
 ``RunContext`` is what the runner and the dashboard server need from any app's context.
 """
 

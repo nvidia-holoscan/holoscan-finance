@@ -6,9 +6,8 @@ Each field has one writer thread: the source lane (and the drain thread, under `
 for the ring and bucket fields), the bars lane, the risk lane. Readers rely on GIL-atomic
 int reads, on immutable snapshots (``BarCounters``, ``SymbolSnapshot``) and on copies taken
 under ``IngestStats.lock``, which covers O(1) updates only; so the HTTP thread never touches
-CUDA or waits behind data-plane work (4.3 held ``state.lock`` across four D2H copies per
-snapshot). Counter names are 4.3's (``dropped`` = sequence gaps, ``ring_dropped`` =
-messages); the stall helpers are verbatim from 4.3 ``GpuMitchSourceOp``.
+CUDA or waits behind data-plane work. Counter names: ``dropped`` = sequence gaps,
+``ring_dropped`` = messages.
 """
 
 from __future__ import annotations
@@ -158,7 +157,7 @@ class IngestStats:
         """``on_sent`` callback of a host source's ``PendingEmits``."""
         self.packet_batches += 1
 
-    # ---- stall diagnosis (4.3 GpuMitchSourceOp) ---------------------------------------
+    # ---- stall diagnosis -------------------------------------------------------------
     def reset_stalls(self) -> None:
         """Loss diagnosis since the last reset: the longest gaps between NIC bursts, the
         slowest drain and decode passes with per-step times, and every >50 ms stall.
@@ -229,7 +228,7 @@ class BarsStats:
         self.counters = self.symbol_snapshot = None
 
     def observations(self) -> dict | None:
-        """The 4.3 ``/snapshot.observations`` dict, or None before the first batch."""
+        """The ``/snapshot.observations`` dict, or None before the first batch."""
         c = self.counters
         if c is None:
             return None

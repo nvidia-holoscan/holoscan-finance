@@ -169,7 +169,7 @@ def mixed_capture(capture, tmp_path_factory):
 
 
 def test_another_senders_frames_stay_stale_in_every_pass(mixed_capture):
-    """Only the feed is re-sourced per pass (4.3 ``tcprewrite --portmap``): the foreign
+    """Only the feed is re-sourced per pass (like ``tcprewrite --portmap``): the foreign
     frames never join the feed's session, so every pass decodes the same."""
     path, units = mixed_capture
     knob = Knob(validate_manifest(manifest(1, PORT)))

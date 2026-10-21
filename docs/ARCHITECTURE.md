@@ -3,8 +3,7 @@
 How the two applications are put together on Holoscan SDK 5: the graphs, the lanes they
 run on, what flows between operators, how the dashboard reaches the data plane, and the
 performance invariants the layout protects. The operator reference is the
-[catalog](../operators/README.md); what changed from Holoscan 4.3 is in
-[PORTING_TO_5_0.md](PORTING_TO_5_0.md).
+[catalog](../operators/README.md).
 
 ## Layers
 
@@ -19,19 +18,23 @@ Each operator wraps a library *processor* that holds the logic and is tested wit
 Holoscan: `GpuIngest` (both GPU sources), `UdpReceiver`, `DaqiriHostReceiver`,
 `HostMitchDecoder`, `BarBuilder`, `RollingRisk` and `CpuCrossCheck`. Nothing below the
 operator layer imports the SDK, so the CPU tools, the feed containers, spawned analytics
-workers and the pure test tier run without a GPU driver (in 5.0, `import holoscan` links
+workers and the pure test tier run without a GPU driver (the SDK's `import holoscan` links
 libcuda). `tests/python/packaging/test_import_hygiene.py` enforces this.
 
 The package `holoscan_finance` is published by Holoscan as `holoscan.finance` through a
 `holoscan.modules` entry point (wheel, CMake build tree, or `holoscan_finance.devpath`).
-Inside the package, modules import each other relatively; applications and tests import
-the canonical name.
+Holoscan SDK 5.0 resolves `holoscan.<name>` only from `holoscan.modules` entry points; a
+`holoscan/<name>` directory outside the SDK does not import. Inside the package, modules
+import each other relatively; applications and tests import the canonical name.
 
 ## Graphs and lanes
 
 A lane is an authored partition: one runtime thread with its own CPU placement. Every
 operator is in an authored lane, so the compiler never adds an automatic partition. Edge
-labels are `port · policy/depth`.
+labels are `port · policy/depth`. The operators of `equity_analytics` are named `source`,
+`decode` (host front ends), `bars`, `risk`, `publish`, `crosscheck` and
+`publish_comparison`, plus `risk_summary` with `--topics`; plan rules, `/snapshot.engine`
+and the session diagnostics use these names.
 
 ### `equity_analytics`, GPU front ends (`gpudirect`, `replay`)
 
@@ -65,6 +68,10 @@ Decode is fused into the GPU sources: a ring slot stays leased until decode has
 synchronized, so the lease has exactly one consumer by construction and no extra hop. Bars
 share the source's lane, so the per-packet path never crosses a thread; the only
 cross-lane edge on the data path is the latest-only window edge, used once per closed bar.
+Sharing the lane also serializes the decode and bars CUDA work on one thread. The NIC-free
+throughput gate (at least twice the 6.6M messages/s line rate, `market_data_bench
+throughput`) guards this choice; if it fails, moving `bars` into its own lane is a one-line
+fallback.
 
 ### `equity_analytics`, host front ends (`udp`, `daqiri-host`)
 
@@ -88,6 +95,12 @@ flowchart LR
 The `crosscheck` and `topics` lanes are the same as above. On host front ends the analytics
 run in spawned worker processes (`gpu_window`, `cpu_window`): Python decode keeps the GIL
 busy, and running SciPy or the GPU engine in the same process measurably slows both.
+A spawned worker re-imports the application's top-level imports (Holoscan, FastAPI) once,
+when its pool starts in the operator's `start()`; the applications keep all work under
+`main()`, so nothing runs twice. In host `compare` mode the CPU cross-check of a window
+starts when its GPU result is ready, so the host-mode `cpu_receive_to_result_ms` includes
+the GPU job; `cpu_ms`, `gpu_ms` and the speedup are measured inside the engines and
+exclude it.
 
 ### `market_data_bench`
 
@@ -147,7 +160,7 @@ compile either. This is why a sink fed only from another lane gets its own lane,
 | `app` | `all − reserved`; every pipeline thread |
 | `ingest` | `--ingest-cpus`, else `app`; the `ingest` lane's `ThreadPlacement` (with `BUSY_POLL` only under `--ingest-busy-poll`) |
 | `helper` | `app`, minus `ingest` only when a busy-polled ingest set is carved out; every other lane, the drain and receiver threads. The main thread is masked to it before `run_async` (and earlier threads are swept off `all − helper`), so everything created later inherits it: uvicorn, the stall heartbeat, CuPy and the runtime's own threads |
-| `worker` | `helper`; spawned analytics workers pin themselves to it (the 4.3 BLAS candidate set) |
+| `worker` | `helper`; spawned analytics workers pin themselves to it |
 
 The runtime never re-applies a lane's placement, so a mask change made in `start()` would
 persist. `daqiri_init` therefore runs inside `thread_mask(...)`, which saves the lane's
@@ -164,15 +177,15 @@ stream; producers synchronize before they publish, and no payload carries a CUDA
 | Payload | Producer → consumer | Memory |
 | --- | --- | --- |
 | `PacketBatch` (datagrams, receive times, wire counts, peers) | host sources → `MitchDecodeOp` | host; the receiver hands the bytes over |
-| `list[ReplayBatch]` (the 4.3 record batch, one per packet) | `MitchDecodeOp` → `QuoteBarsOp(cpu)` | host |
-| `list[GpuReplayBatch]` (the 4.3 device columns, one element) | GPU sources → `QuoteBarsOp(gpu)`, and `QuoteBarsOp(cpu)` in the bench reference lane | device columns from CuPy's pool; complete before emit; never aliases ring slots |
+| `list[ReplayBatch]` (the host record batch, one per packet) | `MitchDecodeOp` → `QuoteBarsOp(cpu)` | host |
+| `list[GpuReplayBatch]` (device columns, one element) | GPU sources → `QuoteBarsOp(gpu)`, and `QuoteBarsOp(cpu)` in the bench reference lane | device columns from CuPy's pool; complete before emit; never aliases ring slots |
 | `BarWindow` (per-bar return vectors, bar times, generation, completed bars, receive stamp) | `QuoteBarsOp` → `RollingRiskOp` (latest only), `CallbackSinkOp` | NumPy or CuPy parts; closed bars are never mutated; `rows` is stacked only by the consumer, so a skipped window costs no GPU work |
 | `RiskUpdate` (window, result dict, host rows when validated) | `RollingRiskOp` → `CallbackSinkOp`, `RiskCrossCheckOp`, `RiskSummaryOp` | host results |
 | `RiskComparison` (GPU update, CPU result, agreement, matched work) | `RiskCrossCheckOp` → `CallbackSinkOp` | host |
 | `holoscan.schema.String` (JSON ≤ 480 B) | `RiskSummaryOp` → `export_topic` | host; crosses processes |
 
-The decoded record layouts (`ReplayBatch`, `GpuReplayBatch`) are the 4.3 classes, kept
-verbatim because the bit-identity tools compare them field by field.
+The decoded record layouts (`ReplayBatch`, `GpuReplayBatch`) are fixed because the
+bit-identity tools compare them field by field.
 
 ## Control plane
 
@@ -186,9 +199,13 @@ operators as `Ref` parameters, and operators read them once per activation:
 | `CaptureTap` | HTTP `POST /capture`, `/capture/finish` | the decode sites and `ResultsStore` record into it |
 | `FeedControl` | HTTP `/feedrate`, `/feedstatus`, `/replay/resume` | the external sender, which polls; never the graph (replay mode ignores it) |
 
+The replay pace is a command-line setting (`--replay-pps`): in replay mode the graph
+ignores `/feedrate`, and pause and seek apply only to the external sender.
+
 Results flow out through `CallbackSinkOp` into `ResultsStore` callbacks on the analytics
-and crosscheck lanes. Those callbacks never raise: an exception is recorded as the run's
-error, publication stops and the gate is released, as 4.3's publisher did.
+and crosscheck lanes, right after each analysis (nothing polls for them). Those callbacks
+never raise: an exception is recorded as the run's error, publication stops and the gate
+is released.
 
 Locks follow one global order: `ReplayDirectory.lock` → its listener lock →
 `FullDayController` → `ResultsStore.lock` → `CaptureTap` → `IngestStats.lock`. Directory
@@ -206,10 +223,15 @@ only these host objects. No CUDA call and no data-plane lock is ever taken from 
 | `BarsStats` | `QuoteBarsOp` | an immutable `BarCounters` per batch (one 40-byte D2H on the GPU), a `SymbolSnapshot` at most every 250 ms, sequence and stale counters, the last window key |
 | `RiskStats` | `RollingRiskOp`, `RiskCrossCheckOp`, `RiskSummaryOp` (disjoint fields) | windows received and superseded, analyses, gate waits, late activations, timings, errors |
 
-`GET /snapshot` keeps every 4.3 key (`network.ingest` still reports `async`, `ano`, `gpu`
-or `replay`) and adds `network.ingest_mode` and an `engine` block (SDK version, lanes,
+`GET /snapshot` reports `network.ingest` as the canonical ingest mode (`udp`,
+`daqiri-host`, `gpudirect` or `replay`) and carries an `engine` block (SDK version, lanes,
 edges, clocks, lane CPUs, risk and source counters). `GET /plan` returns the compiled plan
 summary.
+
+`RiskStats.late_activations` (`--risk-deadline-us`, a `max_start_delay` with
+`EMIT_WITNESS`) counts risk poll ticks that started late, which are almost always the
+ticks right after an analysis that overran the poll period. It is not a measure of window
+lateness; that is `receive_to_result_ms` minus the engine time.
 
 A finite run (`--exit-when-drained`, the bench) stops when `app.drained.DrainedCondition`
 holds: the source reached end of stream with nothing pending, the bars saw every event
@@ -222,18 +244,47 @@ Operators never complete or stop the run themselves.
 | # | Invariant | How the layout keeps it | Checked by |
 | --- | --- | --- | --- |
 | 1 | Lossless 200,000 packets/s (6.6M msgs/s) on GPUDirect | 131,072-message batches, 4,096-packet / 20 ms bursts, 114,688 NIC buffers, a 1M-slot ring, zero-copy staging, the native drain; source and bars in one lane | NIC run (with approval); NIC-free bench `paced` and `throughput` (≥ 2× line rate) |
-| 2 | A GIL-free native drain | `daqiri_drain.cpp` byte-identical to 4.3, built before `daqiri_init`; ring rows released only after decode synchronized, in order; bursts never wrap | `library/test_gpu_ingest_pull.py`, `gpu/test_gpu_ingest.py`, `library/test_kernel_sources_verbatim.py` |
+| 2 | A GIL-free native drain | `daqiri_drain.cpp`, built before `daqiri_init`; ring rows released only after decode synchronized, in order; bursts never wrap | `library/test_gpu_ingest_pull.py`, `gpu/test_gpu_ingest.py` |
 | 3 | No market data on the CPU in GPU mode | only headers, counters, a 250 ms symbol snapshot and results cross to the host; GPU front ends with CPU analytics are rejected | `app/test_cli.py`, `operators/test_quote_bars_op.py` |
 | 4 | Latest-only windows; bars never block; bounded analysis rate | `DROP_OLDEST/1` window edge; a one-window slot polled every 1 ms with the minimum interval enforced in the operator | plan rules; `graphs/test_latest_only.py`; `graphs/test_risk_pickup_latency.py` |
-| 5 | GPU decode and bars bit-identical to the CPU | kernels, flags and the 4.3 bar and record classes verbatim; one host copy of the sequence rules | `gpu/*`; `gpu_validate`; bench `--check` |
+| 5 | GPU decode and bars bit-identical to the CPU | one kernel source and fixed compile flags; the bar and record classes shared with the CPU reference; one host copy of the sequence rules | `gpu/*`; `gpu_validate`; bench `--check` |
 | 6 | Generation, sequence and stale semantics | decode reads the directory immediately before decoding; bars reset on a new generation; replay loops register fresh ports | `library/test_sequence.py`, `test_accounting.py`, `control/test_directory.py` |
-| 7 | Statistics conventions | `CovarianceEngine`, agreement tolerances and eligibility unchanged | `library/test_covariance.py`, `test_agreement.py` |
+| 7 | Statistics conventions | `CovarianceEngine`, agreement tolerances and eligibility as documented in [METHODOLOGY.md](METHODOLOGY.md) | `library/test_covariance.py`, `test_agreement.py` |
 | 8 | Warm-up before data | kernels and worker pools start in `start()`, which runs downstream first and before any `compute`; the NIC starts last | operator tests |
-| 9 | BLAS tuning on the 4.3 core set | workers pinned to `CpuSets.worker` | `library/test_workers.py` |
+| 9 | BLAS tuning on the worker core set | workers pinned to `CpuSets.worker` | `library/test_workers.py` |
 | 10 | Core and IRQ isolation | main thread masked to `helper` (`app` unless a busy-polled ingest set is carved out); lanes placed; `daqiri_init` mask restored and asserted; the post-init sweep; helpers under the process mask | plan rule `lanes_avoid_cpus`; `library/test_affinity.py`; `app/test_runner.py`; source operator tests |
 | 11 | Interpreter tuning | `sys.setswitchinterval(0.001)`; no idle sleeps in `compute`; no clock below 500 µs by default | `app/test_runner.py` |
 | 12 | Latency accounting | the receive stamp of the packet that closed the newest bar travels in `BarWindow.recv_ns`; results publish on the risk lane right after analysis | `control/test_results_store.py`; e2e reports |
 | 13 | No allocations that wake a suspended iGPU | ring, pinned buffers and replay frames preallocated in `start()` | review; NIC run |
+
+## The receiver process on IGX Thor
+
+The NIC front ends run only through the launchers in
+[deploy/igx_thor](../deploy/igx_thor/README.md):
+
+- The receiver container gets a private IPC namespace with `--shm-size=4g`, never
+  `--ipc=host`: a root Holoscan 5 process with `--ipc=host` leaves a root-owned
+  shared-memory file in the host's `/dev/shm` that breaks later non-root runs.
+- The DAQIRI receive configuration names the DPDK engine explicitly (`"engine": "dpdk"`):
+  recent DAQIRI releases default raw streams to ibverbs, where the Thor steering patch
+  would silently stop applying.
+- The native drain is built before `daqiri_init` (about 5 s cold), so the NIC is never up
+  and unpolled while the helper compiles.
+- `run_python.sh` appends the checkout's `python/` to `PYTHONPATH`: the image finds the SDK
+  only through its own `PYTHONPATH`, which must stay first.
+- The sender and replay-controller containers run without the GPU runtime; the tools they
+  run never import the SDK.
+
+## Holoscan features not used, on purpose
+
+| Feature | Why not |
+| --- | --- |
+| Tensor ports | payloads have several fields, each hop would cost a conversion, and device payloads would mix CUDA streams; `pyobject` ports carry the objects as they are |
+| `LatestWithin` | it needs capture times on every message and starves silently without them; the latest-only window edge is `DROP_OLDEST`/1 |
+| Runtime parameter updates | live settings travel as `Ref` objects (`Knob`, gates, stats) that operators read once per activation |
+| Operator restarts | a failed operator fails the run, with its error in the session diagnostics and `/snapshot` |
+| Embedded `hs.Graph` subclasses | a parent cannot place an embedded graph's operators, and every operator must sit in an authored lane |
+| `complete_after`, `request_completion` | operators never end the run themselves; a finite run stops through a drained predicate and `session.request_stop()` |
 
 ## Adding an operator
 

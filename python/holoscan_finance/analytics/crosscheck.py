@@ -3,11 +3,10 @@
 """The CPU recomputation of validated GPU windows: the processor of ``RiskCrossCheckOp``.
 
 Each validated ``RiskUpdate`` carries a host copy of its window; ``cpu_window`` recomputes it
-in one spawned, pinned, BLAS-tuned worker, and the comparison applies the 4.3
-``publish_comparison`` rules (``agreement.compare_results``). This is the compare branch of
-4.3 ``PublishOp``: the dashboard's live CPU/GPU speedup comes from these pairs (the published
-9.55x is from separate CPU-only and GPU-only runs of the same workers). The gate keeps one
-update in flight; the queue stays FIFO anyway.
+in one spawned, pinned, BLAS-tuned worker, and the comparison applies
+``agreement.compare_results``. The dashboard's live CPU/GPU speedup comes from these pairs
+(separate CPU-only and GPU-only runs of the same workers give the separate-runs speedup,
+docs/METHODOLOGY.md). The gate keeps one update in flight; the queue stays FIFO anyway.
 """
 
 from __future__ import annotations

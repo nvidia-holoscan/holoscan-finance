@@ -56,7 +56,7 @@ emitting device data, so no payload carries a CUDA event.
 | Payload | From → to | Notes |
 | --- | --- | --- |
 | `PacketBatch` | host sources `.packets` → `MitchDecodeOp.packets` | `(datagram, recv_wall_ns, wire_count, peer)` per packet; host memory |
-| `list[ReplayBatch]` | `MitchDecodeOp.events` → `QuoteBarsOp(cpu).events` | one batch per accepted packet (4.3 layout) |
+| `list[ReplayBatch]` | `MitchDecodeOp.events` → `QuoteBarsOp(cpu).events` | one batch per accepted packet |
 | `list[GpuReplayBatch]` | GPU sources `.events` → `QuoteBarsOp.events` | always one element; columns in GPU memory, complete before emit |
 | `BarWindow` | `QuoteBarsOp.window` → `RollingRiskOp.window`, `CallbackSinkOp` | per-bar return vectors never mutated after their bar closed; `rows` is stacked by the consumer, so a skipped window costs no GPU work |
 | `RiskUpdate` | `RollingRiskOp.risk` / `.validate` → `CallbackSinkOp`, `RiskCrossCheckOp`, `RiskSummaryOp` | host results; `rows_host` on validated windows |

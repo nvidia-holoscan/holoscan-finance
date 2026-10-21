@@ -9,16 +9,16 @@ returns.
 events (list[GpuReplayBatch] | list[ReplayBatch]) → generation and sequence checks → bars → window (BarWindow)
 ```
 
-With `backend="gpu"` the bars stay in GPU memory (`GpuQuoteBars`); over a full recorded day
-the kernels match the NumPy reference `QuoteBars` bit for bit in marks, quote times, trades,
-volumes and counters, and in returns within 1 ULP (CUDA vs NumPy `log`)
+With `backend="gpu"` the bars stay in GPU memory (`GpuQuoteBars`). `gpu_validate --bars`
+checks the kernels against the NumPy reference `QuoteBars`: marks, quote times, trades,
+volumes and counters bit for bit, returns within 1 ULP (CUDA vs NumPy `log`). On a full-size
+synthetic day (2026-10-20) they matched, with 41 of 13,414,033 returns 1 ULP apart
 ([validation](../../docs/GPU_INGEST.md#correctness)). With `backend="cpu"` the host
-`QuoteBars` runs behind the 4.3 host sequence rules. The cpu backend also accepts
-`GpuReplayBatch`es (one D2H per batch): that is the in-graph reference of
+`QuoteBars` runs behind the host sequence rules (`marketdata.sequence`). The cpu backend
+also accepts `GpuReplayBatch`es (one D2H per batch): that is the in-graph reference of
 `market_data_bench --check`, never a production path.
 
-Processor: `holoscan_finance.marketdata.bar_builder.BarBuilder`. Replaces 4.3
-`GpuQuoteBarsOp`, the host `BarsOp` and `EquityState.observe`.
+Processor: `holoscan_finance.marketdata.bar_builder.BarBuilder`.
 
 ## Ports
 
@@ -45,7 +45,7 @@ Contract: `OnEach(events)`.
 | `directory` | `Ref` | `Ref()` | `Ref(Knob[FeedDirectory])`; empty: input is counted and ignored |
 | `stats` | `Ref` | `Ref()` | `Ref(BarsStats)`; private if empty |
 
-The five bar Params are validated with the 4.3 `QuoteBars` rules at `graph.op`
+The five bar Params are validated with the `QuoteBars` rules at `graph.op`
 (`BarSettings`).
 
 ## Behaviour
@@ -53,8 +53,8 @@ The five bar Params are validated with the 4.3 `QuoteBars` rules at `graph.op`
 - **Generations.** The directory is read once per input message. A new generation resets
   the bars (new engine, next expected sequence 1) at the first message decoded under it;
   messages of the bars' generation still in flight when the directory moved are built
-  first, and batches of any other generation are stale. 4.3 reset at the HTTP call; the
-  dashboard hides the old generation meanwhile.
+  first, and batches of any other generation are stale. The dashboard hides the old
+  generation until then.
 - **Sequences.** A sequence below the expected one is stale; a gap resets the marks, so no
   return spans missing updates.
 - **Host mirrors.** After every batch the exact counters go to `BarsStats.counters` (an
@@ -70,7 +70,7 @@ The five bar Params are validated with the 4.3 `QuoteBars` rules at `graph.op`
 - Out: `LATEST` to `RollingRiskOp` in another lane (bars never block on analytics; risk
   skips windows), or `lossless(64)` to a same-lane `CallbackSinkOp` when every window matters.
 - Lane: the source's (`ingest`), or the bench's `reference` lane.
-- Streams: the legacy stream; the engine's per-batch D2H of segment starts is 4.3's.
+- Streams: the legacy stream, plus the engine's per-batch D2H of segment starts.
 - Errors: an unexpected `BackpressuredError` propagates (the run fails loudly); a wrong batch
   type raises `TypeError`.
 

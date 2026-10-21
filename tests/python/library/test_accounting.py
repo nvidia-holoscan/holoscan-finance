@@ -5,8 +5,7 @@
 The GPU path sees only the 7-column receive header of each packet and accounts a burst at a
 time, vectorized for the contiguous case; the host receivers account every datagram. The
 same stream (gaps, reordering, duplicates, session changes, framing rejects, non-UDP frames
-and ring overflow) must give identical counters on both (from 4.3
-``test_gpu_source_accounting``). No GPU needed.
+and ring overflow) must give identical counters on both. No GPU needed.
 """
 
 from __future__ import annotations

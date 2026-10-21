@@ -5,7 +5,7 @@
 ``BarsChecker`` collects the windows of two ``QuoteBarsOp`` backends fed one stream (the
 ``market_data_bench --check`` fan-out) and pairs them by ``(generation, completed_bars)``.
 Times and NaN patterns must be identical and finite returns within 1 ULP (CUDA vs NumPy
-``log``), the 4.3 ``gpu_validate --bars`` criteria. The callbacks only append under a lock,
+``log``), the ``gpu_validate --bars`` criteria. The callbacks only append under a lock,
 so collecting costs a lane one list append per window; the comparisons, with the device
 copies they need, run after the run. ``final_state_equal`` compares both backends' final
 counters and symbol state, and ``bench_verdict`` applies the bench gates to its report.
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from ..telemetry.stats import BarsStats
     from .compare import HostReference
 
-MAX_ULPS = 1  # CUDA vs NumPy log; GPU_INGEST measured no difference above 1 ULP
+MAX_ULPS = 1  # CUDA vs NumPy log; gpu_validate --bars measures none above 1 ULP
 LOSS_KEYS = (
     "sequence_gaps",
     "ring_dropped",

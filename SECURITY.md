@@ -141,16 +141,17 @@ Key boundaries and interfaces:
 - **Processes and messages.** Operators exchange Python objects within one process. Rolling
   analytics on the host-memory paths, and the CPU cross-check on every path, run in spawned worker
   processes. The validation tools fork decode workers.
-- **Privileged deployment.** `deploy/igx_thor/igx_ano_run.sh` starts the receiver as root with
+- **Privileged deployment.** `deploy/igx_thor/igx_run.sh` starts the receiver as root with
   host networking (so `NET_ADMIN` applies to the host's network stack), `NET_ADMIN`, `IPC_LOCK`,
   `SYS_NICE` and `SYS_PTRACE`, all GPUs, unlimited locked memory, `/dev/infiniband` and
-  hugepages; with `INGEST=gpu` it mounts `KERNEL_CACHE_DIR` read-write as its CuPy and native
-  cache. It runs `--privileged` helper containers, some with `--pid=host` and `nsenter` into the
-  host, that set PHY loopback (`mstlink`), link state, NetworkManager management, the test address
-  and neighbor, the irqbalance ban, GPU runtime power management and `fwupd-refresh.timer`.
+  hugepages; with `INGEST=gpudirect` it mounts `KERNEL_CACHE_DIR` read-write as its CuPy and
+  native cache. It runs `--privileged` helper containers, some with `--pid=host` and `nsenter`
+  into the host, that set PHY loopback (`mstlink`), link state, NetworkManager management, the
+  test address and neighbor, the irqbalance ban, GPU runtime power management and
+  `fwupd-refresh.timer`.
   - The launcher records the original NetworkManager, link, irqbalance, GPU power-management and
     timer state in the receiver's labels, and with PHY loopback it first requires a dedicated
-    port. `igx_ano_down.sh` removes the test settings and restores the recorded state.
+    port. `igx_down.sh` removes the test settings and restores the recorded state.
   - The launchers never replace existing containers, and teardown stops only containers with the
     project's owner label.
   - The replay container mounts the capture directory, `TCPREPLAY_DIR`, `TCPREPLAY_LIBS` and
@@ -197,7 +198,7 @@ auxiliary build, deployment and tooling paths:
    (`--host 0.0.0.0` or `WEB_HOST=0.0.0.0`) exposes these endpoints to the network. The
    documented external-sender setup in `deploy/igx_thor/README.md` does this, because the sender
    announces each generation through `POST /manifest`; run it only on a trusted, isolated segment,
-   or tunnel the sender's `--control-url`. With `HOLOSCAN_FINANCE_FAULTS=1`, which `igx_ano_run.sh`
+   or tunnel the sender's `--control-url`. With `HOLOSCAN_FINANCE_FAULTS=1`, which `igx_run.sh`
    and `holoscan run` forward from the caller's environment, `/debug/hold_gil` holds the Python
    interpreter lock for up to 10 seconds per request. It exists for fault-injection tests only and
    must never be enabled in a deployment.
@@ -229,10 +230,10 @@ auxiliary build, deployment and tooling paths:
    enter the host's namespaces and change NIC, IRQ, power-management, NetworkManager and systemd
    state, and they run code from the mounted checkout (`replay_control.py`, `irq_isolate.py`) and
    the `tcpreplay` binaries as root. Anyone who can modify these scripts, the checkout, the images
-   they name (`ANO_IMAGE`, `MST_IMAGE`), `TCPREPLAY_DIR`/`TCPREPLAY_LIBS` or their environment
+   they name (`RECEIVER_IMAGE`, `MST_IMAGE`), `TCPREPLAY_DIR`/`TCPREPLAY_LIBS` or their environment
    effectively has root on the host. Run them only on a dedicated test port. With PHY loopback
-   (`LOOPBACK=1`), `igx_ano_run.sh` first refuses a port that has a global IP address, already has
-   a neighbor entry for the peer, does not belong to `ANO_PCIE`, or whose PHY loopback cannot be
+   (`LOOPBACK=1`), `igx_run.sh` first refuses a port that has a global IP address, already has
+   a neighbor entry for the peer, does not belong to `NIC_PCIE`, or whose PHY loopback cannot be
    verified as off. The benchmark scripts under `gpu_ingest_bench/` perform none of these checks.
    Never run any of them against a management interface.
 
@@ -332,7 +333,7 @@ released in the next version; earlier pre-release versions are not maintained se
 | Version | Supported |
 | --- | --- |
 | `main` (0.2.x, Holoscan SDK 5) | Yes |
-| 0.1.x (Holoscan SDK 4.3) and older pre-releases | No |
+| Older pre-releases | No |
 
 ## Scope
 

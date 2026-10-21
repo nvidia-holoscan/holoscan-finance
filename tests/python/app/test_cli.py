@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``equity_analytics`` flags: 4.3 aliases, front-end defaults, rejected combinations, NIC Params."""
+"""``equity_analytics`` flags: canonical ingest names, front-end defaults, rejected combinations,
+NIC Params."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from apphelpers import equity_args
 from holoscan_finance.app import cli
 from holoscan_finance.app.runner import ExitCode
 from holoscan_finance.ingest.affinity import CpuSets
+from holoscan_finance.settings import INGEST_MODES
 
 
 def usage_error(capsys: pytest.CaptureFixture[str], *argv: str) -> str:
@@ -22,21 +24,26 @@ def usage_error(capsys: pytest.CaptureFixture[str], *argv: str) -> str:
     return capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    ("old", "new"), [("async", "udp"), ("ano", "daqiri-host"), ("gpu", "gpudirect")]
-)
-def test_43_ingest_names_map_with_a_deprecation_warning(old: str, new: str) -> None:
-    with pytest.deprecated_call(match=f"--ingest {old} is deprecated; use --ingest {new}"):
-        args = equity_args("--ingest", old)
-    assert args.ingest == new
+@pytest.mark.parametrize("mode", INGEST_MODES)
+def test_canonical_ingest_names_parse_unchanged(mode: str) -> None:
+    assert equity_args("--ingest", mode, "--pcap", "day.pcap", "--tape", "tape").ingest == mode
 
 
-def test_43_ano_flags_set_the_nic_flags_with_a_deprecation_warning() -> None:
-    with pytest.deprecated_call() as record:
-        args = equity_args(
-            "--ingest", "gpudirect", "--ano-pcie", "0001:02:00.0", "--ano-config", "nic.yaml",
-            "--ano-master-core", "4", "--ano-rx-core", "5", "--ano-num-bufs", "4096",
-        )  # fmt: skip
+@pytest.mark.parametrize("name", ["sockets", "gpu-direct", "nic"])
+def test_other_ingest_names_are_rejected(capsys: pytest.CaptureFixture[str], name: str) -> None:
+    assert "invalid choice" in usage_error(capsys, "--ingest", name)
+
+
+def test_nic_flags_have_one_spelling(capsys: pytest.CaptureFixture[str]) -> None:
+    err = usage_error(capsys, "--ingest", "gpudirect", "--pcie", "0001:02:00.0")
+    assert "unrecognized arguments: --pcie" in err
+
+
+def test_nic_flags_set_the_nic_settings() -> None:
+    args = equity_args(
+        "--ingest", "gpudirect", "--nic-pcie", "0001:02:00.0", "--nic-config", "nic.yaml",
+        "--nic-master-core", "4", "--nic-rx-core", "5", "--nic-num-bufs", "4096",
+    )  # fmt: skip
     assert (args.nic_pcie, args.nic_config, args.nic_master_core, args.nic_rx_core) == (
         "0001:02:00.0",
         "nic.yaml",
@@ -44,18 +51,6 @@ def test_43_ano_flags_set_the_nic_flags_with_a_deprecation_warning() -> None:
         5,
     )
     assert args.nic_num_bufs == 4096
-    messages = sorted(str(w.message) for w in record)
-    assert messages == [
-        f"--ano-{name} is deprecated; use --nic-{name}"
-        for name in ("config", "master-core", "num-bufs", "pcie", "rx-core")
-    ]
-    assert "deprecated_flags" not in vars(args)  # no bookkeeping left in the run's config
-
-
-def test_canonical_names_give_no_warning(recwarn: pytest.WarningsRecorder) -> None:
-    args = equity_args("--ingest", "daqiri-host", "--nic-pcie", "0001:02:00.0")
-    assert args.ingest == "daqiri-host" and args.nic_pcie == "0001:02:00.0"
-    assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
 
 
 @pytest.mark.parametrize(
@@ -77,7 +72,7 @@ def test_explicit_batch_and_ring_are_kept() -> None:
     assert (args.batch_messages, args.ring_size) == (512, 1024)
 
 
-def test_defaults_match_43() -> None:
+def test_defaults() -> None:
     args = equity_args()
     assert args.ingest == "udp" and args.analytics_backend == "compare"
     assert (args.host, args.port, args.udp_host, args.udp_port) == (
@@ -143,7 +138,7 @@ def test_exit_when_drained_needs_a_finite_replay(capsys: pytest.CaptureFixture[s
         (["--risk-poll-us", "50"], "--risk-poll-us"),
         (["--risk-poll-us", "200000"], "--risk-poll-us"),
         (["--interval", "0"], "--interval"),
-        (["--bar-seconds", "7"], "invalid bar, window"),  # 4.3 rule: bars tile the window
+        (["--bar-seconds", "7"], "invalid bar, window"),  # bars tile the window
         (["--ingest-cpus", "4-x"], "invalid CPU list"),
         (["--ingest", "nic"], "invalid choice"),
     ],
@@ -180,7 +175,7 @@ def test_nic_params_add_num_bufs_for_gpudirect_and_widen_init_to_every_cpu() -> 
     )
     params = cli.nic_params(args, cpus, gpudirect=True)
     assert params["num_bufs"] == 8192 and params["daqiri_config"] == "nic.yaml"
-    assert params["init_cpus"] == [0, 1, 2, 3]  # 4.3 called daqiri_init on the full mask
+    assert params["init_cpus"] == [0, 1, 2, 3]  # daqiri_init runs on the full mask
 
 
 def test_bar_settings_come_from_the_bar_flags() -> None:

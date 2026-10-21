@@ -10,13 +10,12 @@ control flow only touches tiny arrays (segment boundaries, counters). Closed bar
 (marks and return rows) stay in GPU memory; ``window()`` returns a device array
 that the GPU covariance engine consumes in place.
 
-Validated against ``QuoteBars`` over a full recorded day by ``gpu_validate --bars``:
-marks, quote times, trades, volumes and counters are identical; returns use the
-CUDA ``log`` and are compared in ULPs.
+``gpu_validate --bars`` validates it against ``QuoteBars`` over a full day: marks, quote
+times, trades, volumes and counters must be identical; returns use the CUDA ``log`` and are
+compared in ULPs.
 
-Verbatim from 4.3 ``holoscan.marketdata.gpu_bars`` (kernel source and ``--fmad=false``
-byte-identical). Added: ``GpuQuoteBars.counts()`` and ``symbol_arrays()``, the batched
-host mirrors the bars lane publishes instead of 4.3's per-request D2H on the HTTP thread.
+``GpuQuoteBars.counts()`` and ``symbol_arrays()`` are the batched host mirrors the bars lane
+publishes, so the HTTP thread never copies from the GPU.
 """
 
 from __future__ import annotations
@@ -518,7 +517,7 @@ def select_packets(batch, indices):
 
 
 def apply_sequence(bars, batch, expected):
-    """Mirror ``EquityState.observe`` for one GPU batch of same-generation packets.
+    """Mirror ``SequenceTracker.observe`` for one GPU batch of same-generation packets.
 
     Returns ``(expected, stale, gaps)``. The common case -- one contiguous run of
     sequence numbers -- is fully vectorized; anomalies fall back to the exact

@@ -4,9 +4,9 @@
 
 Risk claims the gate for a window it will validate and waits while a claim is open;
 ``ResultsStore.on_comparison`` releases it after the comparison is published. So every
-validated GPU result has its CPU pair and comparisons never pile up (4.3 ``validate_next``
-and the risk operator's ``ready`` callable). ``allowed`` suspends validation, e.g. during a
-full-day burst (4.3 ``validation_allowed``).
+validated GPU result has its CPU pair and comparisons never pile up (``try_claim`` and
+the risk operator's ``ready`` callable). ``allowed`` suspends validation, e.g. during a
+full-day burst (``FullDayController.validation_allowed``).
 """
 
 from __future__ import annotations

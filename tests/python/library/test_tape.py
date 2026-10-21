@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Prepared tapes: ``open_tape`` checks, and ``prepare`` on synthetic Parquet (from 4.3
-``test_equities``; skips without duckdb and pyarrow)."""
+"""Prepared tapes: ``open_tape`` checks, and ``prepare`` on synthetic Parquet (skips without
+duckdb and pyarrow)."""
 
 from __future__ import annotations
 

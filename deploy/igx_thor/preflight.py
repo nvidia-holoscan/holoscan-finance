@@ -35,9 +35,8 @@ def check(args):
         importlib.import_module(name)
     import holoscan_finance
     from holoscan_finance.ingest.daqiri import require_daqiri
-    from holoscan_finance.settings import canonical_ingest
 
-    mode, _ = canonical_ingest(args.ingest)
+    mode = args.ingest
     require_daqiri(gpu=mode == "gpudirect")
     import cupy as cp
 
@@ -52,7 +51,7 @@ def check(args):
         raise RuntimeError(f"no Mellanox/NVIDIA network device at PCIe {args.pcie}")
     cores = os.sched_getaffinity(0)
     if args.master_core == args.rx_core or not {args.master_core, args.rx_core} <= cores:
-        raise RuntimeError(f"choose distinct ANO master/RX cores from {sorted(cores)}")
+        raise RuntimeError(f"choose distinct DAQIRI master/RX cores from {sorted(cores)}")
     meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
     if int(meminfo["HugePages_Free"].strip()) == 0:
         raise RuntimeError("no free hugepages; provision them using the DAQIRI system setup guide")
@@ -71,11 +70,11 @@ def wait_ready(args):
             last_error = str(exc)
         else:
             if state.get("error") or state.get("graph_status") == "stopped":
-                raise RuntimeError(f"ANO graph failed: {state.get('error') or 'stopped'}")
+                raise RuntimeError(f"receiver graph failed: {state.get('error') or 'stopped'}")
             network = state.get("network", {})
             if network.get("error"):
-                raise RuntimeError(f"ANO RX failed: {network['error']}")
-            if network.get("ingest") in ("ano", "gpu") and network.get("ready"):
+                raise RuntimeError(f"DAQIRI RX failed: {network['error']}")
+            if network.get("ingest") in ("daqiri-host", "gpudirect") and network.get("ready"):
                 payload = json.dumps({"speed": args.speed, "rate": args.rate}).encode()
                 request = Request(
                     f"{args.url}/feedrate",
@@ -85,11 +84,11 @@ def wait_ready(args):
                 )
                 with urlopen(request, timeout=3) as response:
                     json.load(response)
-                print("ANO RX ready; replay pacing configured")
+                print("DAQIRI RX ready; replay pacing configured")
                 return
             last_error = f"graph={state.get('graph_status')}, network={network.get('status')}"
         time.sleep(0.25)
-    raise RuntimeError(f"ANO RX did not become ready in {args.timeout}s: {last_error}")
+    raise RuntimeError(f"DAQIRI RX did not become ready in {args.timeout}s: {last_error}")
 
 
 def main():
@@ -99,9 +98,7 @@ def main():
     check_parser.add_argument("--pcie", required=True)
     check_parser.add_argument("--master-core", type=int, required=True)
     check_parser.add_argument("--rx-core", type=int, required=True)
-    check_parser.add_argument(
-        "--ingest", required=True, choices=("daqiri-host", "gpudirect", "ano", "gpu")
-    )
+    check_parser.add_argument("--ingest", required=True, choices=("daqiri-host", "gpudirect"))
     wait_parser = sub.add_parser("wait")
     wait_parser.add_argument("--url", required=True)
     wait_parser.add_argument("--timeout", type=float, default=90)
@@ -111,7 +108,7 @@ def main():
     try:
         (check if args.command == "check" else wait_ready)(args)
     except (ImportError, OSError, RuntimeError) as exc:
-        parser.exit(1, f"ANO startup failed: {exc}\n")
+        parser.exit(1, f"receiver startup failed: {exc}\n")
 
 
 if __name__ == "__main__":

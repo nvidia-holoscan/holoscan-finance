@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Synthetic data: the 4.3 stream and fuzz generators unchanged, deterministic tapes, captures
-that carry exactly the tape, ``drop_every`` gaps, and the ``synth`` CLI with ``--reuse``."""
+"""Synthetic data: the stream and fuzz generators reproduce their expected digests,
+deterministic tapes, captures that carry exactly the tape, ``drop_every`` gaps, and the
+``synth`` CLI with ``--reuse``."""
 
 from __future__ import annotations
 
@@ -26,10 +27,10 @@ from holoscan_finance.nyq.tape import open_tape
 from holoscan_finance.tools import synth
 
 MIDNIGHT = day_start_ns("2025-04-01")
-# Outputs of the 4.3 ``gpu_validate`` generators for these arguments (computed once from
-# the 4.3 sources): the moved functions must reproduce them byte for byte.
-STREAM_43 = "5210bc2f12d578a3ac2e9df8e605d4c6d1a477c38d51c929ab152e90340e4063"
-FUZZ_43 = "3c2bbf7814c5089d01dae0c23817c039727143db9e59ea778379d524febb1e27"
+# Expected SHA-256 of the generators' output for these arguments: the generators must
+# reproduce them byte for byte.
+STREAM_DIGEST = "5210bc2f12d578a3ac2e9df8e605d4c6d1a477c38d51c929ab152e90340e4063"
+FUZZ_DIGEST = "3c2bbf7814c5089d01dae0c23817c039727143db9e59ea778379d524febb1e27"
 
 
 def digest(units):
@@ -40,10 +41,10 @@ def decode(unit, universe, recv_ns=0):
     return decode_packet(unit, recv_ns, generation=1, midnight_ns=MIDNIGHT, universe=universe)
 
 
-def test_stream_and_fuzz_reproduce_the_4_3_generators():
+def test_stream_and_fuzz_reproduce_the_expected_digests():
     stream = synthetic_stream(np.random.default_rng(20260930), 400, 50, MIDNIGHT, 34200)
-    assert digest(stream) == STREAM_43
-    assert digest(fuzz(stream, 6000, seed=11)) == FUZZ_43
+    assert digest(stream) == STREAM_DIGEST
+    assert digest(fuzz(stream, 6000, seed=11)) == FUZZ_DIGEST
 
 
 def test_stream_units_are_valid_contiguous_and_cover_every_kind():
@@ -142,7 +143,7 @@ def test_tapes_are_deterministic_by_seed(tmp_path):
     assert (tmp_path / "a/manifest.json").read_text() == (tmp_path / "b/manifest.json").read_text()
 
 
-def test_capture_carries_the_tape_as_4_3_replay_units(tape, tmp_path):
+def test_capture_carries_the_tape_as_replay_units(tape, tmp_path):
     out, manifest = tape
     _, rows = open_tape(out)
     counts = synthetic_capture(out, tmp_path / "day.pcap", sender_port=40123, start_seq=5)

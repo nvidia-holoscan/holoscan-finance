@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic synthetic NYQ data: replay units, fuzzed units, tapes and pcap captures.
 
-``synthetic_stream`` and ``fuzz`` are verbatim from 4.3 ``equities.gpu_validate``: random
-but valid units covering every observation kind (one-sided, negative and halted quotes,
-trades, conditions, several Time seconds per packet) and mutations aimed at each rejection
-rule. ``synthetic_tape`` writes a tape in the ``open_tape`` format and ``synthetic_capture``
-packetizes a tape as 4.3 ``replay.py`` sends it, into a pcap; with them every test and the
-NIC-free validation run without the licensed data. NumPy only.
+``synthetic_stream`` and ``fuzz`` generate random but valid units covering every observation
+kind (one-sided, negative and halted quotes, trades, conditions, several Time seconds per
+packet) and mutations aimed at each rejection rule. ``synthetic_tape`` writes a tape in the
+``open_tape`` format and ``synthetic_capture`` packetizes a tape as ``tools.replay_sender``
+sends it, into a pcap; with them every test and the NIC-free validation run without the
+licensed data. NumPy only.
 """
 
 from __future__ import annotations
@@ -261,9 +261,9 @@ def synthetic_capture(
     start_seq: int = 1,
     drop_every: int = 0,
 ) -> dict:
-    """Packetize a tape as 4.3 ``replay.py`` does (``pack_events`` units plus the final Status
-    marker) into UDP frames in a pcap; ``drop_every`` > 0 leaves out every n-th data packet
-    (sequence gaps; the marker is always sent). Returns the counts.
+    """Packetize a tape as ``tools.replay_sender`` does (``pack_events`` units plus the final
+    Status marker) into UDP frames in a pcap; ``drop_every`` > 0 leaves out every n-th data
+    packet (sequence gaps; the marker is always sent). Returns the counts.
 
     The counts are what a lossless receiver of the pcap sees: ``packets``, ``events``
     (observations, the marker's included) and ``messages`` (MITCH messages, Time included),

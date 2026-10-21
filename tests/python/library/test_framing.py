@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Ethernet/IPv4/UDP framing and pcap files: the host strip path (from 4.3
-``test_ano_source_op``), synthetic frames, pcap round trips and IHL-aware source ports."""
+"""Ethernet/IPv4/UDP framing and pcap files: the host strip path, synthetic frames, pcap
+round trips and IHL-aware source ports."""
 
 from __future__ import annotations
 

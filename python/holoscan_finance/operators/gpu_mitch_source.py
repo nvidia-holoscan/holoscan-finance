@@ -8,9 +8,9 @@ with ``lossless(4)`` in the same lane: the source is the entry of ``ingest`` and
 with the bars, so no per-packet work crosses a lane. Decode is fused because ring rows stay
 leased until decode synchronizes; the lease has one consumer by construction.
 ``GpuMitchSourceOp`` receives through DAQIRI GPUDirect and the GIL-free native drain
-(GPU_INGEST: lossless at 200k packets/s, 6.6M msgs/s); ``GpuMitchReplaySourceOp`` replays a
-pcap from GPU memory through the same gather, ring, accounting and decode, with no NIC.
-Processor: ``ingest.gpu_ingest.GpuIngest``. From 4.3 ``gpu_mitch_source_op``.
+(sized for 200k packets/s, 6.6M msgs/s); ``GpuMitchReplaySourceOp`` replays a pcap from GPU
+memory through the same gather, ring, accounting and decode, with no NIC.
+Processor: ``ingest.gpu_ingest.GpuIngest``.
 """
 
 from __future__ import annotations

@@ -5,9 +5,8 @@
 ``prepare`` turns one UTC day of licensed NYQ Parquet into ``events.bin`` (``EVENT_DTYPE``
 records of the 09:30-16:00 New York session, time ordered) plus ``manifest.json``, with a
 DuckDB external sort and Arrow batches so memory stays bounded. ``open_tape`` maps a tape
-without reading it. Both verbatim from 4.3 ``equities.data`` (its CLI is now
-``tools.prepare_tape``); the two progress lines are log records. duckdb and pyarrow are
-imported inside ``prepare``.
+without reading it. Its CLI is ``tools.prepare_tape``; the two progress lines are log
+records. duckdb and pyarrow are imported inside ``prepare``.
 """
 
 from __future__ import annotations

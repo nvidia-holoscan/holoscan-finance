@@ -6,8 +6,7 @@ The q/P layouts are reused for consolidated quotes/trades; their original LSE
 auction/hidden-trade semantics are not asserted. See docs/METHODOLOGY.md.
 Dates, RIC directory and sender-session identity come from the HTTP manifest.
 There are no custom trailers or timestamps hidden in exchange identifier fields.
-Verbatim from 4.3 ``holoscan.equities.mitch``: ``decode_packet`` is the host oracle the GPU
-decoder matches bit for bit.
+``decode_packet`` is the host oracle the GPU decoder matches bit for bit.
 """
 
 from __future__ import annotations

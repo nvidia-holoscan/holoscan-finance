@@ -4,8 +4,8 @@
 
 The numeric symbol ID indexes the HTTP-delivered directory. NaN denotes a missing
 source value. A generation counter resets analytics on seek, loop or restart.
-Verbatim from 4.3 ``holoscan.marketdata.wire``: ``ReplayBatch`` and ``EVENT_DTYPE`` are the
-host side of the bit-identity checks, so neither layout changes.
+``ReplayBatch`` and ``EVENT_DTYPE`` are the host side of the bit-identity checks, so neither
+layout may change.
 """
 
 from __future__ import annotations

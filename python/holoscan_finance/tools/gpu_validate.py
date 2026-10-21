@@ -13,9 +13,8 @@ through host ``QuoteBars`` and ``GpuQuoteBars`` with identical batching instead;
 
     python -m holoscan_finance.tools.gpu_validate --pcap base.pcap --tape /data/tape
 
-From 4.3 ``equities.gpu_validate`` (same flags). The oracle pieces moved to the library:
-``validation.compare`` (host decode, comparison, ULPs), ``nyq.synthetic`` (``fuzz``) and
-``marketdata.sequence`` (the host sequence rules, was ``_observe_host``).
+The oracle pieces are library code: ``validation.compare`` (host decode, comparison,
+ULPs), ``nyq.synthetic`` (``fuzz``) and ``marketdata.sequence`` (the host sequence rules).
 """
 
 from __future__ import annotations

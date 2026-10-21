@@ -15,8 +15,8 @@ equals Python's integer true division. Larger magnitudes (absent from real data,
 present in fuzzed packets) are written as placeholders, recorded, and patched
 with the Python reference conversion, so results stay bit-identical.
 
-Benchmark only (``decode_bench``, ``gpu_validate --decoder cpu``): no graph uses it. From 4.3
-``equities.cpu_mitch``, verbatim; needs numba>=0.68.
+Benchmark only (``decode_bench``, ``gpu_validate --decoder cpu``): no graph uses it.
+Needs numba>=0.68.
 """
 
 from __future__ import annotations

@@ -4,13 +4,12 @@
 ``RollingRiskOp``.
 
 A one-window slot keeps only the newest window, and ``poll`` analyzes it at most once per
-``min_interval_ns`` and only while no CPU comparison is in flight: 4.3's run-on-arrival
-timing (``MessageAvailable`` + ``PeriodicCondition``) with a 1 ms poll measured a 0.99 ms
-pick-up, where a 50 ms clock added 28 ms at p50. Inline it is 4.3
-``GpuRollingRiskOp.compute`` (a throwaway engine per generation, host-variance ranking of
-validated windows); with ``executor="process"`` it is the host paths' 4.3 ``RiskOp``
-(``gpu_window``/``cpu_window`` in one spawned worker, off the decoder's GIL). Never imports
-Holoscan; CuPy only inside the inline GPU path.
+``min_interval_ns`` and only while no CPU comparison is in flight, so a window is picked
+up on arrival: a 1 ms poll measured a 0.99 ms pick-up, where a 50 ms clock added 28 ms at
+p50. Inline it keeps a throwaway engine per generation and ranks validated windows by host
+variance; with ``executor="process"`` it runs ``gpu_window``/``cpu_window`` in one spawned
+worker, off the decoder's GIL. Never imports Holoscan; CuPy only inside the inline GPU
+path.
 """
 
 from __future__ import annotations
@@ -202,8 +201,8 @@ class RollingRisk:
         try:
             result = future.result()
         except Exception as exc:
-            # 4.3 RiskOp: record the error and stop analyzing. No comparison will come for
-            # this window, so its claim is void.
+            # Record the error and stop analyzing. No comparison will come for this window,
+            # so its claim is void.
             self.stats.error = f"Analytics failed: {exc}"
             self._failed = True
             if validated:

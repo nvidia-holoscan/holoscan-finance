@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""CPU/GPU agreement (4.3 tolerances) and the comparison rules of 4.3 ``publish_comparison``."""
+"""CPU/GPU agreement tolerances and the comparison rules of ``compare_results``."""
 
 from __future__ import annotations
 

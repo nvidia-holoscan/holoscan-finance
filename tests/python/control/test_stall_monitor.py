@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""StallMonitor: GIL stalls seen by the 5 ms heartbeat, GC pauses, the 4.3 stalls shape."""
+"""StallMonitor: GIL stalls seen by the 5 ms heartbeat, GC pauses, the stalls dict shape."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def test_start_and_stop_are_idempotent():
     assert monitor._gc_timer not in gc.callbacks
 
 
-def test_stalls_has_the_4_3_shape():
+def test_stalls_has_its_shape():
     ingest = IngestStats()
     ingest.stall_event("compute", 75.0, decode=70.0)
     ingest.burst_gap(0)

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """NYQ observations to MITCH and back: round trip, lossy-field policy, huge prices and the
-replay-specific rejections (from 4.3 ``test_mitch``)."""
+replay-specific rejections."""
 
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""GPU risk: heatmap selection independent of the BLAS backend (from 4.3 ``test_equities``),
-and ``RollingRisk(gpu)`` on device windows matching the engine, validated or not (from 4.3
-``test_rolling_risk_op_matches_the_engine``)."""
+"""GPU risk: heatmap selection independent of the BLAS backend, and ``RollingRisk(gpu)`` on
+device windows matching the engine, validated or not."""
 
 from __future__ import annotations
 

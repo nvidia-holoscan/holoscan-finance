@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Use only on a dedicated test port. DAQIRI must start before enabling loopback.
-# shellcheck source=deploy/igx_thor/ano_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/ano_common.sh"
+# shellcheck source=deploy/igx_thor/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 ACTION=up
 case "${1:-}" in
     --check) ACTION=check ;;
@@ -71,4 +71,4 @@ run docker run --rm --privileged --net=host --pid=host "$MST_IMAGE" bash -ceu '
         fi
         if [[ "$6" == 0 ]]; then ip link set "$nic" down; fi
     fi
-' ano-loopback "$ACTION" "$ANO_PCIE" "$ANO_NIC" "$LOOPBACK_CIDR" "$LOOPBACK_PEER" "${ORIGINAL_LINK_UP:-1}" "${ORIGINAL_NM_MANAGED:-no}"
+' nic-loopback "$ACTION" "$NIC_PCIE" "$NIC_NAME" "$LOOPBACK_CIDR" "$LOOPBACK_PEER" "${ORIGINAL_LINK_UP:-1}" "${ORIGINAL_NM_MANAGED:-no}"

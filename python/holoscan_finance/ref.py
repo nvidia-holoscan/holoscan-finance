@@ -4,8 +4,8 @@
 
 Holoscan deep-copies Param values into every operator instance (at ``graph.op``, at compile
 and per run), so a live object such as a stats holder or a gate travels inside a ``Ref``
-whose deep copy is itself: every instance then shares one object. ``Knob`` replaces 4.3's
-``state.lock``-guarded manifest: writers serialize, data-plane readers take no lock.
+whose deep copy is itself: every instance then shares one object. ``Knob`` holds the latest
+value: writers serialize, data-plane readers take no lock.
 No Holoscan import, so library code builds both without the SDK.
 """
 

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""ReplayDirectory and ReplayGenerations: 4.3 manifest rules, listener order, lock release."""
+"""ReplayDirectory and ReplayGenerations: manifest rules, listener order, lock release."""
 
 from __future__ import annotations
 
@@ -39,15 +39,15 @@ def test_generations_are_monotonic_and_idempotent():
     assert d.current is None and d.generation == 0
     assert d.set_manifest(manifest(5)) == {"generation": 5}
     assert d.generation == 5 and d.current.sender_port == 50001 and knob.version == 1
-    # An equal or older generation is a no-op that reports the current one (4.3).
+    # An equal or older generation is a no-op that reports the current one.
     assert d.set_manifest(manifest(5, port=50002)) == {"generation": 5}
     assert d.set_manifest(manifest(3, port=50003)) == {"generation": 5}
     assert knob.version == 1 and d.used_sender_ports == {50001}
 
 
 def test_seek_takes_a_new_port_and_rejects_the_old_one():
-    # From 4.3 test_mitch: a seek registers a new generation from a new sender port; packets
-    # still queued from the old port are stale because the directory names the new one.
+    # A seek registers a new generation from a new sender port; packets still queued from
+    # the old port are stale because the directory names the new one.
     d = ReplayDirectory(Knob())
     d.set_manifest(manifest(1, 50001))
     d.set_manifest(manifest(2, 50002))

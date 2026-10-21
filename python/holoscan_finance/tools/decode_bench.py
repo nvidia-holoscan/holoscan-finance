@@ -12,13 +12,12 @@ the Python and CPU decoders, the fused CUDA bars for the GPU decoder.
 
 Warm-up (numba/CUDA compilation) runs before timing. This measures the decode and
 bars stages only; the live ingest ceiling also includes receive, scheduling and
-analytics, so do not compare these numbers with live packets/s figures
-(GPU_INGEST, Holoscan 4.3: 17.7M msgs/s at 16k-message groups, 76M at 131k and up).
+analytics, so do not compare these numbers with live packets/s figures.
 
     python -m holoscan_finance.tools.decode_bench --pcap base.pcap --tape /data/tape
 
-From 4.3 ``equities.decode_bench`` (same flags); the bar settings come from ``BarSettings``.
-CuPy and numba are imported only by the paths that use them.
+The bar settings come from ``BarSettings``. CuPy and numba are imported only by the paths
+that use them.
 """
 
 from __future__ import annotations

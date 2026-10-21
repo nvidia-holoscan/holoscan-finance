@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Event-time quote bars (from 4.3 ``test_equities``) and the methods added in 5.0:
-``window_parts``, ``reset_marks``, ``counts`` and ``symbol_arrays``."""
+"""Event-time quote bars and the host-mirror methods: ``window_parts``, ``reset_marks``,
+``counts`` and ``symbol_arrays``."""
 
 from __future__ import annotations
 

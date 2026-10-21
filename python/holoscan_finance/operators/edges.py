@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Edge presets that applications pass to ``add_flow``, so ``plan.json`` shows the intent.
 
-``LATEST`` is the latest-only mailbox (4.3 ``POP``/``IOSize(1)``): bars never block on
+``LATEST`` is the latest-only mailbox (``DROP_OLDEST``, depth 1): bars never block on
 analytics, and a slow consumer skips windows. ``lossless(depth)`` is a ``BLOCKING`` edge of
 explicit depth (the default depth 1 fails a run with ``BackpressuredError`` under load).
 ``topic_export_kwargs`` bounds a holomq export so a stalled external reader can never fail

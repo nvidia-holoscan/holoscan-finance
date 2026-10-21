@@ -5,12 +5,12 @@
     python -m holoscan_finance.tools.measure --output RUN.json [--url http://127.0.0.1:8080]
         [--seconds 120] [--rate 75000] [--seek 50400]
 
-From 4.3 ``equities.measure`` (same flags): wait for a complete, validated window of a fresh
-generation, record every packet and calculation of a ``--seconds`` capture through the
-dashboard's ``/capture`` endpoints, and save it with the counters around it; separate CPU and
-GPU captures are then compared by ``compare_runs``. It knows the NIC-free ``replay`` front
-end, whose pace and position are the receiver's CLI (``/feedrate`` does not reach it), so
-there any complete window starts the capture. CPU only.
+Wait for a complete, validated window of a fresh generation, record every packet and
+calculation of a ``--seconds`` capture through the dashboard's ``/capture`` endpoints, and
+save it with the counters around it; separate CPU and GPU captures are then compared by
+``compare_runs``. It knows the NIC-free ``replay`` front end, whose pace and position are
+the receiver's CLI (``/feedrate`` does not reach it), so there any complete window starts
+the capture. CPU only.
 """
 
 from __future__ import annotations
@@ -24,10 +24,10 @@ from pathlib import Path
 
 from .replay_sender import request
 
-TRANSPORT_SCOPE = {  # by /snapshot network.ingest, which keeps the 4.3 tokens
-    "async": "Linux kernel UDP sockets",
-    "ano": "DAQIRI/ConnectX host-memory reception",
-    "gpu": "DAQIRI/ConnectX GPUDirect reception into GPU memory",
+TRANSPORT_SCOPE = {  # by /snapshot network.ingest
+    "udp": "Linux kernel UDP sockets",
+    "daqiri-host": "DAQIRI/ConnectX host-memory reception",
+    "gpudirect": "DAQIRI/ConnectX GPUDirect reception into GPU memory",
     "replay": "pcap replay from GPU memory (software NIC)",
 }
 

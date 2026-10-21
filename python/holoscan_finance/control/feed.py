@@ -3,9 +3,8 @@
 """Pacing controls for the external replay sender (``/feedrate``, ``/feedstatus``).
 
 The sender (``tools.replay_sender``) polls ``GET /feedrate`` every 0.2 s and reports its
-cursor through ``POST /feedstatus``; nothing here reaches an operator. The rules are 4.3
-``EquityState.feed_control`` and the ``/feedstatus`` and ``/replay/resume`` handlers,
-verbatim. The NIC-free replay source ignores these controls (its pace is a CLI setting).
+cursor through ``POST /feedstatus``; nothing here reaches an operator. The rules are the
+ones the replay sender expects. The NIC-free replay source ignores these controls (its pace is a CLI setting).
 """
 
 from __future__ import annotations

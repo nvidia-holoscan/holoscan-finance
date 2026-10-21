@@ -13,7 +13,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "NVIDIA Corporation" }]
-# The Holoscan SDK is NEVER a pip dependency: PyPI tops out at 4.6; use the 5.0 image or Debian packages.
+# The Holoscan SDK is NEVER a pip dependency: Holoscan SDK 5.0 is not published on PyPI; use the 5.0 image or Debian packages.
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
@@ -39,7 +39,7 @@ cuda = 13
 workspace-name = "holoscan-finance"
 forward-env = ["CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "HOLOSCAN_FINANCE_NATIVE_DRAIN", "HOLOSCAN_FINANCE_FAULTS"]
 search-paths = ["operators", "applications"]
-docker-run-args = ["--tmpfs=/dev/shm:rw,exec,size=4g"]      # never share the host /dev/shm (docs/PORTING_TO_5_0.md); no --as-root needed
+docker-run-args = ["--tmpfs=/dev/shm:rw,exec,size=4g"]      # never share the host /dev/shm (SECURITY.md, shared-memory topics); no --as-root needed
 
 [tool.holoscan.base-images]
 x86_64 = "nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13"

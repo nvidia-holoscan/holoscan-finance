@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``validate_manifest``: every 4.3 ``set_manifest`` rejection, and the immutable
-``FeedDirectory`` it publishes."""
+"""``validate_manifest``: every manifest rejection, and the immutable ``FeedDirectory`` it
+publishes."""
 
 from __future__ import annotations
 

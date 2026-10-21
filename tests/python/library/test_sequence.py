@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Host packet-sequence rules: seek and sequence-loss invalidation (from 4.3 ``test_equities``),
-gap flushes before the mark reset, and stale packets."""
+"""Host packet-sequence rules: seek and sequence-loss invalidation, gap flushes before the
+mark reset, and stale packets."""
 
 from __future__ import annotations
 

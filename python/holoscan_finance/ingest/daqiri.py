@@ -3,10 +3,10 @@
 """DAQIRI binding checks and the single-queue RX configuration of the DAQIRI sources.
 
 ``require_daqiri`` fails explicitly on missing or incompatible bindings and never falls back
-to sockets. ``build_daqiri_config`` is the 4.3 config (one flow-isolated queue steering every
-datagram for the feed's UDP port) plus ``"engine": "dpdk"``: DAQIRI >= #253 defaults raw
-streams to ibverbs, where the Thor steering patch would silently stop applying. From 4.3
-``marketdata.daqiri``; ``strip_udp_datagram`` moved to ``marketdata.framing``.
+to sockets. ``build_daqiri_config`` builds one flow-isolated queue steering every datagram
+for the feed's UDP port, with ``"engine": "dpdk"``: DAQIRI >= #253 defaults raw streams to
+ibverbs, where the Thor steering patch would silently stop applying. ``strip_udp_datagram``
+lives in ``marketdata.framing``.
 """
 
 from __future__ import annotations

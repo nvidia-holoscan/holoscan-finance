@@ -4,9 +4,8 @@
 
 Importing the package imports nothing else: ``Ref``/``Knob``, the payload classes and the
 ten operator classes resolve on first access, so the CPU tools and the library modules run
-without the Holoscan SDK or CuPy (the 4.3 ``holoscan.marketdata`` lazy exports, without
-its ``__path__`` hack). Inside the package, modules import each other relatively: the
-``holoscan.finance`` alias must not be imported while this package initializes.
+without the Holoscan SDK or CuPy. Inside the package, modules import each other relatively:
+the ``holoscan.finance`` alias must not be imported while this package initializes.
 """
 
 from __future__ import annotations

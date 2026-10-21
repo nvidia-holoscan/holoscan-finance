@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Compile (or load from ``CUPY_CACHE_DIR``) the GPU kernels before live data.
 
-Without this the first market-data batches stall behind CUDA JIT compilation. Split from
-4.3 ``equities.warmup.warmup`` so each operator warms only its own kernels in ``start()``:
-the sources the gather and decode RawModule, the bars operator both bar paths and
-``apply_sequence``. Both functions run once per process and device and log
-"GPU <x> kernels ready in N s".
+Without this the first market-data batches stall behind CUDA JIT compilation. Each
+operator warms only its own kernels in ``start()``: the sources the gather and decode
+RawModule, the bars operator both bar paths and ``apply_sequence``. Both functions run once
+per process and device and log "GPU <x> kernels ready in N s".
 """
 
 from __future__ import annotations
@@ -29,13 +28,13 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()  # one warm-up at a time; later callers find the kernels ready
 _warm: set[tuple[str, int]] = set()  # (kernels, device) warmed in this process
 
-_MIDNIGHT = 1_700_000_000 * 10**9 // 86400 // 10**9 * 86400 * 10**9  # the 4.3 warm-up day
+_MIDNIGHT = 1_700_000_000 * 10**9 // 86400 // 10**9 * 86400 * 10**9  # the warm-up day
 _SYMBOLS = ["A", "B", "C"]
 
 
 def _unit(step: int, sequence: int, bar_ns: int, *, late_ns: int = 0) -> tuple[bytes, int]:
-    """One MITCH unit of quotes, trades and a halt in bar ``step`` (the 4.3 warm-up rows);
-    ``late_ns`` moves the first observation that far back."""
+    """One MITCH unit of quotes, trades and a halt in bar ``step``; ``late_ns`` moves the
+    first observation that far back."""
     rows = np.zeros(6, EVENT_DTYPE)
     rows["timestamp_ns"] = _MIDNIGHT + 36000 * 10**9 + step * bar_ns + np.arange(6) * 10**6
     rows["timestamp_ns"][0] -= late_ns
@@ -95,7 +94,7 @@ def warm_decode_kernels(gpu_device: int = 0) -> float:
 
 
 def warm_bars_kernels(settings: Mapping[str, float], gpu_device: int = 0) -> float:
-    """The 4.3 ``warmup()`` body: bars across several bar boundaries (the fused path), then a
+    """The bars warm-up: bars across several bar boundaries (the fused path), then a
     sequence gap and a late observation (``select_packets`` and the general path); returns
     seconds (0.0 when this device is already warm)."""
 

@@ -5,10 +5,9 @@
     python -m holoscan_finance.tools.compare_runs --cpu CPU.json --gpu GPU.json --output OUT.json
         [--start ISO --end ISO | --all-shared]
 
-From 4.3 ``equities.compare_runs`` (same flags). A speedup is claimed only when both
-``measure`` captures cover every predefined window with identical inputs (SHA-256 of the
-window), numerically agreeing results and the same incremental/rebuild work; one missing,
-duplicated or disagreeing window voids it. CPU only.
+A speedup is claimed only when both ``measure`` captures cover every predefined window with
+identical inputs (SHA-256 of the window), numerically agreeing results and the same
+incremental/rebuild work; one missing, duplicated or disagreeing window voids it. CPU only.
 """
 
 from __future__ import annotations

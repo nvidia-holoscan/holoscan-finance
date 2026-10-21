@@ -4,13 +4,12 @@
 
 Every port is ``hs.pyobject``: zero-copy, identity-preserving, shared across a fan-out.
 So the producer never touches a payload after ``emit()`` and consumers copy before
-modifying; the dataclasses are frozen. The 4.3 batch classes keep their names and layouts
-(bit-identity oracle): ``ReplayBatch`` is re-exported from ``marketdata.records`` and
+modifying; the dataclasses are frozen. The batch classes' layouts are fixed (bit-identity
+oracle): ``ReplayBatch`` is re-exported from ``marketdata.records`` and
 ``GpuReplayBatch`` lazily from ``marketdata.gpu_bars``. ``BarCounters`` and
 ``SymbolSnapshot`` live here because ``marketdata.bar_builder`` produces them and
 ``telemetry.stats`` stores them: this NumPy-only leaf is the one place both import without
-a cycle. ``BarWindow`` comes from 4.3 ``gpu_quote_bars_op``, ``RiskUpdate`` from
-``gpu_rolling_risk_op``.
+a cycle.
 """
 
 from __future__ import annotations

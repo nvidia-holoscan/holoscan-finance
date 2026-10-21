@@ -15,14 +15,12 @@ The drain (`holoscan_finance.ingest.drains.DeviceReplayDrain`, thread `hf-replay
 implements the native drain's protocol (records, ring positions, releases, statistics). It
 closes a burst at `burst_packets` frames or `rx_timeout_us` after its first frame was due,
 as DAQIRI does, never wraps a burst around the ring end, and holds a burst while the ring is
-full, sleeping on a condition that each release signals (a full ring costs it no CPU).
-This is how the whole 5.0 GPU graph is run, tested and A/B-compared without a NIC: bit
-identity, throughput headroom and paced lossless gates. The drain is Python, so it is not a
-test of resilience to GIL stalls; those claims stay with the native drain on the NIC.
+full, sleeping on a condition that each release signals (a full ring costs it no CPU). This
+is how the whole GPU graph is run and tested without a NIC: bit identity, throughput
+headroom and paced lossless gates. The drain is Python, so it is not a test of resilience to
+GIL stalls; those claims stay with the native drain on the NIC.
 
-Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with `DeviceReplayDrain`. New in
-the 5.0 port; frame reading from 4.3 `gpu_validate.read_pcap`, loop and generation logic
-from `replay.py`.
+Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with `DeviceReplayDrain`.
 
 ## Requirements
 
@@ -64,7 +62,7 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
 - **Feed and sender port.** The feed is the capture's frames from the first generation's
   `sender_port` when the capture carries that port, else its most common UDP source port's
   frames, which are rewritten to `sender_port` before pass 0. Each later pass re-sources
-  only the feed's frames (4.3's `tcprewrite --portmap feed:new`); frames from any other
+  only the feed's frames (like `tcprewrite --portmap feed:new`); frames from any other
   sender stay stale in every pass.
 - **Loops.** Before pass k ≥ 1 the drain waits until the consumer released every row (ring
   and staging empty) and `settled()` holds (every decoded batch reached the bars), calls

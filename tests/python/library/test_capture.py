@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Capture membership, complete distributions and explicit invalidation (from 4.3
-``test_equity_capture`` and ``test_mitch``), and the ``CaptureTap`` that holds the active
-capture for the decode sites, the results store and HTTP."""
+"""Capture membership, complete distributions and explicit invalidation, and the
+``CaptureTap`` that holds the active capture for the decode sites, the results store and
+HTTP."""
 
 from __future__ import annotations
 

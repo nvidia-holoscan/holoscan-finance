@@ -8,7 +8,7 @@ decode, bars and every generation filter read it without a lock. Global lock ord
 order, so no ABBA deadlock between manifests and the analytics lane):
 ``ReplayDirectory.lock`` -> ``_listener_lock`` -> ``FullDayController`` -> ``ResultsStore``
 -> ``CaptureTap`` -> ``IngestStats``. Listeners run after ``lock`` is released, in
-publication order. From 4.3 ``EquityState.set_manifest`` and ``replay.py``'s generations.
+publication order.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class ReplayDirectory:
 
     def set_manifest(self, payload: dict) -> dict:
         """Accept a newer generation. An older or equal one is a no-op that returns the
-        current generation; a sender port seen before raises ValueError (4.3 rules)."""
+        current generation; a sender port seen before raises ValueError."""
         d = validate_manifest(payload)
         with self.lock:
             current = self.knob.get()
@@ -81,7 +81,7 @@ class ReplayDirectory:
 
 class ReplayGenerations:
     """``GpuMitchReplaySourceOp.on_loop``: every replay pass after the first is a new
-    generation from a fresh sender port, as 4.3 ``replay.py`` registered each loop."""
+    generation from a fresh sender port, as ``tools.replay_sender`` registers each loop."""
 
     def __init__(self, directory: ReplayDirectory, base_manifest: dict, first_port: int) -> None:
         self._directory = directory

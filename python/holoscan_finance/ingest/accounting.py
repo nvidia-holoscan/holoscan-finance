@@ -1,15 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Receive accounting of every source: one implementation of the 4.3 sequence rules.
+"""Receive accounting of every source: one implementation of the sequence rules.
 
 Units are counted per sender session (source address and market-data group, so a new replay
 generation's sender is never read as the current one): a sequence above the expected one
 adds the gap to ``dropped`` (sequence gaps, in messages), one below it is out of order, and
-the expectation never moves back. The host receivers call ``observe_packet`` per datagram
-(4.3 ``AsyncUdpSourceOp._enqueue_packet``); the GPU path calls ``observe_burst`` on the
-7-column receive header of a burst, vectorized for the normal single-session contiguous
-burst (4.3 ``GpuMitchSourceOp._account``) and per packet otherwise (``_account_slow``), with
-identical counters. Ring admission (``ring_dropped``) is left to the owner of each ring.
+the expectation never moves back. The host receivers call ``observe_packet`` per datagram;
+the GPU path calls ``observe_burst`` on the 7-column receive header of a burst, vectorized
+for the normal single-session contiguous burst and per packet otherwise (``_account_slow``),
+with identical counters. Ring admission (``ring_dropped``) is left to the owner of each ring.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from ..telemetry.stats import IngestStats
 def mitch_packet_header(data: bytes, peer: tuple[str, int] | None) -> tuple[tuple, int, int]:
     """``(session, sequence, message count)`` of one MITCH unit; ValueError if malformed.
 
-    Sequences count wire messages, Time messages included (was 4.3 ``host_sources.packet_header``).
+    Sequences count wire messages, Time messages included.
     """
     group, sequence, count = inspect_unit(data)
     return (peer, group), sequence, count
@@ -88,7 +87,7 @@ class ReceiveAccounting:
         return cand
 
     def _sequence(self, session: tuple, seq: int, count: int) -> None:
-        """The per-packet 4.3 rule."""
+        """The per-packet rule."""
         if session != self._session:
             self._session, self._expected = session, None
         expected = self._expected

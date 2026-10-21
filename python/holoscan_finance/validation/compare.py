@@ -5,13 +5,13 @@
 ``host_decode`` decodes captured payloads with the reference ``nyq.mapping.decode_packet`` in
 a fork pool; ``compare_decoded`` requires another decoder's output to match it bit for bit:
 per-packet accept/reject stage, counts, sequences and every observation field, floats as raw
-bit patterns so NaN placement and signed zeros count. Both, and ``ulps``, are 4.3
-``equities.gpu_validate`` (``_host_decode``, ``compare``, ``_ulps``).
+bit patterns so NaN placement and signed zeros count; ``ulps`` measures float distances.
 
 ``HostReference`` is the post-run oracle of ``market_data_bench --check``: the capture through
 the host sequence rules and ``QuoteBars``, recording every bar as it closes, so each GPU
-window of the graph is checked against an independent decode (GPU_INGEST: on the real day
-518 of 11.6M returns differ by 1 ULP, CUDA vs NumPy ``log``, none by more).
+window of the graph is checked against an independent decode (docs/VALIDATION.md step 2,
+2026-10-20, full-size synthetic day: 41 of 13,414,033 finite returns differ by 1 ULP, CUDA
+vs NumPy ``log``, none by more).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from ..nyq.manifest import FeedDirectory
     from ..settings import BarSettings
 
-# Packets HostReference decodes at once (4.3 gpu_validate --chunk). Decoding holds about 4 KB
+# Packets HostReference decodes at once (as gpu_validate --chunk). Decoding holds about 4 KB
 # per packet (events and worker results): about 12 GB for a full day in one piece.
 _CHUNK_PACKETS = 250_000
 _CTX: dict = {}  # per worker process: midnight_ns, universe

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The GPU MITCH decode kernel is bit-compatible with the host decoder: every field and every
 rejection rule, via golden bytes, randomized streams and mutations; the Ethernet/IPv4/UDP
-gather kernel against ``strip_udp_datagram`` (from 4.3 ``test_equities_gpu``). The full-day
+gather kernel against ``strip_udp_datagram``. The full-day
 version of these checks is ``python -m holoscan_finance.tools.gpu_validate``.
 
 ``to_slots``, ``host_decode`` and ``compare`` are the test oracle the other GPU tests share.
