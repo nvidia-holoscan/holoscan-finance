@@ -11,6 +11,7 @@ Generation ordering and sender-port reuse are the directory's checks, not this m
 from __future__ import annotations
 
 import copy
+import math
 import types
 from dataclasses import dataclass
 
@@ -37,6 +38,23 @@ class FeedDirectory:
         return len(self.symbols)
 
 
+def _symbol(value: object) -> bool:
+    """1-128 characters that encode as UTF-8 (``/snapshot`` serves them; a lone surrogate
+    from a JSON escape cannot be encoded)."""
+    if not isinstance(value, str) or not 0 < len(value) <= 128:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _number(value: object) -> bool:
+    """A JSON number ``/snapshot`` can serve back: no bool, no inf or NaN."""
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
 def validate_manifest(payload: dict) -> FeedDirectory:
     """Every manifest check plus the market day; ValueError on any failure."""
     if not isinstance(payload, dict):
@@ -51,7 +69,7 @@ def validate_manifest(payload: dict) -> FeedDirectory:
         or not 1 <= payload["sender_port"] <= 65535
         or not isinstance(symbols, list)
         or not 1 <= len(symbols) <= 10000
-        or not all(isinstance(s, str) and 0 < len(s) <= 128 for s in symbols)
+        or not all(_symbol(s) for s in symbols)
         or len(set(symbols)) != len(symbols)
         or type(generation) is not int
         or generation <= 0
@@ -62,6 +80,10 @@ def validate_manifest(payload: dict) -> FeedDirectory:
         or type(payload.get("events")) is not int
         or payload["events"] < 1
         or not isinstance(payload.get("profile"), list)
+        or not all(  # [minute start (s), events] pairs
+            isinstance(p, list) and len(p) == 2 and all(_number(x) for x in p)
+            for p in payload["profile"]
+        )
     ):
         raise ValueError("invalid NYQ directory or generation")
     midnight_ns = day_start_ns(payload["date"])  # ValueError for an invalid date

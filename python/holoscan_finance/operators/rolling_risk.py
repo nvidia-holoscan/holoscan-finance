@@ -6,9 +6,9 @@ Ports: ``window`` (in, ``BarWindow``) -> ``risk`` (out, ``RiskUpdate``) and, onl
 ``cross_check``, ``validate`` (out: the validated updates, with ``rows_host``). Edges: in,
 ``LATEST`` from ``QuoteBarsOp`` in another lane; ``risk`` -> ``CallbackSinkOp``
 ``lossless(8)``, same lane; ``validate`` -> ``RiskCrossCheckOp`` ``lossless(2)``. Lane: the
-entry of ``analytics``. It polls every ``poll_period_us`` (1 ms) and keeps the newest window
-in a slot, analyzing it as soon as ``min_interval_us`` has passed: run-on-arrival timing at
-a bounded rate (pick-up p50 0.99 ms, measured). ``executor="process"`` runs the analysis in
+entry of ``analytics``. It polls every ``poll_period_us`` (250 µs) and keeps the newest
+window in a slot, analyzing it as soon as ``min_interval_us`` has passed: run-on-arrival
+timing at a bounded rate. ``executor="process"`` runs the analysis in
 a spawned worker (host front ends: off the decoder's GIL). Processor:
 ``analytics.rolling.RollingRisk``.
 """
@@ -44,20 +44,33 @@ class RollingRiskOp(hs.Operator):
         range=(1000, 60_000_000),
         description="--interval: at most one analysis per interval",
     )
-    poll_period_us = hs.Param(1000, range=(100, 100_000))
+    poll_period_us = hs.Param(
+        250, range=(100, 100_000), description="--risk-poll-us: how often to look for a window"
+    )
     host_variance = hs.Param(False, description="inline: rank by host NumPy variance")
     cross_check = hs.Param(False, description="claim the gate and emit validated updates")
     gate = hs.Param(Ref(), description="Ref(CrossCheckGate); required with cross_check")
     cpu_threads = hs.Param(0, range=(0, 1024), description="cpu_window BLAS threads; 0 tunes")
-    full_window_bars = hs.Param(60, range=(1, 100_000), description="cpu_window re-tunes here")
+    full_window_bars = hs.Param(
+        60,
+        range=(1, 100_000),
+        description="the bars' full window (window_seconds // bar_seconds): engine capacity,"
+        " and the window the CPU worker's BLAS tuning times",
+    )
     worker_cpus = hs.Param([], description="pin_worker set of the process executor; [] inherits")
+    directory = hs.Param(
+        Ref(),
+        description="Ref(Knob[FeedDirectory]); process + cpu: tune the worker for each new"
+        " universe when its manifest arrives (in start() if it is known then); empty: at its"
+        " first window",
+    )
     deadline_us = hs.Param(
         0, range=(0, 10_000_000), description=">0: count poll ticks that started this late"
     )
     stats = hs.Param(Ref(), description="Ref(RiskStats); private if empty")
 
     def __init__(self) -> None:
-        self._risk = self._pending = self._stats = None
+        self._risk = self._pending = self._stats = self._knob = None
         self._count_late = False
 
     def setup(self, spec: hs.OperatorSpec) -> None:
@@ -103,11 +116,18 @@ class RollingRiskOp(hs.Operator):
             stats=self._stats,
         )
         self._risk.start()  # process: the worker is running before the first window
+        cpu_worker = self.backend == "cpu" and self.executor == "process"
+        self._knob = self.directory.obj if cpu_worker else None
+        if self._knob is not None and (d := self._knob.get()) is not None:
+            # Replay registers its universe before the graph runs: tune before any window.
+            self._risk.prepare(d.universe, wait=True)
 
     def compute(self, ctx: hs.ExecutionContext) -> None:
         # Into the slot first: DrainAll retires samples this activation does not read.
         for sample in self.window.selected_batch():
             self._risk.offer(sample.data)
+        if self._knob is not None and (d := self._knob.get()) is not None:
+            self._risk.prepare(d.universe)  # once per universe, while the worker is idle
         if (
             self._count_late
             and ctx.activation.reason == hs.ActivationReason.MAX_START_DELAY_EXCEEDED

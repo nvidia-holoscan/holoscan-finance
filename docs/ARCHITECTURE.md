@@ -46,7 +46,7 @@ flowchart LR
         source -->|"events · BLOCKING/4"| bars
     end
     subgraph analytics["lane analytics · CpuSets.helper"]
-        risk["risk<br/>RollingRiskOp(gpu, inline)<br/>OnClock 1 ms + DrainAll"]
+        risk["risk<br/>RollingRiskOp(gpu, inline)<br/>OnClock 250 µs + DrainAll"]
         publish["publish<br/>CallbackSinkOp → ResultsStore.on_risk"]
         risk -->|"risk · BLOCKING/8"| publish
     end
@@ -94,7 +94,8 @@ flowchart LR
 
 The `crosscheck` and `topics` lanes are the same as above. On host front ends the analytics
 run in spawned worker processes (`gpu_window`, `cpu_window`): Python decode keeps the GIL
-busy, and running SciPy or the GPU engine in the same process measurably slows both.
+busy, and running SciPy or the GPU engine in the same process measurably slows both. The
+worker keeps the window it analyzed last, so risk sends it only each window's new bars.
 A spawned worker re-imports the application's top-level imports (Holoscan, FastAPI) once,
 when its pool starts in the operator's `start()`; the applications keep all work under
 `main()`, so nothing runs twice. In host `compare` mode the CPU cross-check of a window
@@ -171,15 +172,17 @@ mask, never the lane's. The plan rule `lanes_avoid_cpus(reserved)` checks the re
 ## Payloads
 
 Every port is a `pyobject` port except the holomq summary. Payloads are immutable after
-`emit()`; consumers copy before modifying. Every GPU operator uses the CUDA legacy default
-stream; producers synchronize before they publish, and no payload carries a CUDA event.
+`emit()`; consumers copy before modifying. The GPU sources and `QuoteBarsOp` use the CUDA
+legacy default stream, and the risk engine its own non-blocking stream; producers
+synchronize before they publish (`QuoteBarsOp` explicitly, before it emits a window), and
+no payload carries a CUDA event.
 
 | Payload | Producer → consumer | Memory |
 | --- | --- | --- |
 | `PacketBatch` (datagrams, receive times, wire counts, peers) | host sources → `MitchDecodeOp` | host; the receiver hands the bytes over |
 | `list[ReplayBatch]` (the host record batch, one per packet) | `MitchDecodeOp` → `QuoteBarsOp(cpu)` | host |
 | `list[GpuReplayBatch]` (device columns, one element) | GPU sources → `QuoteBarsOp(gpu)`, and `QuoteBarsOp(cpu)` in the bench reference lane | device columns from CuPy's pool; complete before emit; never aliases ring slots |
-| `BarWindow` (per-bar return vectors, bar times, generation, completed bars, receive stamp) | `QuoteBarsOp` → `RollingRiskOp` (latest only), `CallbackSinkOp` | NumPy or CuPy parts; closed bars are never mutated; `rows` is stacked only by the consumer, so a skipped window costs no GPU work |
+| `BarWindow` (per-bar return vectors, bar times, generation, completed bars, receive stamp) | `QuoteBarsOp` → `RollingRiskOp` (latest only), `CallbackSinkOp` | NumPy or CuPy parts; closed bars are never mutated, so the risk engine proves the bars two windows share by identity and copies in only the new ones; `rows` is stacked only on demand (validation, captures), and a skipped window costs no GPU work |
 | `RiskUpdate` (window, result dict, host rows when validated) | `RollingRiskOp` → `CallbackSinkOp`, `RiskCrossCheckOp`, `RiskSummaryOp` | host results |
 | `RiskComparison` (GPU update, CPU result, agreement, matched work) | `RiskCrossCheckOp` → `CallbackSinkOp` | host |
 | `holoscan.schema.String` (JSON ≤ 480 B) | `RiskSummaryOp` → `export_topic` | host; crosses processes |
@@ -200,7 +203,10 @@ operators as `Ref` parameters, and operators read them once per activation:
 | `FeedControl` | HTTP `/feedrate`, `/feedstatus`, `/replay/resume` | the external sender, which polls; never the graph (replay mode ignores it) |
 
 The replay pace is a command-line setting (`--replay-pps`): in replay mode the graph
-ignores `/feedrate`, and pause and seek apply only to the external sender.
+ignores `/feedrate`, and pause and seek apply only to the external sender. The dashboard
+therefore disables those controls in replay mode, and its clock follows the latest analyzed
+bar. `/feedrate` takes numbers for `speed`, `rate` and `seek` (a string is a 422) and
+returns them as floats, which the sender paces with.
 
 Results flow out through `CallbackSinkOp` into `ResultsStore` callbacks on the analytics
 and crosscheck lanes, right after each analysis (nothing polls for them). Those callbacks
@@ -226,7 +232,20 @@ only these host objects. No CUDA call and no data-plane lock is ever taken from 
 `GET /snapshot` reports `network.ingest` as the canonical ingest mode (`udp`,
 `daqiri-host`, `gpudirect` or `replay`) and carries an `engine` block (SDK version, lanes,
 edges, clocks, lane CPUs, risk and source counters). `GET /plan` returns the compiled plan
-summary.
+summary. `GET /healthz` is the readiness probe: 200 once the graph runs and its ingest front
+end receives (`network.ready`: the UDP socket bound, or the DAQIRI or replay drain
+running, with no error), 503 before that, after a stop or an error, and once a finite input
+has ended (a replay's last pass, `--replay-loops`): the graph and the dashboard keep
+running then, and the body's `input_ended` is true. `replay_sender` starts sending only
+on a 200, so no datagram goes to a port nobody reads yet.
+
+Two loss counters, kept apart because they answer different questions:
+`network.sequence_gaps` (`IngestStats.dropped`, the dashboard's "Sequence gaps") counts the
+MITCH messages missing between the packets the receiver got from one sender, from that
+sender's first packet; `network.analytics_sequence_gaps` (`BarsStats.sequence_gaps`,
+"Bar input gaps") counts what the quote bars did not get, from each generation's first
+sequence (1), so it also includes the ring drops and anything a sender sent before the
+receiver was ready.
 
 `RiskStats.late_activations` (`--risk-deadline-us`, a `max_start_delay` with
 `EMIT_WITNESS`) counts risk poll ticks that started late, which are almost always the
@@ -246,16 +265,16 @@ Operators never complete or stop the run themselves.
 | 1 | Lossless 200,000 packets/s (6.6M msgs/s) on GPUDirect | 131,072-message batches, 4,096-packet / 20 ms bursts, 114,688 NIC buffers, a 1M-slot ring, zero-copy staging, the native drain; source and bars in one lane | NIC run (with approval); NIC-free bench `paced` and `throughput` (≥ 2× line rate) |
 | 2 | A GIL-free native drain | `daqiri_drain.cpp`, built before `daqiri_init`; ring rows released only after decode synchronized, in order; bursts never wrap | `library/test_gpu_ingest_pull.py`, `gpu/test_gpu_ingest.py` |
 | 3 | No market data on the CPU in GPU mode | only headers, counters, a 250 ms symbol snapshot and results cross to the host; GPU front ends with CPU analytics are rejected | `app/test_cli.py`, `operators/test_quote_bars_op.py` |
-| 4 | Latest-only windows; bars never block; bounded analysis rate | `DROP_OLDEST/1` window edge; a one-window slot polled every 1 ms with the minimum interval enforced in the operator | plan rules; `graphs/test_latest_only.py`; `graphs/test_risk_pickup_latency.py` |
+| 4 | Latest-only windows; bars never block; bounded analysis rate | `DROP_OLDEST/1` window edge; a one-window slot polled every 250 µs with the minimum interval enforced in the operator | plan rules; `graphs/test_latest_only.py`; `graphs/test_risk_pickup_latency.py` |
 | 5 | GPU decode and bars bit-identical to the CPU | one kernel source and fixed compile flags; the bar and record classes shared with the CPU reference; one host copy of the sequence rules | `gpu/*`; `gpu_validate`; bench `--check` |
 | 6 | Generation, sequence and stale semantics | decode reads the directory immediately before decoding; bars reset on a new generation; replay loops register fresh ports | `library/test_sequence.py`, `test_accounting.py`, `control/test_directory.py` |
 | 7 | Statistics conventions | `CovarianceEngine`, agreement tolerances and eligibility as documented in [METHODOLOGY.md](METHODOLOGY.md) | `library/test_covariance.py`, `test_agreement.py` |
 | 8 | Warm-up before data | kernels and worker pools start in `start()`, which runs downstream first and before any `compute`; the NIC starts last | operator tests |
 | 9 | BLAS tuning on the worker core set | workers pinned to `CpuSets.worker` | `library/test_workers.py` |
 | 10 | Core and IRQ isolation | main thread masked to `helper` (`app` unless a busy-polled ingest set is carved out); lanes placed; `daqiri_init` mask restored and asserted; the post-init sweep; helpers under the process mask | plan rule `lanes_avoid_cpus`; `library/test_affinity.py`; `app/test_runner.py`; source operator tests |
-| 11 | Interpreter tuning | `sys.setswitchinterval(0.001)`; no idle sleeps in `compute`; no clock below 500 µs by default | `app/test_runner.py` |
+| 11 | Interpreter tuning | `sys.setswitchinterval(0.001)`; no idle sleeps in `compute`; no clock below 250 µs by default (the risk poll; the sources poll every 500 µs) | `app/test_runner.py`; `graphs/test_plans.py` |
 | 12 | Latency accounting | the receive stamp of the packet that closed the newest bar travels in `BarWindow.recv_ns`; results publish on the risk lane right after analysis | `control/test_results_store.py`; e2e reports |
-| 13 | No allocations that wake a suspended iGPU | ring, pinned buffers and replay frames preallocated in `start()` | review; NIC run |
+| 13 | No allocations that wake a suspended iGPU | ring, pinned buffers and replay frames preallocated in `start()`; the risk kernels loaded in `start()`; the risk engine's workspaces (for the bars' full window, `full_window_bars`), pinned buffers and CUDA graphs allocated at the first window of a universe (run untimed) and kept across generations, so a window allocates nothing | `gpu/test_gpu_covariance.py` (no call into CuPy's device or pinned allocator over every window kind: growth after a seek, one- to three-bar slides, a supplied variance, a second generation); `graphs/test_bench_plans.py` (the bench sizes the engine); review; NIC run |
 
 ## The receiver process on IGX Thor
 

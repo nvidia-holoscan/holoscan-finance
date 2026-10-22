@@ -29,7 +29,7 @@ WEB_PORT="${WEB_PORT:-8080}"
 CONTROL_HOST="$WEB_HOST"
 if [[ "$CONTROL_HOST" == 0.0.0.0 ]]; then CONTROL_HOST=127.0.0.1; fi
 UDP_PORT="${UDP_PORT:-26400}"
-TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/nyq-equities-2025-04-01}"
+TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/nyq/tape}"
 GPU_UUID="${GPU_UUID:-}"
 # daqiri-host: DAQIRI into pinned host memory, Python MITCH decode.
 # gpudirect: DAQIRI GPUDirect into GPU memory, CUDA gather + MITCH decode + quote bars.

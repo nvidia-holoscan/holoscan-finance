@@ -146,7 +146,7 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--risk-poll-us",
         type=int,
-        default=1000,
+        default=250,
         help="how often risk looks for a new window (100-100000)",
     )
     g.add_argument(

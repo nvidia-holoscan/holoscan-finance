@@ -7,11 +7,12 @@
 # Non-root with private IPC (never --ipc=host), off the DAQIRI lcores 3 and 9, and on the
 # RTX PRO 6000 (PCI bus order). The timeout runs inside the container because a host-side
 # timeout does not stop bash as PID 1 (RUN5_TIMEOUT, default 1500 s; exit 137). Test
-# dependencies and holoscan-cli (the image has no `holoscan` command) go into the gitignored
-# .cache/pyuser5 under flock, so parallel runs share one user base. CPU-only: dev5cpu.sh.
+# dependencies and holoscan-cli (the image has no `holoscan` command), at the versions
+# requirements-dev.txt pins (as CI installs them), go into the gitignored .cache/pyuser5 under
+# flock, so parallel runs share one user base. CPU-only: dev5cpu.sh.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN5_PIP='python3 -m pip install --user -q --disable-pip-version-check scipy threadpoolctl fastapi uvicorn anyio httpx duckdb pyarrow pytest-timeout ruff==0.15.17 "numba>=0.68" "holoscan-cli[create]==5.0.0" >/dev/null'   # ONE line: it runs via bash -c
+RUN5_PIP='python3 -m pip install --user -q --disable-pip-version-check -r requirements-cli.txt -c requirements-dev.txt scipy threadpoolctl fastapi uvicorn anyio httpx duckdb pyarrow pytest-timeout ruff numba >/dev/null'   # ONE line: it runs via bash -c
 exec docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
   -e CUDA_VISIBLE_DEVICES=1 -e PYTHONDONTWRITEBYTECODE=1 -e HOME=/tmp \
   -e PYTHONUSERBASE="$REPO/.cache/pyuser5" -e CUPY_CACHE_DIR="$REPO/.cache/cupy" \

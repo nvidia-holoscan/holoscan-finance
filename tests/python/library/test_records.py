@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Decoded observation batches: coalescing keeps every packet's receive stamp, and sequence
-counts are wire messages when the decoder knows them."""
+counts are wire messages when the decoder knows them; a device bar window stacks on its own
+device."""
 
 from __future__ import annotations
 
 import numpy as np
 
 from holoscan_finance.marketdata.records import EVENT_DTYPE, ReplayBatch, combine_batches
+from holoscan_finance.payloads import BarWindow
 
 
 def batch(n, recv_ns, sequence, wire_count=None, generation=1):
@@ -38,3 +40,37 @@ def test_combine_keeps_packet_offsets_and_receive_stamps():
 def test_a_single_batch_passes_through():
     one = batch(2, 100, 7)
     assert combine_batches([one]) is one
+
+
+def test_a_device_window_stacks_on_its_parts_device(monkeypatch):
+    """``BarWindow.rows`` of device parts stacks under the parts' device, not whichever
+    device is current in the consumer's thread (a capture records on the publish lane)."""
+    import sys
+    import types
+
+    current = ["device 0"]
+
+    class Device:
+        def __init__(self, name):
+            self.name = name
+
+        def __enter__(self):
+            self.previous, current[0] = current[0], self.name
+
+        def __exit__(self, *exc):
+            current[0] = self.previous
+
+    class Part(np.ndarray):
+        device = Device("device 1")
+
+    stacked_on = []
+
+    def stack(parts):
+        stacked_on.append(current[0])
+        return np.stack(parts)
+
+    monkeypatch.setitem(sys.modules, "cupy", types.SimpleNamespace(stack=stack))
+    parts = tuple(np.zeros(3).view(Part) for _ in range(2))
+    window = BarWindow(parts, np.arange(2), 1, 2, 0, device=True)
+    assert window.rows.shape == (2, 3) and stacked_on == ["device 1"]
+    assert current == ["device 0"]

@@ -213,3 +213,71 @@ def test_tap_is_thread_safe():
         t.join()
     assert tap.capture.packet_count == 2000 and tap.capture.wire_messages == 4000
     assert tap.capture.events == 2000 and tap.capture.expected_sequence == 4001
+
+
+def _per_packet(capture, packets):
+    """The per-packet counting rule the batch recorders must reproduce."""
+    for p in packets:
+        if not capture.includes(p.recv_wall_ns):
+            continue
+        if p.generation != capture.generation:
+            capture.generation_changed = True
+            continue
+        capture.events += len(p.events)
+        capture.packet_count += 1
+        capture.wire_messages += p.sequence_count
+        if capture.expected_sequence is not None:
+            capture.sequence_gaps += max(0, p.sequence - capture.expected_sequence)
+            capture.reordered += int(p.sequence < capture.expected_sequence)
+        capture.expected_sequence = max(
+            capture.expected_sequence or 0, p.sequence + p.sequence_count
+        )
+        capture.overflow |= capture.packet_count > capture.max_packets
+
+
+COUNTERS = ("events", "packet_count", "wire_messages", "sequence_gaps", "reordered")
+
+
+def test_batch_recording_counts_exactly_as_packet_by_packet():
+    """Gaps, reordering, duplicates, stamps outside the interval and a packet limit, over
+    several batches: the vectorized recorders give the per-packet counts."""
+    rng = np.random.default_rng(6)
+    start = 1_000_000_000
+    packets, sequence = [], 1
+    for k in range(600):
+        wire = int(rng.integers(1, 5))
+        jump = int(rng.choice([0, 0, 0, 0, 3, -6]))  # a gap, or an old packet again
+        sequence = max(1, sequence + jump)
+        received = start + int(rng.integers(-3, 100)) if k % 50 else start - 5
+        packets.append(packet(sequence, received, events=int(rng.integers(0, 9)), wire_count=wire))
+        sequence += wire
+    want = LatencyCapture(1, 1, start_ns=start, max_packets=450)
+    _per_packet(want, packets)
+    host, device = (LatencyCapture(1, 1, start_ns=start, max_packets=450) for _ in range(2))
+    tap = CaptureTap()
+    for lo in range(0, 600, 47):
+        chunk = packets[lo : lo + 47]
+        tap.capture = host
+        tap.record_host_batches(chunk)
+        counts = np.array([len(p.events) for p in chunk])
+        columns = {"timestamp_ns": np.zeros(int(counts.sum()), np.int64)}
+        tap.capture = device
+        tap.record_gpu_batch(
+            GpuReplayBatch(
+                columns,
+                1,
+                np.array([p.sequence for p in chunk], np.uint32),
+                np.array([p.sequence_count for p in chunk], np.int32),
+                np.r_[0, np.cumsum(counts)[:-1]].astype(np.int64),
+                np.array([p.recv_wall_ns for p in chunk], np.int64),
+                chunk[-1].recv_wall_ns,
+            )
+        )
+    assert want.sequence_gaps > 0 and want.reordered > 0 and want.overflow
+    for got in (host, device):
+        assert [getattr(got, k) for k in COUNTERS] == [getattr(want, k) for k in COUNTERS]
+        assert (got.expected_sequence, got.overflow) == (want.expected_sequence, want.overflow)
+    other = LatencyCapture(1, 1, start_ns=start)
+    tap.capture = other
+    tap.record_host_batches([packet(5, start + 1), packet(9, start + 2, generation=2)])
+    assert other.packet_count == 1 and other.generation_changed

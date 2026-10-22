@@ -89,6 +89,7 @@ def compose(args, ctx: BenchContext) -> tuple[hs.Graph, Lanes]:
             executor="inline",
             gpu_device=args.gpu_device,
             bar_seconds=ctx.settings.bar_seconds,
+            full_window_bars=ctx.settings.window_bars,
             min_interval_us=round(args.interval * 1e6),
             stats=Ref(ctx.risk_stats),
         )
@@ -118,7 +119,7 @@ def rules(args, ctx: BenchContext) -> list[plan.Rule]:
     if args.risk == "gpu":
         checks += [
             plan.edge("bars.window", "risk.window", policy="DROP_OLDEST", depth=1),
-            plan.clock_period_max("risk", 1000),  # the bench keeps RollingRiskOp's default poll
+            plan.clock_period_max("risk", 250),  # the bench keeps RollingRiskOp's default poll
         ]
     return checks
 

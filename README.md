@@ -3,8 +3,9 @@
 Replays one recorded trading day of LSEG NYQ trades and quotes as MITCH over UDP and
 continuously computes five-second quote returns, historical volatility and
 cross-instrument correlation. A Holoscan SDK 5 graph runs the receiver, MITCH decode,
-quote bars and analytics; CuPy/cuBLAS computes the rolling statistics on the GPU, and a
-NumPy/SciPy worker computes the same windows on the CPU for comparison. With GPUDirect
+quote bars and analytics; custom CUDA kernels (CuPy) compute the rolling statistics on the
+GPU, and a NumPy/SciPy worker computes the same windows with the same algorithm on the CPU
+for comparison. With GPUDirect
 ingest, packets go from the NIC straight into GPU memory and CUDA kernels decode them and
 build the quote bars.
 
@@ -37,7 +38,7 @@ per-packet path:
 | `Param`-gated optional ports (`emit_windows`, `cross_check`) | yes | yes |
 | `OnClock` sources with hold-and-retry on `BLOCKING` edges | yes | yes, including fan-out |
 | A lossless same-lane `OnEach` chain: no thread hop per packet | yes | yes |
-| A `DROP_OLDEST`/1 latest-only mailbox into an `OnClock(1 ms)` + `DrainAll` consumer | yes | `--risk gpu` |
+| A `DROP_OLDEST`/1 latest-only mailbox into an `OnClock(250 µs)` + `DrainAll` consumer | yes | `--risk gpu` |
 | Authored lanes with `ThreadPlacement` (CPU affinity, optional `BUSY_POLL`), off the DAQIRI cores | yes | yes |
 | Downstream-first `start()` warm-up: kernels are compiled before the NIC starts | yes | yes |
 | `run_async` under a FastAPI lifespan, with run diagnostics in `/snapshot` | yes | - |
@@ -100,7 +101,7 @@ non-root container without DAQIRI. They run only through the Thor launchers in
 | `DaqiriPacketSourceOp` | → `packets` | `OnClock` 500 µs | ingest | DAQIRI into pinned host memory |
 | `MitchDecodeOp` | `packets` → `events` | `OnEach` | ingest | Python reference MITCH decode (host front ends) |
 | `QuoteBarsOp` | `events` → `window` | `OnEach` | ingest | Event-time five-second quote bars, `backend="gpu"` (CUDA kernels) or `"cpu"` (NumPy), bit-identical |
-| `RollingRiskOp` | `window` → `risk`, `validate` | `OnClock` 1 ms + `DrainAll` | analytics | Rolling volatility, covariance and correlation on the newest window at a bounded rate; GPU or CPU, inline or in a spawned process |
+| `RollingRiskOp` | `window` → `risk`, `validate` | `OnClock` 250 µs + `DrainAll` | analytics | Rolling volatility, covariance and correlation on the newest window at a bounded rate; GPU or CPU, inline or in a spawned process |
 | `RiskCrossCheckOp` | `risk` → `comparison` | `OnClock` 5 ms + `DrainAll` | crosscheck | Recomputes validated GPU windows on the CPU and checks agreement |
 | `CallbackSinkOp` | `items` → | `OnEach` | producer's | Hands every item to a callable (results store, checkers, tests) |
 | `RiskSummaryOp` | `risk` → `summary` | `OnEach` | topics | Compact JSON risk summary for a holomq topic (`--topics` only) |
@@ -141,13 +142,15 @@ CPU-only unless noted; none of them imports the Holoscan SDK except `topic_tail`
 
 ```bash
 python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 20000   # synthetic tape + pcap
-python3 -m holoscan_finance.tools.prepare_tape --data '/licensed/nyq/2025-04-01/*.parquet' --output data/nyq-equities-2025-04-01
-python3 -m holoscan_finance.tools.replay_sender --data data/nyq-equities-2025-04-01 --port 26400 --control-url http://127.0.0.1:8080
-python3 -m holoscan_finance.tools.bench_replay inspect capture.pcap          # and: register --port N
+python3 -m holoscan_finance.tools.prepare_tape --data '/licensed/nyq/2025-04-01/*.parquet' --output data/nyq/tape
+python3 -m holoscan_finance.tools.replay_sender --data data/nyq/tape --port 26400 --control-url http://127.0.0.1:8080   # starts once /healthz is 200
+python3 -m holoscan_finance.tools.bench_replay inspect data/nyq/day.pcap    # and: register --port N
 python3 -m holoscan_finance.tools.measure --seconds 120 --rate 75000 --output cpu-only.json
 python3 -m holoscan_finance.tools.compare_runs --cpu cpu-only.json --gpu gpu-only.json --all-shared --output separate.json
-python3 -m holoscan_finance.tools.gpu_validate --pcap capture.pcap --tape <tape dir> [--bars]   # GPU
-python3 -m holoscan_finance.tools.decode_bench --pcap capture.pcap --tape <tape dir>            # GPU; numba >= 0.68 for the CPU decoder
+python3 -m holoscan_finance.tools.gpu_validate --pcap data/nyq/day.pcap --tape data/nyq/tape [--bars]   # GPU
+python3 -m holoscan_finance.tools.decode_bench --pcap data/nyq/day.pcap --tape data/nyq/tape            # GPU; numba >= 0.68 for the CPU decoder
+python3 -m holoscan_finance.tools.risk_bench --sizes 50,2886,10000 --check --out risk.json     # GPU and CPU analytics per window
+python3 -m holoscan_finance.tools.risk_bench --kinds 300 --backends gpu,gpu-host,cpu,compare --returns data/nyq/tape --check   # every window kind, back to back and at 270 ms
 python3 -m holoscan_finance.tools.topic_tail --catalog /tmp/holoscan-finance/endpoints.json     # holomq subscriber (SDK)
 ```
 
@@ -160,38 +163,55 @@ Prepare it once, then run the receiver and the paced sender:
 
 ```bash
 PYTHONPATH=python python3 -m holoscan_finance.tools.prepare_tape \
-    --data '/licensed/nyq/2025-04-01/*.parquet' --output data/nyq-equities-2025-04-01
+    --data '/licensed/nyq/2025-04-01/*.parquet' --output data/nyq/tape
 holoscan run equity_analytics udp                     # receiver and dashboard on port 8080
 PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender \
-    --data data/nyq-equities-2025-04-01 --port 26400 --control-url http://127.0.0.1:8080
+    --data data/nyq/tape --port 26400 --control-url http://127.0.0.1:8080
 ```
 
 Open <http://localhost:8080/>: scrub the timeline, pause, and set the replay speed or a
-fixed observation rate. A seek, loop or sender restart resets the rolling history; the
-first estimate needs 20 return bars and the window grows to 60 (five minutes).
+fixed observation rate (these drive the external sender; with `--ingest replay` the pace is
+`--replay-pps` and the page disables them). A seek, loop or sender restart resets the
+rolling history; the first estimate needs 20 return bars and the window grows to 60 (five
+minutes).
 DAQIRI/ConnectX, GPUDirect and the full-day button run on Thor through the launchers
 in [deploy/igx_thor](deploy/igx_thor/README.md).
 
-## Results (Holoscan SDK 5.0, NIC-free, 2026-10-20)
+## Results (Holoscan SDK 5.0, 2026-10-21 and 22)
 
-Measured on IGX Thor with the RTX PRO 6000 Blackwell Max-Q, in the Holoscan 5.0.0 image
-through `scripts/dev5.sh`, with the NIC-free replay source (`GpuMitchReplaySourceOp`: pcap
-frames in GPU memory through the production gather, ring, decode and bars code) on a
-full-size synthetic day of 2,880,001 packets (95.06M MITCH messages, 2,886 symbols). The
-commands, host state and every run are in [docs/VALIDATION.md](docs/VALIDATION.md).
+Measured on the final code on IGX Thor (14 Arm cores) with the RTX PRO 6000 Blackwell Max-Q
+GPU, in the Holoscan 5.0.0 image through `scripts/dev5.sh`, with no other GPU application
+on the host during the timed runs (runs during which another user's container appeared were
+repeated or replaced). The end-to-end, ingest and per-window runs of both passes kept the
+Thor's integrated GPU awake with an idle CUDA context (end-to-end runs repeated without it
+were no slower); the full chain in `compare` mode (step 7) and the back-to-back `compare`
+runs of step 10 were measured without it. The data is a recorded NYQ day prepared with
+`tools.prepare_tape` (2,886 symbols) and its MITCH capture (2,880,565 packets, 95.08M
+messages), replayed from GPU memory by `GpuMitchReplaySourceOp` (the production gather,
+ring, decode and bars code) or sent over localhost UDP by `replay_sender`. The commands,
+host state and every run are in [docs/VALIDATION.md](docs/VALIDATION.md), by step:
 
-| Check | Result |
-| --- | --- |
-| GPU decode and quote bars vs the CPU implementation (`gpu_validate`) | decode bit-identical, including the decisions on 240,000 mutated packets; bars identical, with 41 of 13,414,033 returns 1 ULP apart (CUDA vs NumPy `log`) |
-| Full day paced at 200,000 packets/s (6.6M msgs/s), NIC buffer model, GPU risk | lossless and real time in 3 of 3 runs; replay lag p99 0.61–1.22 ms |
-| Full day unpaced: gather, ring, decode and bars | median **62.1M MITCH messages/s** (5 runs), 4.7× the 13.2M gate |
-| Full chain in `compare` mode at 200,000 packets/s: packet receipt to published result | p50 25.2 ms, p99 143.9 ms (41 windows, every one agreeing with its CPU twin) |
-| Rolling analytics per window, CPU / GPU median | 97.3 / 5.31 ms, **18.3×** on the synthetic day, where all 2,886 symbols are eligible; 4.7× (6.3× with the iGPU kept awake) on the recorded day |
+| Check | Result | Step |
+| --- | --- | --- |
+| Full day unpaced: gather, ring, decode and bars | **60.45M and 62.27M MITCH messages/s** (two runs), 4.6× and 4.7× the 13.2M gate, lossless | [6](docs/VALIDATION.md#6-throughput-headroom-timing-pass) |
+| Decode + quote bars offline, GPU vs the best compiled CPU (numba decode and NumPy bars, 1–12 threads) | **2.47×** at 16k-message batches (17.79M vs 7.19M msgs/s), **8.67×** at 131k (65.91M vs 7.60M); decode alone at 16k-message batches is faster on the CPU (the GPU reaches 0.28× of twelve numba threads) | [3](docs/VALIDATION.md#3-offline-kernels-timing-pass) |
+| Rolling analytics per window (`risk_bench --kinds` on the recorded day's bars; the same algorithm and work on both), p50 | GPU faster for every window kind (first window after a start or seek, growth, one- to three-bar slides, rebuilds, and `compare` mode's validated windows) on both GPU paths at every size from 50 to 10,000 symbols. Back to back: 1.4–1.7× at 50 symbols, 7.4–9.7× at 2,886, 8.6–16.6× at 10,000; one-bar slides 0.076 vs 0.130 ms at 50 symbols, **0.43 vs 3.71 ms (8.7×)** at 2,886 and 2.28 vs 37.9 ms at 10,000. With 270 ms between windows (the live cadence): 1.9–2.8× at 50, 9.6–12.8× at 2,886, 8.3–15.7× at 10,000 | [10](docs/VALIDATION.md#step-10-analytics-per-window) |
+| The same, p99 | GPU faster for every kind at every size from 50 to 10,000 symbols, on both GPU paths: back to back (2,000 windows of a kind up to 2,886 symbols, 500 above; also in `compare` mode; 1.4× or more) and at the live cadence (300 windows; 2.0× or more). One exception in 16 back-to-back runs at 50 symbols: the GPU worker's three-bar slide, 0.182 vs 0.154 ms, one slow window among 300; the margin there is 0.04–0.05 ms | [10](docs/VALIDATION.md#step-10-analytics-per-window) |
+| Separate GPU-only and CPU-only runs at 75,000 observations/s over UDP: packet to published result p50 / p99 | GPU **5.38–5.41 / 8.34–8.89 ms** vs CPU 10.63–10.77 / 15.03–15.52 ms (three runs each; `compare_runs` valid for all 9 pairs, analytics 9.7–10.0× faster) | [11](docs/VALIDATION.md#step-11-separate-cpu-only-and-gpu-only-runs) |
+| Full chain in `compare` mode at 200,000 packets/s: packet receipt to published result | p50 15.7–16.1 ms, p99 25.7–26.1 ms (two runs, 284 and 286 windows, every one agreeing with its CPU twin) | [7](docs/VALIDATION.md#steps-7-and-8-full-chain-with-compare) |
+| Bit identity of GPU decode and bars, paced lossless gate at 200,000 packets/s | GPU decode **bit-identical** on all 2,880,565 packets and a 240,000-packet fuzz pass; bars identical, returns within 1 ULP, also with every 5,000th packet dropped; the graph's `--check` `ok` (`max_ulps` 1); paced at 200,000 packets/s **lossless in three runs**, lag p99 0.24–0.37 ms | [2](docs/VALIDATION.md#2-library-bit-identity-gpu-vs-host-decode-and-bars), [4](docs/VALIDATION.md#4-graph-bit-identity-market_data_bench---check), [5](docs/VALIDATION.md#5-paced-lossless-timing-pass-3-runs) |
+| Short NIC check on the ConnectX-7 (PHY loopback, the paced Python sender at about 4,600-4,700 packets/s, 60 s each): packet to published result p50 / p99 | `gpudirect` in `compare` mode: GPU **4.21 / 6.49 ms**, all 370 windows agreeing. `daqiri-host` separate runs: GPU 9.82 / 18.0 ms vs CPU 14.7 / 21.3 ms, `compare_runs` valid, analytics 9.8× faster. No sequence gap or drop in any run; 200,000 packets/s on the NIC not measured | [NIC check](docs/VALIDATION.md#short-nic-check) |
 
-NIC runs of this code (GPUDirect and DAQIRI host-memory ingest on the ConnectX-7) are not
-recorded yet. The replay drain is a Python thread, so these runs say nothing about
-resilience to interpreter-lock stalls; that is the native drain's job on the NIC
-([status](docs/GPU_INGEST.md#status)).
+UDP stamps each datagram's arrival as it is received. The replay front end stamps a burst
+after DAQIRI's 20 ms partial-burst timeout, so its packet-to-result figure at the same rate
+(GPU 4.02–4.10 / 4.97–5.45 ms, two runs) leaves out up to 20 ms of a packet's wait and is not
+comparable with UDP's.
+
+NIC results of this code (GPUDirect and DAQIRI host-memory ingest on the ConnectX-7) are
+limited to the short check above, at the rate the Python sender reaches; 200,000 packets/s
+on the NIC (`tcpreplay`) and the full-day NIC series are not recorded. The replay drain
+is a Python thread, so these runs say nothing about resilience to interpreter-lock stalls;
+that is the native drain's job on the NIC ([status](docs/GPU_INGEST.md#status)).
 
 ### Host-memory path vs GPUDirect path
 
@@ -201,18 +221,19 @@ resilience to interpreter-lock stalls; that is the native drain's job on the NIC
 | Packet handling | Python copies each packet into a ring | CUDA kernel gathers payloads into slots |
 | MITCH decode | Python, one message at a time | CUDA kernel, one thread per packet |
 | Five-second quote bars | NumPy on the CPU | CUDA kernels |
-| Rolling covariance / correlation | CuPy + cuBLAS in a separate process, fed host arrays | CuPy + cuBLAS in-process on the device-resident window (`RollingRiskOp`) |
+| Rolling covariance / correlation | CUDA kernels (CuPy) in a separate process, sent each window's new bars | CUDA kernels (CuPy) in-process on the device-resident window (`RollingRiskOp`) |
 | Market data on the CPU | every packet, observation and bar | none (control metadata and dashboard results only) |
 
 **Where the gain comes from: mostly not the GPU.** The host path is limited by
-interpreted Python decoding each message. On the same 200,000 packets (`decode_bench`,
-2026-10-20, synthetic day) a compiled CPU decoder (numba, bit-identical) is ~130× faster
-than Python on one core (36.1M vs 0.27M messages/s) and, at 16k-message groups, close to
-the GPU decoder (43.1M). The GPU's advantage appears at scale and in the bars: with
-131k-message groups GPU decode reaches 306.1M messages/s (compiled CPU, 8 threads: 151.4M)
-and GPU decode + bars 66.4M, where compiled CPU decode with NumPy bars reaches at most 6.3M.
-The 6.6M messages/s line rate is above what compiled CPU decode plus NumPy bars reach even
-offline; a CPU path with compiled multi-core bars was not built. See
+interpreted Python decoding each message. On the same 200,000 packets of the recorded day
+(`decode_bench`) a compiled CPU decoder (numba) is about 120× faster than Python on one core
+(34.2M vs 0.275M messages/s), and at 16k-message groups four or more numba threads decode
+faster than the GPU (twelve: 160.1M vs 44.0M). The GPU's advantage is in the bars and at
+scale: GPU decode + bars reaches 17.79M messages/s at 16k-message groups and 65.91M at 131k,
+where compiled CPU decode with NumPy bars reaches at most 7.19M and 7.60M, and with
+131k-message groups GPU decode alone reaches 276.1M (eight numba threads: 112.7M). Compiled
+CPU decode plus NumPy bars reaches at most 1.15× the 6.6M messages/s line rate offline; a
+CPU path with compiled multi-core bars was not built. See
 [Is it the GPU, or is it removing Python?](docs/GPU_INGEST.md#is-it-the-gpu-or-is-it-removing-python)
 
 Holoscan's contribution is structure: receiver, bars and analytics are operators on one
@@ -222,7 +243,7 @@ path is three operators:
 ```text
 GpuMitchSourceOp ──events──▶ QuoteBarsOp(gpu) ──window──▶ RollingRiskOp(gpu)
 NIC → GPU memory,             5 s quote bars              volatility, covariance and
-GPU gather + MITCH decode     on the GPU                  correlation on the GPU (cuBLAS)
+GPU gather + MITCH decode     on the GPU                  correlation on the GPU (CUDA)
 ```
 
 ### What runs where
@@ -233,15 +254,16 @@ GPU gather + MITCH decode     on the GPU                  correlation on the GPU
 | Replay sender (MITCH over UDP) | NumPy memory map, project codec | CPU |
 | Receive | `GpuMitchSourceOp` (DAQIRI GPUDirect) or `GpuMitchReplaySourceOp` (pcap in GPU memory), or the host baselines `UdpPacketSourceOp` and `DaqiriPacketSourceOp` | NIC → GPU memory, or CPU |
 | MITCH decode, quote bars | CUDA kernels on the GPU front ends; `MitchDecodeOp` (Python) and `QuoteBarsOp(cpu)` (NumPy) on the host front ends | GPU or CPU |
-| Volatility, covariance, correlation | CuPy + cuBLAS (`gemm`) | GPU |
-| CPU comparator | NumPy + SciPy BLAS (`dgemm`), threadpoolctl | CPU, separate process |
+| Volatility, covariance, correlation | CuPy `RawModule` kernels: a fused rank update and device reductions, one CUDA graph launch per window of any kind (slides of any length, growth after a seek, rebuilds) | GPU |
+| CPU comparator | The same algorithm in NumPy + SciPy BLAS (`dgemm`, `gemv`), threadpoolctl | CPU, separate process |
 | Dashboard and controls | FastAPI / Uvicorn, JavaScript | CPU / browser |
 
 The custom CUDA kernels are in
-[gpu_mitch.py](python/holoscan_finance/marketdata/gpu_mitch.py) and
-[gpu_bars.py](python/holoscan_finance/marketdata/gpu_bars.py); the analytics use CuPy and
-cuBLAS only ([covariance.py](python/holoscan_finance/marketdata/covariance.py)). The graph
-is [equity_analytics.py](applications/equity_analytics/equity_analytics.py).
+[gpu_mitch.py](python/holoscan_finance/marketdata/gpu_mitch.py),
+[gpu_bars.py](python/holoscan_finance/marketdata/gpu_bars.py) and, for the analytics,
+[_risk_kernels.py](python/holoscan_finance/marketdata/_risk_kernels.py) (driven by
+[covariance.py](python/holoscan_finance/marketdata/covariance.py)). The graph is
+[equity_analytics.py](applications/equity_analytics/equity_analytics.py).
 
 ### Data
 

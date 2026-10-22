@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
     "name": "RollingRiskOp",
-    "description": "Rolling volatility, covariance and correlation of the newest bar window at a bounded rate (cuBLAS or NumPy/SciPy BLAS, inline or in a spawned worker).",
+    "description": "Rolling volatility, covariance and correlation of the newest bar window at a bounded rate (CUDA kernels or NumPy/SciPy BLAS, inline or in a spawned worker).",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -33,7 +33,7 @@
     "tags": [
       "Finance",
       "Risk Analytics",
-      "cuBLAS"
+      "CUDA"
     ],
     "ranking": 2,
     "requirements": {

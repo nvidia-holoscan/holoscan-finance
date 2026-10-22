@@ -8,10 +8,12 @@ in, ``lossless(4)`` from a GPU source or ``lossless(16)`` from decode, same lane
 ``LATEST`` to risk in another lane (bars never block on analytics) or ``lossless(64)`` to a
 same-lane sink when every window matters. Lane: the source's (``ingest``). A new directory
 generation resets the bars at the first batch decoded under it, so batches still in flight
-under the old one are built, not stale. Per batch the exact
-counters go to ``BarsStats.counters`` (GPU: one 40-byte D2H), and a ``SymbolSnapshot`` at most
-every ``snapshot_period_ms``, so the dashboard never touches CUDA. The cpu backend also takes
-GPU batches (one D2H each): the bench's reference only. Processor: ``BarBuilder``.
+under the old one are built, not stale. A GPU window is emitted after an explicit stream
+synchronize, so its parts are complete for a consumer on any stream. After the emit, the exact
+counters go to ``BarsStats.counters`` (GPU: one 40-byte D2H) per batch, and a
+``SymbolSnapshot`` at most every ``snapshot_period_ms``, so the dashboard never touches CUDA.
+The cpu backend also takes GPU batches (one D2H each): the bench's reference only.
+Processor: ``BarBuilder``.
 """
 
 from __future__ import annotations
@@ -113,19 +115,23 @@ class QuoteBarsOp(hs.Operator):
         window = b.observe(batches)
         st.stale_packets, st.sequence_gaps = b.stale_packets, b.sequence_gaps
         st.expected_sequence = b.expected
-        if b.engine is not None:  # no directory yet: input is ignored and nothing to mirror
-            st.counters = b.counters()
-            now = time.monotonic_ns()
-            if self._snapshot_ns and now >= self._snapshot_due:
-                st.symbol_snapshot = b.symbol_snapshot()
-                self._snapshot_due = now + self._snapshot_ns
         if window is not None and self.emit_windows:
+            # Publish contract: the window's parts are complete before emit. Risk reads them
+            # on its own CUDA stream, which nothing else orders after these kernels.
+            b.synchronize()
             # The key first: a drained check must never match risk to the previous window
             # while this one is in flight.
             st.last_window_key = (window.generation, window.completed_bars)
             st.last_window_bars = window.completed_bars
             self.window.emit(window)
             st.windows_emitted += 1
+        if b.engine is not None:  # no directory yet: input is ignored and nothing to mirror
+            # After the emit: the counters' D2H and the snapshot stay off the window's path.
+            st.counters = b.counters()
+            now = time.monotonic_ns()
+            if self._snapshot_ns and now >= self._snapshot_due:
+                st.symbol_snapshot = b.symbol_snapshot()
+                self._snapshot_due = now + self._snapshot_ns
         st.batches_in += 1  # last: "batches_in == event_batches" means fully processed
 
     def _settings(self) -> BarSettings:

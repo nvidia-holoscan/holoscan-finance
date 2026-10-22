@@ -79,8 +79,8 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
   --check` also `lossless(8)` into a reference `QuoteBarsOp(backend="cpu")` (fan-out: the
   source retries until both accept).
 - Lane: the entry of `ingest`.
-- Threads: `hf-replay` (Python), created under `helper_mask(helper_cpus)`; it holds the GIL
-  for about 100-200 µs per burst, about 1% of a core at 200k packets/s.
+- Threads: `hf-replay` (Python, so it takes the GIL for every burst), created under
+  `helper_mask(helper_cpus)`.
 - Streams: the drain gathers on its own non-blocking stream and synchronizes each burst.
 - Errors: a pcap error fails `start()`; a drain exception goes to `stats.error` and the next
   compute raises.

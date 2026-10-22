@@ -7,16 +7,18 @@ starts an image without DAQIRI, as a non-root user, with the host IPC namespace.
 
 ```text
 INGEST=daqiri-host: MITCH / UDP → ConnectX / DAQIRI → pinned host memory
-            → Python decode / NumPy quote bars → CuPy / cuBLAS → dashboard
+            → Python decode / NumPy quote bars → custom CUDA kernels (CuPy) → dashboard
 INGEST=gpudirect:   MITCH / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect, dma-buf)
-            → CUDA gather / MITCH decode / quote bars → CuPy / cuBLAS → dashboard
+            → CUDA gather / MITCH decode / quote bars → custom CUDA kernels (CuPy) → dashboard
 ```
 
 To run the same GPU chain without a NIC, use the `replay` mode of `equity_analytics`
 (pcap frames staged in GPU memory; see the [main README](../../README.md)).
 
-Design and method: [GPUDirect ingest](../../docs/GPU_INGEST.md). NIC runs of this code
-have not been recorded yet; NIC-free results are in [docs/VALIDATION.md](../../docs/VALIDATION.md).
+Design and method: [GPUDirect ingest](../../docs/GPU_INGEST.md). Of the NIC runs of this
+code, only a [short check](../../docs/VALIDATION.md#short-nic-check) with these launchers is
+recorded (PHY loopback, the paced Python sender); NIC-free results are in
+[docs/VALIDATION.md](../../docs/VALIDATION.md).
 
 ## Prepare the platform
 
@@ -67,7 +69,7 @@ build `MST_IMAGE`; use any image with NVIDIA MFT (`mstlink`, `mstreg`), `iproute
 `tcpdump` and `nsenter`, tagged `holoscan-finance:mst` or named by `MST_IMAGE`.
 
 ```bash
-export NIC_PCIE=0004:03:00.0 NIC_NAME=enP4p3s0f0np0 TAPE_DIR=/licensed/prepared-nyq
+export NIC_PCIE=0004:03:00.0 NIC_NAME=enP4p3s0f0np0   # TAPE_DIR: the repo's data/nyq/tape
 LOOPBACK=1 bash deploy/igx_thor/igx_run.sh --dry-run
 LOOPBACK=1 bash deploy/igx_thor/igx_run.sh
 bash deploy/igx_thor/igx_down.sh   # stop
@@ -86,7 +88,7 @@ customized it.
 NIC_PCIE=0004:03:00.0 NIC_MASTER_CORE=3 NIC_RX_CORE=9 \
     WEB_HOST=0.0.0.0 bash deploy/igx_thor/igx_run.sh
 # on the sender:
-PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender --data /licensed/prepared-nyq \
+PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender --data data/nyq/tape \
     --host RECEIVER_CONNECTX_IP --port 26400 \
     --control-url http://RECEIVER_MANAGEMENT_IP:8080
 ```
@@ -109,7 +111,7 @@ network.
 | `LOOPBACK_CIDR`, `LOOPBACK_PEER` | `192.168.100.1/24`, `192.168.100.2` | Test network |
 | `FEED_HOST` | loopback peer if enabled | Local sender destination |
 | `WEB_HOST`, `WEB_PORT`, `UDP_PORT` | `127.0.0.1`, `8080`, `26400` | HTTP bind and UDP flow match |
-| `TAPE_DIR` | repo `data/nyq-equities-2025-04-01` | Prepared licensed tape |
+| `TAPE_DIR` | repo `data/nyq/tape` | Prepared licensed tape ([data layout](../../docs/VALIDATION.md#1-data)) |
 | `CPU_THREADS` | `0` | CPU BLAS threads (0 = tune automatically) |
 | `ANALYTICS_BACKEND` | `compare` | `compare` runs both workers; `cpu` or `gpu` runs one, for separate measurements (`INGEST=gpudirect` accepts `compare` or `gpu`) |
 | `SPEED`, `RATE` | `10`, `50000` | Replay multiplier; `SPEED=0` selects fixed observations/s |
@@ -188,13 +190,15 @@ UUID (`nvidia-smi -L`), since CUDA device index 0 can be the integrated GPU:
 ```bash
 export RECEIVER_IMAGE=holoscan-finance:hsdk5-daqiri INGEST=gpudirect LOOPBACK=1 \
     GPU_UUID=GPU-<uuid> \
-    TAPE_DIR=/data/nyq-equities-2025-04-01 APP_NAME=fin-gpu-demo FEED_NAME=fin-gpu-feed \
-    FULLDAY_PCAP=/data/xportbench/base.pcap FULLDAY_BASE_PORT=$(cat /data/xportbench/baseport) \
-    FULLDAY_PACKETS=$(cat /data/xportbench/base.count) \
-    TCPREPLAY_DIR=/data/xportbench/root/usr/bin \
-    TCPREPLAY_LIBS=/data/xportbench/root/usr/lib/aarch64-linux-gnu
+    TAPE_DIR=$PWD/data/nyq/tape APP_NAME=fin-gpu-demo FEED_NAME=fin-gpu-feed \
+    FULLDAY_PCAP=$PWD/data/nyq/day.pcap FULLDAY_BASE_PORT=<PORT> FULLDAY_PACKETS=<PACKETS> \
+    TCPREPLAY_DIR=~/tools/root/usr/bin TCPREPLAY_LIBS=~/tools/root/usr/lib/aarch64-linux-gnu
 bash deploy/igx_thor/igx_run.sh
 ```
+
+`data/nyq/day.pcap` is one captured replay generation
+([gpu_ingest_bench](gpu_ingest_bench/README.md)); `bench_replay inspect data/nyq/day.pcap`
+prints its sender port and packet count.
 
 The dashboard binds to `127.0.0.1`. From another machine, tunnel to it:
 `ssh -N -L 8080:127.0.0.1:8080 <user>@<thor-host>`, then open <http://localhost:8080/>.

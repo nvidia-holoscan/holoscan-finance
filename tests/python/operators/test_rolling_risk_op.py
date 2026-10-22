@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """``RollingRiskOp`` under the operator harness: the newest of several queued windows is the
 one analyzed, ``validate`` exists only with ``cross_check``, Params are checked at
-authoring, late poll ticks are counted, and on the GPU the update matches the engine with
-and without host-variance ranking.
+authoring, a CPU worker is tuned in ``start`` for a universe registered before the run,
+late poll ticks are counted, and on the GPU the update matches the engine with and without
+host-variance ranking.
 
 The slot, interval, gate and process-executor rules are tested on ``RollingRisk`` itself
 (``library/test_rolling_risk.py``): clocked operators stop being activated once staged
@@ -12,6 +13,7 @@ harness input ends."""
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import holoscan as hs
 import numpy as np
@@ -19,13 +21,15 @@ import pytest
 from holoscan.diagnostics import DiagnosticSeverity
 from holoscan.testing import OperatorTestHarness, TestResult, TestRunOptions
 
+from holoscan_finance.analytics import workers
 from holoscan_finance.analytics.rolling import RollingRisk
 from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.marketdata.covariance import CovarianceEngine
-from holoscan_finance.operators import RollingRiskOp
+from holoscan_finance.operators import CallbackSinkOp, RollingRiskOp
 from holoscan_finance.operators import rolling_risk as rolling_risk_module
+from holoscan_finance.operators.edges import LATEST, lossless
 from holoscan_finance.payloads import BarWindow
-from holoscan_finance.ref import Ref
+from holoscan_finance.ref import Knob, Ref
 from holoscan_finance.telemetry.stats import RiskStats
 
 pytestmark = pytest.mark.sdk
@@ -110,6 +114,76 @@ def test_worker_cpus_reach_the_processor_sorted_and_unique(monkeypatch):
     monkeypatch.setattr(rolling_risk_module, "RollingRisk", Recording)
     run_until_stopped(dict(backend="cpu", worker_cpus=(1, 0, 1)), [], outputs=0)
     assert seen["worker_cpus"] == [0, 1] and seen["min_interval_ns"] == 50_000_000
+
+
+class OneShotWindow(hs.Operator):
+    """Emits ``item`` once (recording it in ``events``), then keeps ticking: a clocked
+    operator fed by the harness stops being activated once its staged input ends, and the
+    process executor collects a window at a later poll."""
+
+    out = hs.Output("out", hs.pyobject)
+    item = hs.Param(Ref())
+    events = hs.Param(Ref())
+
+    def __init__(self) -> None:
+        self._sent = False
+
+    def contract(self) -> hs.Contract:
+        return hs.Contract().trigger(hs.OnClock(period=hs.time.ms(1)))
+
+    def compute(self, ctx: hs.ExecutionContext) -> None:
+        if not self._sent:
+            self.events.obj.append(("window",))
+            self.out.emit(self.item.obj)
+            self._sent = True
+
+
+def test_a_cpu_worker_is_tuned_in_start_for_a_universe_registered_before_the_run(monkeypatch):
+    """Process + cpu: replay registers its universe before the graph runs, so ``start``
+    tunes the worker and returns once the tuning is collected, before any operator computes
+    (a tuning left to ``compute`` made the first window wait for it)."""
+    events, updates = [], []
+    collect = workers.UniverseTuning.collect
+
+    def traced(self):
+        pending = self.pending
+        done = collect(self)
+        if pending and done:
+            events.append(("tuned", self.result["width"]))
+        return done
+
+    monkeypatch.setattr(workers.UniverseTuning, "collect", traced)
+    (window,) = windows(1)
+    knob = Knob(SimpleNamespace(universe=ROWS.shape[1]))
+    g = hs.Graph("risk", default_clock=hs.RealtimeClock)
+    source = g.op(OneShotWindow, "bars", item=Ref(window), events=Ref(events))
+    risk = g.op(
+        RollingRiskOp,
+        "risk",
+        backend="cpu",
+        executor="process",
+        min_interval_us=1000,
+        directory=Ref(knob),
+    )
+    publish = g.op(CallbackSinkOp, "publish", callback=Ref(updates.append))
+    g.add_flow(source.out, risk.window, **LATEST)
+    g.add_flow(risk.risk, publish.items, **lossless(8))
+    g.partition("bars").add(source)
+    g.partition("analytics").add(risk, publish)
+    split = hs.execution.SerializationDomainSplitPolicy.ALLOW
+    plan = hs.compile(g, hs.CompileOptions(serialization_domain_splits=split))
+    assert plan.ok, plan.summary()
+    with hs.run_async(plan) as session:
+        deadline = time.monotonic() + 60
+        while not updates and time.monotonic() < deadline and not session.wait(0.01):
+            pass
+        session.request_stop()
+        session.wait(10)
+    assert session.termination is hs.RunTermination.STOPPED, session.summary()
+    assert events[:2] == [("tuned", ROWS.shape[1]), ("window",)]
+    (update,) = updates
+    assert update.window is window and update.backend == "cpu"
+    assert update.result["cpu_tunings"] == 1  # the window did not tune
 
 
 def test_late_poll_ticks_are_counted_with_a_deadline():

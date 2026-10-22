@@ -3,11 +3,14 @@
 """Memory-mapped NYQ trade/quote replay over UDP with pause, speed and seek.
 
     python -m holoscan_finance.tools.replay_sender --data TAPE [--host 127.0.0.1] [--port 26400]
-        [--control-url http://127.0.0.1:8080] [--loops 0]
+        [--control-url http://127.0.0.1:8080] [--loops 0] [--ready-timeout 180]
 
-The external feed of the ``udp``, ``daqiri-host`` and ``gpudirect`` front ends. Every seek
-or loop is a new generation from a fresh UDP source port, registered with ``POST /manifest``
-before its first packet, so the receiver can tell old packets from new ones. The pacing
+The external feed of the ``udp``, ``daqiri-host`` and ``gpudirect`` front ends. It starts
+once the receiver's ``/healthz`` answers 200, that is once its front end receives (the
+socket bound, the NIC drain running), so no packet goes to a port nobody reads yet. Every
+seek or loop is a new generation from a fresh UDP source port, registered with ``POST
+/manifest`` before its first packet, so the receiver can tell old packets from new ones. The
+pacing
 (``/feedrate``) is polled every 200 ms; the final Status marker of a pass closes the last
 regular-session bar. The Python sender tops out at a few thousand packets/s;
 ``bench_replay`` covers higher rates. CPU only.
@@ -19,6 +22,7 @@ import argparse
 import json
 import socket
 import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -39,6 +43,30 @@ def request(base: str, path: str, payload: dict | None = None) -> dict:
         return json.load(response)
 
 
+def wait_ready(base: str, timeout_s: float, poll_s: float = 0.1) -> dict:
+    """Poll ``GET /healthz`` until it answers 200 (the receiver's front end receives);
+    RuntimeError after ``timeout_s`` or once the receiver's graph has stopped."""
+    deadline = time.monotonic() + timeout_s
+    last = "no answer"
+    while True:
+        try:
+            with urlopen(base.rstrip("/") + "/healthz", timeout=3) as response:
+                return json.load(response)
+        except HTTPError as exc:  # 503: running up, or stopped
+            try:
+                state = json.load(exc)
+            except ValueError:
+                state = {}
+            if state.get("graph_status") == "stopped":
+                raise RuntimeError(f"the receiver at {base} has stopped") from exc
+            last = f"HTTP {exc.code}, graph {state.get('graph_status')}"
+        except (OSError, ValueError) as exc:  # not listening yet
+            last = str(exc)
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"the receiver at {base} was not ready in {timeout_s:g} s: {last}")
+        time.sleep(poll_s)
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m holoscan_finance.tools.replay_sender", description=__doc__.splitlines()[0]
@@ -48,6 +76,12 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=26400)
     p.add_argument("--control-url", default="http://127.0.0.1:8080")
     p.add_argument("--loops", type=int, default=0, help="0 repeats indefinitely")
+    p.add_argument(
+        "--ready-timeout",
+        type=float,
+        default=180.0,
+        help="seconds to wait for the receiver's /healthz 200 before sending; 0 sends at once",
+    )
     return p
 
 
@@ -100,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("receiver rejected the replay generation")
         anchor_ts, anchor_wall = int(rows["timestamp_ns"][idx]), time.perf_counter()
 
+    if a.ready_timeout > 0:
+        wait_ready(a.control_url, a.ready_timeout)
     print(
         f"MITCH NYQ replay: {len(rows):,} observations / {len(manifest['symbols']):,} RICs -> {target}",
         flush=True,

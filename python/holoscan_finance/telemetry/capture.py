@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..marketdata.gpu_decoder import GpuMitchDecoder
-
 if TYPE_CHECKING:
     from ..marketdata.gpu_bars import GpuReplayBatch
     from ..marketdata.records import ReplayBatch
@@ -73,24 +71,47 @@ class LatencyCapture:
         return not self.closed and self.start_ns <= recv_ns < self.end_ns
 
     def record_packet(self, batch):
-        if not self.includes(batch.recv_wall_ns):
+        """One received packet (a ``ReplayBatch`` or anything with its packet fields)."""
+        self.record_packets(
+            batch.generation,
+            [len(batch.events)],
+            [batch.sequence],
+            [batch.sequence_count],
+            [batch.recv_wall_ns],
+        )
+
+    def record_packets(self, generation, events, sequence, wire_count, recv_ns):
+        """Packets of one generation in arrival order, as arrays: per-packet observation
+        counts, MITCH sequences, wire message counts and receive stamps. Exactly
+        ``record_packet`` per packet: a gap is counted against the highest sequence seen so
+        far, and a packet below it is reordered."""
+        recv_ns = np.asarray(recv_ns, dtype=np.int64)
+        inside = (recv_ns >= self.start_ns) & (recv_ns < self.end_ns)
+        if self.closed or not inside.any():
             return
         with self.lock:
             if self.closed:
                 return
-            if batch.generation != self.generation:
+            if generation != self.generation:
                 self.generation_changed = True
                 return
-            count = len(batch.events)
-            self.events += count
-            self.packet_count += 1
-            self.wire_messages += batch.sequence_count
-            if self.expected_sequence is not None:
-                self.sequence_gaps += max(0, batch.sequence - self.expected_sequence)
-                self.reordered += int(batch.sequence < self.expected_sequence)
-            self.expected_sequence = max(
-                self.expected_sequence or 0, batch.sequence + batch.sequence_count
-            )
+            sequence = np.asarray(sequence, dtype=np.int64)[inside]
+            wire_count = np.asarray(wire_count, dtype=np.int64)[inside]
+            self.events += int(np.asarray(events, dtype=np.int64)[inside].sum())
+            self.packet_count += len(sequence)
+            self.wire_messages += int(wire_count.sum())
+            # The expected sequence before each packet: a running maximum of the ends.
+            ends = np.maximum.accumulate(sequence + wire_count)
+            known = self.expected_sequence
+            before = ends[:-1] if known is None else np.r_[known, ends[:-1]]
+            if known is not None:
+                before = np.maximum(before, known)
+            else:
+                before = np.maximum(before, 0)
+                sequence = sequence[1:]  # the first packet has nothing to be counted against
+            self.sequence_gaps += int(np.maximum(sequence - before, 0).sum())
+            self.reordered += int((sequence < before).sum())
+            self.expected_sequence = int(max(known or 0, ends[-1]))
             if self.packet_count > self.max_packets:
                 self.overflow = True
 
@@ -150,7 +171,7 @@ class LatencyCapture:
         if not self.includes(work["recv_ns"]):
             return
         digest = hashlib.sha256(np.asarray(work["times"], dtype="<i8").tobytes())
-        rows = work.get("rows_host", work["rows"])
+        rows = work["rows"]
         rows = rows.get() if hasattr(rows, "get") and not isinstance(rows, np.ndarray) else rows
         digest.update(np.asarray(rows, dtype="<f8").tobytes())
         with self.lock:
@@ -322,14 +343,32 @@ class CaptureTap:
             capture.generation_changed = True
 
     def record_host_batches(self, batches: list[ReplayBatch]) -> None:
+        """Count every packet (one ``ReplayBatch`` each), a generation's run at a time."""
         capture = self.capture
-        if capture is not None:
-            for batch in batches:
-                capture.record_packet(batch)
+        if capture is None or not batches:
+            return
+        start = 0
+        for k in range(1, len(batches) + 1):
+            if k == len(batches) or batches[k].generation != batches[start].generation:
+                run = batches[start:k]
+                capture.record_packets(
+                    run[0].generation,
+                    [len(b.events) for b in run],
+                    [b.sequence for b in run],
+                    [b.sequence_count for b in run],
+                    [b.recv_wall_ns for b in run],
+                )
+                start = k
 
     def record_gpu_batch(self, batch: GpuReplayBatch) -> None:
-        """Count every packet of a device batch."""
+        """Count every packet of a device batch (host metadata only)."""
         capture = self.capture
         if capture is not None:
-            for view in GpuMitchDecoder.capture_views(batch):
-                capture.record_packet(view)
+            ends = np.r_[batch.packet_offsets[1:], batch.n_events]
+            capture.record_packets(
+                batch.generation,
+                ends - batch.packet_offsets[: batch.n_packets],
+                batch.sequence[: batch.n_packets],
+                batch.wire_count[: batch.n_packets],
+                batch.packet_recv_ns[: batch.n_packets],
+            )

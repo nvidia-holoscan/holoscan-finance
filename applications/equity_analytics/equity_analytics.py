@@ -125,6 +125,7 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
         cpu_threads=args.cpu_threads,
         full_window_bars=ctx.settings.window_bars,
         worker_cpus=sorted(ctx.cpus.worker),
+        directory=directory,  # a CPU worker is tuned for each universe before its first window
         cross_check=compare,
         gate=Ref(ctx.gate),
         deadline_us=args.risk_deadline_us,
@@ -143,6 +144,7 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
             cpu_threads=args.cpu_threads,
             full_window_bars=ctx.settings.window_bars,
             worker_cpus=sorted(ctx.cpus.worker),
+            directory=directory,  # tuned per universe ahead of its first window
             stats=Ref(ctx.risk_stats),
         )
         publish_comparison = g.op(
@@ -175,7 +177,7 @@ def rules(ctx: EquityContext) -> list[plan.Rule]:
     checks = [
         plan.same_lane("source", "bars"),  # no thread hop on the packet path
         plan.edge("bars.window", "risk.window", policy="DROP_OLDEST", depth=1),  # bars never block
-        # a poll, not a 50 ms grid (default 1000 us)
+        # a poll, not a 50 ms grid (default 250 us)
         plan.clock_period_max("risk", ctx.args.risk_poll_us),
         plan.no_automatic_partitions(),
         plan.outputs_connected(),

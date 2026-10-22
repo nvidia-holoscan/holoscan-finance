@@ -11,9 +11,8 @@ events (list[GpuReplayBatch] | list[ReplayBatch]) → generation and sequence ch
 
 With `backend="gpu"` the bars stay in GPU memory (`GpuQuoteBars`). `gpu_validate --bars`
 checks the kernels against the NumPy reference `QuoteBars`: marks, quote times, trades,
-volumes and counters bit for bit, returns within 1 ULP (CUDA vs NumPy `log`). On a full-size
-synthetic day (2026-10-20) they matched, with 41 of 13,414,033 returns 1 ULP apart
-([validation](../../docs/GPU_INGEST.md#correctness)). With `backend="cpu"` the host
+volumes and counters bit for bit, returns within 1 ULP (CUDA vs NumPy `log`)
+([correctness](../../docs/GPU_INGEST.md#correctness)). With `backend="cpu"` the host
 `QuoteBars` runs behind the host sequence rules (`marketdata.sequence`). The cpu backend
 also accepts `GpuReplayBatch`es (one D2H per batch): that is the in-graph reference of
 `market_data_bench --check`, never a production path.

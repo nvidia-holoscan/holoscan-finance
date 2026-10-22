@@ -5,7 +5,7 @@
 ``PlanView`` joins a compiled plan's JSON (payload edges -> ports -> operators, partition
 placements, clock triggers) into operator-level facts. A ``Rule`` turns those
 facts into violation strings, so an application states its invariants next to its graph
-(source and bars share a lane, bars -> risk is latest-only, risk polls at 1 ms) and the
+(source and bars share a lane, bars -> risk is latest-only, risk polls at 250 µs) and the
 runner refuses a plan that breaks them; the plan tests apply the same rules on the CPU
 tier. A rule never raises: a key a later SDK drops gives ``plan.json key <k> unavailable``. ``plan_summary`` is what ``--plan-only``, ``GET /plan`` and ``/snapshot.engine`` show.
 """

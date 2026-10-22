@@ -158,7 +158,7 @@ class EquityContext:
             results=results,
             stall_monitor=stall_monitor,
             fullday=fullday,
-            status=RunStatus(),
+            status=RunStatus(receiving=ingest.ready, input_ended=lambda: ingest.eof),
             replay_generations=replay_generations,
             drained=drained,
         )

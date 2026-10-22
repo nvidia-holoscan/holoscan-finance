@@ -3,7 +3,8 @@
 """``CpuCrossCheck``: validated updates are recomputed in FIFO order by a spawned
 ``cpu_window`` worker and compared with the GPU-side result; a worker exception becomes an
 error comparison (which ``ResultsStore`` publishes and which releases the gate), and so does
-a worker that died while idle."""
+a worker that died while idle. The worker tunes for a universe before its first window, so
+no validated window waits for a tuning."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import time
 import numpy as np
 import pytest
 
+from holoscan_finance.analytics import workers
 from holoscan_finance.analytics.crosscheck import CpuCrossCheck
 from holoscan_finance.analytics.workers import cpu_window, ping, start_worker_pool
 from holoscan_finance.marketdata.covariance import CovarianceEngine
@@ -112,3 +114,82 @@ def test_an_unvalidated_update_is_refused():
     (update,) = validated((12, 1))
     with pytest.raises(ValueError, match="rows_host"):
         CpuCrossCheck().submit(RiskUpdate(update.window, update.result))
+
+
+def _sent_rows(xc: CpuCrossCheck) -> list[int]:
+    """Records the number of rows each job sends the worker."""
+    sent, submit = [], xc._pool.submit
+
+    def recording(fn, *args, **kwargs):
+        if fn is workers.cpu_window:
+            sent.append(len(args[0]))
+        return submit(fn, *args, **kwargs)
+
+    xc._pool.submit = recording
+    return sent
+
+
+def test_a_sliding_window_travels_as_its_new_bars(xc):
+    """As RollingRisk sends its own worker: only the bars a validated window adds to the
+    one sent last, the full window after a gap or in a new generation; the CPU engine then
+    does the GPU's work (same method and bar counts) on every window."""
+    sent = _sent_rows(xc)
+    updates = validated((12, 1), (13, 1), (16, 1), (30, 1), (13, 2))
+    for update in updates:
+        xc.submit(update)
+    comparisons = drain(xc, 5)
+    assert sent == [12, 1, 3, 12, 12]
+    assert all(c.agreement and c.matched_work for c in comparisons)
+    assert [c.cpu["method"] for c in comparisons] == [
+        "rebuild", "incremental", "incremental", "rebuild", "rebuild"
+    ]  # fmt: skip
+
+
+def test_a_worker_that_lost_its_window_gets_the_full_window(xc):
+    """A worker without the window the new bars extend (a new worker process) answers
+    WindowUnknown; the window is sent again in full and its comparison still comes."""
+    sent = _sent_rows(xc)
+    first, second = validated((12, 1), (13, 1))
+    xc.submit(first)
+    drain(xc, 1)
+    xc._pool.submit(workers.reset).result(timeout=60)  # the worker forgets its window
+    xc.submit(second)
+    (comparison,) = drain(xc, 1)
+    assert sent == [12, 1, 12]
+    assert comparison.update is second and comparison.error is None and comparison.agreement
+    assert (xc.stats.crosschecks_submitted, xc.stats.crosschecks_done) == (2, 2)
+
+
+def test_the_worker_tunes_before_the_first_window_so_no_validated_window_waits_for_it(xc):
+    """The universe reaches the idle worker as ``tune_cpu`` when its manifest arrives
+    (``RiskCrossCheckOp`` calls ``prepare``), once per width and never while a window is in
+    flight. Every validated window after it, the first full window included, is computed
+    without tuning: the gate a validated window holds never waits for one (the re-tuning at
+    the first full window delayed the next GPU result by about 0.35 s)."""
+    (busy,) = validated((12, 1))
+    xc.submit(busy)
+    xc.poll()  # the job is in flight
+    xc.prepare(10)
+    assert not xc.tuning_pending  # not while the worker computes a window
+    drain(xc, 1)
+    xc.prepare(10)
+    assert xc.tuning_pending
+    deadline = time.monotonic() + 60
+    while xc.tuning_pending and time.monotonic() < deadline:
+        assert xc.poll() is None
+        time.sleep(0.002)
+    tuning = xc.tuning
+    assert tuning["width"] == 10 and tuning["threads"] == 1  # the fixture's cpu_threads
+    xc.prepare(10)
+    assert not xc.tuning_pending  # once per width
+    engine = CovarianceEngine()
+    for end in range(6, 17):  # growth to the full window (12 bars), then slides, generation 2
+        start = max(0, end - 12)
+        rows = ROWS[start:end]
+        times = np.arange(start, end, dtype=np.int64) * 5_000_000_000
+        result = engine.update(rows, times, observed_variance=np.var(rows, axis=0, ddof=1))
+        window = BarWindow(tuple(rows), times, 2, end, 0)
+        xc.submit(RiskUpdate(window, result, rows.copy(), "gpu", True))
+        (comparison,) = drain(xc, 1)
+        assert comparison.agreement and comparison.matched_work, end
+        assert comparison.cpu["cpu_tunings"] == tuning["cpu_tunings"], end  # none since

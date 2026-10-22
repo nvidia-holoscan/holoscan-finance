@@ -57,6 +57,9 @@ def test_a_seek_bumps_seek_seq():
         {"seek": 86400},
         {"seek": -1},
         {"loops": 2},
+        {"speed": "10"},  # float() would take it; the sender cannot compare it with 0
+        {"seek": "36000"},  # the sender would multiply the string by 10**9
+        {"rate": True},
     ],
 )
 def test_invalid_controls_are_rejected_and_change_nothing(payload):
@@ -65,6 +68,14 @@ def test_invalid_controls_are_rejected_and_change_nothing(payload):
     with pytest.raises(ValueError):
         feed.control(payload)
     assert feed.control() == before
+
+
+def test_numbers_are_stored_as_floats():
+    """GET /feedrate returns what the sender does arithmetic with."""
+    feed = FeedControl(ReplayDirectory(Knob()))
+    c = feed.control({"speed": 25, "rate": 5000, "seek": 36000})
+    assert all(type(c[k]) is float for k in ("speed", "rate", "seek"))
+    assert (c["speed"], c["rate"], c["seek"]) == (25.0, 5000.0, 36000.0)
 
 
 def test_a_value_of_the_wrong_type_raises_type_error():

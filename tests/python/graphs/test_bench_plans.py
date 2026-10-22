@@ -85,7 +85,7 @@ def test_bench_plan(monkeypatch, check, risk, busy_poll):
         ]
     assert view.lanes == lanes and view.automatic == []
     assert sorted(view.edges, key=str) == sorted(edges, key=str)
-    clocks = {"source": 500_000} | ({"risk": 1_000_000} if risk == "gpu" else {})
+    clocks = {"source": 500_000} | ({"risk": 250_000} if risk == "gpu" else {})
     assert view.clocks == clocks
     # Without windows to emit, the GPU bars declare no window port.
     assert view.outputs.get("bars", []) == (["window"] if check or risk == "gpu" else [])
@@ -103,6 +103,30 @@ def test_bench_plan(monkeypatch, check, risk, busy_poll):
         assert CPUS[-1] not in cpus.helper and sorted(cpus.ingest) == [CPUS[-1]]
     assert view.unavailable("runtime_updates") == [] and view.runtime_updates == []
     assert check_plan(plan, APP.rules(args, ctx)) == []
+
+
+@pytest.mark.parametrize("flags", [(), ("--window-seconds", "600"), ("--bar-seconds", "2")])
+def test_the_risk_engine_is_sized_for_the_bars_full_window(monkeypatch, flags):
+    """The bench's GPU risk gets the bars' full window, so growth windows past 64 bars never
+    reallocate the engine (or recapture its graphs) while data flows."""
+    seen = []
+
+    class RecordingRisk(APP.RollingRiskOp):
+        def __init__(self) -> None:
+            super().__init__()
+            seen.append(self.full_window_bars)
+
+    monkeypatch.setattr(APP, "RollingRiskOp", RecordingRisk)
+    args, ctx, _, _ = compile_bench(monkeypatch, "--risk", "gpu", *flags)
+    assert (
+        set(seen) == {ctx.settings.window_bars}
+        and seen[0]
+        == {
+            (): 60,
+            ("--window-seconds", "600"): 120,
+            ("--bar-seconds", "2"): 150,
+        }[flags]
+    )
 
 
 def test_rules_catch_a_broken_composition(monkeypatch):

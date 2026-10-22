@@ -14,7 +14,7 @@ Warm-up (numba/CUDA compilation) runs before timing. This measures the decode an
 bars stages only; the live ingest ceiling also includes receive, scheduling and
 analytics, so do not compare these numbers with live packets/s figures.
 
-    python -m holoscan_finance.tools.decode_bench --pcap base.pcap --tape /data/tape
+    python -m holoscan_finance.tools.decode_bench --pcap data/nyq/day.pcap --tape data/nyq/tape
 
 The bar settings come from ``BarSettings``. CuPy and numba are imported only by the paths
 that use them.

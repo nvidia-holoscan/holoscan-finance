@@ -143,7 +143,7 @@ def test_every_combination_compiles_as_designed(
     assert set(view.edges) == expected_edges(ingest, backend, topics)
     assert len(view.edges) == len(set(view.edges))
 
-    clocks = {"source": 500_000, "risk": 1_000_000}
+    clocks = {"source": 500_000, "risk": 250_000}
     if backend == "compare":
         clocks["crosscheck"] = 5_000_000
     assert view.clocks == clocks
@@ -175,17 +175,21 @@ def test_every_combination_compiles_as_designed(
     assert risk["executor"] == ("inline" if gpu else "process")
     assert risk["backend"] == ("cpu" if backend == "cpu" else "gpu")
     assert risk["cross_check"] is (backend == "compare")
+    # The CPU workers tune for each universe as its manifest arrives, before its first window.
+    assert risk["directory"].obj is ctx.directory_knob
+    if backend == "compare":
+        assert params["crosscheck"]["directory"].obj is ctx.directory_knob
     assert params["bars"]["backend"] == ("gpu" if gpu else "cpu")
 
     assert view.runtime_updates == []
     assert check_plan(plan, app.rules(ctx)) == []
 
 
-def test_risk_polls_every_millisecond_by_default(
+def test_risk_polls_every_250_us_by_default(
     app: ModuleType, mask: list[int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, _, plan, _ = compose(app, monkeypatch, flags("replay", "compare", mask))
-    assert PlanView(plan).clocks["risk"] == 1_000_000
+    assert PlanView(plan).clocks["risk"] == 250_000
 
 
 def test_the_5ms_risk_poll_fallback_compiles_and_keeps_the_rules(

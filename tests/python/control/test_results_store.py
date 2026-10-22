@@ -349,3 +349,42 @@ def test_single_backend_runs_record_hashed_inputs_into_the_capture():
     assert single["backend"] == "cpu" and len(single["input_sha256"]) == 64
     assert single["receive_to_result_ms"] == store.live["receive_to_result_ms"]
     assert "covariance_probes" in single["validation"]  # recorded from the unfiltered result
+
+
+class _CountingWindow(BarWindow):
+    """A window that counts how often its rows are stacked (a device stack per window)."""
+
+    stacked = 0
+
+    @property
+    def rows(self):
+        _CountingWindow.stacked += 1
+        return np.stack(self.parts)
+
+
+@pytest.mark.parametrize("backend", ["compare", "gpu"])
+def test_rows_are_stacked_only_for_a_window_inside_an_open_capture(backend):
+    """A finished capture (CaptureTap keeps it), or a window outside the capture interval,
+    costs no stack; compare mode never stacks (record_gpu and record_cpu read no rows)."""
+    base = window()
+    w = _CountingWindow(base.parts, base.times, 1, base.completed_bars, base.recv_ns)
+    capture = LatencyCapture(60, 1, start_ns=w.recv_ns - 1, backend=backend)
+    store, _ = make_store(backend=backend, capture=capture)
+    validated = backend == "compare"
+    update = RiskUpdate(w, engine_result(base, gpu_name="Test GPU"), None, "gpu", validated)
+    later = RiskUpdate(w, update.result, None, "gpu", validated)
+    compared = [comparison(u) for u in (update, later)]  # built here: they stack
+    _CountingWindow.stacked = 0
+    store.on_risk(update)
+    if validated:
+        store.on_comparison(compared[0])
+    assert _CountingWindow.stacked == (0 if validated else 1)
+    assert capture.status()["calculations"] == 1
+    capture.finish(now_ns=capture.end_ns)
+    store.on_risk(later)
+    if validated:
+        store.on_comparison(compared[1])
+    outside = _CountingWindow(base.parts, base.times, 1, base.completed_bars, capture.end_ns + 1)
+    store.tap.capture = LatencyCapture(60, 1, start_ns=w.recv_ns - 1, backend=backend)
+    store.on_risk(RiskUpdate(outside, update.result, None, "gpu", False))
+    assert _CountingWindow.stacked == (0 if validated else 1) and store.error is None

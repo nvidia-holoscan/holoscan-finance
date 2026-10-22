@@ -48,9 +48,20 @@ def _is_build_tree(name: str) -> bool:
     return name == "build" or name.startswith("build-")
 
 
+def _is_other_checkout(path: Path) -> bool:
+    """A nested checkout (its own ``.git``, such as a git worktree) is another tree."""
+    return (path / ".git").exists()
+
+
 def iter_metadata_files(repo_root: Path):
     for dirpath, dirnames, filenames in os.walk(repo_root):
-        dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIRS and not _is_build_tree(d)]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in _EXCLUDE_DIRS
+            and not _is_build_tree(d)
+            and not _is_other_checkout(Path(dirpath) / d)
+        ]
         if "metadata.json" in filenames:
             yield Path(dirpath) / "metadata.json"
 

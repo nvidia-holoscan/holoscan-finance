@@ -3,7 +3,9 @@
 The Python reference MITCH decoder of the host front ends. Each `PacketBatch` from
 `UdpPacketSourceOp` or `DaqiriPacketSourceOp` is decoded under the current feed directory into
 one `ReplayBatch` per accepted packet. This is the host baseline, about 0.27M msgs/s on one
-core (`decode_bench`, 2026-10-20); the GPU front ends decode inside the source instead.
+core (`decode_bench` on a recorded day, 2026-10-22,
+[VALIDATION.md, step 3](../../docs/VALIDATION.md#step-3-offline-kernels)); the GPU front
+ends decode inside the source instead.
 
 ```text
 packets (PacketBatch) → sender-port check → MIT303 unit parse → NYQ mapping → events (list[ReplayBatch])

@@ -33,10 +33,11 @@ Contract: `OnClock(poll_period_us).input(risk, DrainAll())`.
 | Param | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `bar_seconds` | int | `5` | annualizes volatility |
-| `cpu_threads` | int | `0` | BLAS threads; `0` tunes at start and at the first full window |
-| `full_window_bars` | int | `60` | bars of a full window |
+| `cpu_threads` | int | `0` | BLAS threads; `0` tunes over {1, 2, 4, 8, all} once per universe: the fewest threads within 10% of the fastest steady one-bar slide of a full window of its width, timed in a second pass |
+| `full_window_bars` | int | `60` | bars of a full window (engine capacity, and the window the tuning times) |
 | `poll_period_us` | int | `5000` | the poll clock |
 | `worker_cpus` | list | `[]` | CPUs of the worker (`pin_worker`); `[]` inherits. The apps pass `CpuSets.worker` |
+| `directory` | `Ref` | `Ref()` | `Ref(Knob[FeedDirectory])`: the worker tunes for each new universe as its manifest arrives, while idle, long before the first window, and `start()` tunes a universe registered before the graph runs (`replay`, whose drain starts with its source) and returns once that is done, so no GPU result waits for the tuning; empty: it tunes at the universe's first validated window |
 | `stats` | `Ref` | `Ref()` | `Ref(RiskStats)`: writes `crosschecks_submitted` and `crosschecks_done` only; private if empty |
 
 ## Edges and lane
@@ -57,7 +58,8 @@ from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
 crosscheck = g.op(RiskCrossCheckOp, "crosscheck", bar_seconds=5, full_window_bars=60,
-                  worker_cpus=sorted(cpus.worker), stats=Ref(risk_stats))
+                  worker_cpus=sorted(cpus.worker), directory=Ref(directory_knob),
+                  stats=Ref(risk_stats))
 publish_comparison = g.op(CallbackSinkOp, "publish_comparison", callback=Ref(results.on_comparison))
 g.add_flow(risk.validate, crosscheck.risk, **lossless(2))
 g.add_flow(crosscheck.comparison, publish_comparison.items, **lossless(2))

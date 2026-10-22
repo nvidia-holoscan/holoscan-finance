@@ -345,6 +345,49 @@ def test_snapshot_key_sets(mode, backend, state):
     assert set(s["rolling_timing"]) == ROLLING_TIMING and s["comparison_failure"] is None
 
 
+@pytest.mark.parametrize(("mode", "backend", "state"), CASES)
+def test_snapshot_json_decodes_to_what_fastapi_would_send(mode, backend, state, monkeypatch):
+    """``/snapshot`` is pre-encoded with json.dumps; the content must be FastAPI's, and the
+    live result's cached encoding must follow every newly published result."""
+    encoders = pytest.importorskip("fastapi.encoders")
+    from holoscan_finance.dashboard import model as model_module
+
+    clock = SimpleNamespace(time_ns=lambda: 1_743_600_000 * 10**9)
+    monkeypatch.setattr(model_module, "time", clock)
+    ctx = make_ctx(mode, backend)
+    reach(ctx, state)
+    model = DashboardModel(ctx)
+    for _ in range(2):  # the second call reuses the cached blocks
+        assert json.loads(model.snapshot_json()) == encoders.jsonable_encoder(model.snapshot())
+    if state == "live":
+        before = json.loads(model.snapshot_json())["live"]
+        go_live(ctx)
+        after = json.loads(model.snapshot_json())["live"]
+        assert after == encoders.jsonable_encoder(ctx.results.live) and after != before
+
+
+def test_snapshot_json_rejects_values_that_are_not_plain_json():
+    ctx = make_ctx("replay", "gpu")
+    reach(ctx, "live")
+    ctx.results.live = dict(ctx.results.live, eligible=np.int64(3))
+    with pytest.raises(TypeError, match="int64"):
+        DashboardModel(ctx).snapshot_json()
+
+
+def test_a_non_finite_value_is_served_as_null_and_never_fails_the_snapshot():
+    """A NaN or infinite statistic (a degenerate window), in the live result or the
+    history, is null in /snapshot; every other value is unchanged."""
+    ctx = make_ctx("replay", "gpu")
+    reach(ctx, "live")
+    live = ctx.results.live
+    ctx.results.live = dict(live, mean_correlation=float("nan"), heatmap=[[1.0, float("inf")]])
+    ctx.results.history.append([1, float("-inf"), float("nan")])
+    s = json.loads(DashboardModel(ctx).snapshot_json())
+    assert s["live"]["mean_correlation"] is None and s["live"]["heatmap"] == [[1.0, None]]
+    assert s["history"][-1] == [1, None, None]
+    assert s["live"]["eligible"] == live["eligible"] and s["universe"]
+
+
 @pytest.mark.parametrize("mode", ["udp", "daqiri-host", "gpudirect", "replay"])
 def test_pinned_network_values(mode):
     ctx = make_ctx(mode, "gpu")
@@ -472,16 +515,16 @@ INDEX_READS = {
     "s": [
         "feed_control", "error", "observations", "profile", "sender_status", "live", "settings",
         "universe", "prices", "comparison", "rolling_timing", "analytics_backend", "network",
-        "history", "fullday_available", "fullday", "comparison_failure",
+        "history", "fullday_available", "fullday", "comparison_failure", "graph_status", "engine",
     ],
     "n": [
-        "status", "messages_per_second", "sequence_gaps", "ring_dropped", "packets",
-        "transport", "ingest", "ring_messages", "buckets",
+        "status", "messages_per_second", "sequence_gaps", "analytics_sequence_gaps",
+        "ring_dropped", "packets", "transport", "ingest", "ring_messages", "buckets",
     ],
     "l": [
         "eligible", "universe", "pairs", "annual_vol", "mean_correlation", "bars",
         "heatmap_indices", "heatmap", "timestamp_ns", "generation", "receive_to_result_ms",
-        "milliseconds",
+        "milliseconds", "published_wall_ns", "gpu_name", "method", "added_bars", "expired_bars",
     ],
     "c": [
         "cpu_ms", "gpu_ms", "speedup", "agreement", "matched_work", "gpu_name", "cpu_threads",
@@ -532,9 +575,84 @@ def test_every_field_index_html_reads_is_present(monkeypatch):
 
 
 def test_index_html_branches_on_the_snapshot_ingest_modes():
-    # The network detail and the GPU device rows are picked by network.ingest.
-    tokens = set(re.findall(r"n\.ingest===?'([^']*)'", INDEX_HTML.read_text()))
+    # The network detail, the GPU device rows and the sender controls (not in replay mode)
+    # are picked by network.ingest.
+    tokens = set(re.findall(r"n\.ingest[!=]==?'([^']*)'", INDEX_HTML.read_text()))
     assert tokens == {"daqiri-host", "gpudirect", "replay"} and tokens <= set(INGEST_MODES)
+
+
+def test_the_footer_describes_every_ingest_mode_as_it_runs():
+    """The footer says how the packets reach the receiver in the run's own mode (it once
+    said "not ... PCAP playback" while a pcap was replaying)."""
+    footer = re.search(r"const FOOTER=\{(.*?)\};", script_text()).group(1)
+    sentences = dict(re.findall(r"'?([a-z-]+)'?:'((?:[^'\\]|\\.)*)'", footer))
+    assert set(sentences) == set(INGEST_MODES)
+    assert "pcap" in sentences["replay"] and "GPU memory" in sentences["replay"]
+    assert "kernel UDP socket" in sentences["udp"] and "GPUDirect" in sentences["gpudirect"]
+    assert not any("pcap" in sentences[m] for m in ("udp", "daqiri-host", "gpudirect"))
+    static = re.search(r'<footer id="footer">(.*?)</footer>', INDEX_HTML.read_text()).group(1)
+    assert "PCAP" not in static.upper() and "FOOTER[n.ingest]" in script_text()
+
+
+def test_the_placeholder_does_not_put_the_thread_tuning_in_the_first_comparison():
+    """Until the first comparison arrives the page says what that one includes. The CPU
+    worker's BLAS threads are tuned when the universe arrives, before any window (it once
+    said the first comparison included the CPU thread selection)."""
+    text = re.search(r'<p class="muted" id="benchstatus">(.*?)</p>', INDEX_HTML.read_text())
+    assert "thread selection" not in text.group(1)
+    assert "tuned before it, when the universe arrives" in text.group(1)
+
+
+# The page's variables for the snapshot parts, and the keys each may have in any mode,
+# backend or state. JavaScript members on the same names are not snapshot reads.
+PAGE_VARIABLES = {
+    "s": TOP | {"observations", "prices", "rolling_timing"},
+    "n": NETWORK,
+    "l": ENGINE_OUTPUT | PUBLISHED | GPU_EXTRA | CPU_EXTRA,
+    "c": COMPARISON,
+    "r": ROLLING_TIMING,
+    "p": PROFILE,
+    "x": PRICE,
+    "f": FULLDAY_RUNNING | {"x_realtime", "error"},  # done adds x_realtime, error adds error
+}
+JS_MEMBERS = {"toFixed", "toLocaleString", "length"}
+HTTP_RESPONSE = {"ok", "json", "status"}  # `r` is also the fetch() response
+
+
+def script_text() -> str:
+    html = INDEX_HTML.read_text()
+    return html[html.index("<script>") : html.index("</script>")]
+
+
+def test_index_html_reads_only_fields_the_contract_has():
+    """Every ``<var>.<field>`` the page reads off a snapshot part exists in that part in some
+    mode, backend or state: a renamed or invented field shows up here, not as an
+    ``undefined`` in the browser."""
+    reads: dict[str, set[str]] = {var: set() for var in PAGE_VARIABLES}
+    for var, name in re.findall(r"(?<![\w.$])([snlcrpxf])\.([A-Za-z_]\w*)", script_text()):
+        reads[var].add(name)
+    for var, names in reads.items():
+        allowed = PAGE_VARIABLES[var] | JS_MEMBERS | (HTTP_RESPONSE if var == "r" else set())
+        unknown = names - allowed
+        assert not unknown, f"index.html reads {var}.{sorted(unknown)}, which /snapshot never has"
+    assert reads["s"] >= {"network", "live", "comparison", "fullday"}  # the regex still matches
+
+
+def test_index_html_element_ids_exist():
+    html = INDEX_HTML.read_text()
+    ids = set(re.findall(r'\bid="([^"]+)"', html[: html.index("<script>")]))
+    used = set(re.findall(r"(?:\$|show|syncSelect)\('([^']+)'", script_text()))
+    used |= {
+        i
+        for group in re.findall(r"\[((?:'[a-z_]+',?)+)\]\.forEach", script_text())
+        for i in re.findall(r"'([a-z_]+)'", group)
+    }
+    assert used and used <= ids, sorted(used - ids)
+
+
+def test_index_html_branches_on_the_snapshot_backends():
+    tokens = set(re.findall(r"\bb[!=]==?'([^']*)'", script_text()))
+    assert tokens == {"gpu", "cpu"}  # compare is the default branch
 
 
 def test_snapshot_imports_no_cupy(monkeypatch):

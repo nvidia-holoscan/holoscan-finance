@@ -94,7 +94,7 @@ def test_defaults() -> None:
         20,
     )
     assert args.max_spread_bps == 100.0 and args.interval == 0.05
-    assert (args.risk_poll_us, args.risk_deadline_us, args.expect_windows) == (1000, 0, 0)
+    assert (args.risk_poll_us, args.risk_deadline_us, args.expect_windows) == (250, 0, 0)
     assert args.topics is False and args.topics_catalog == "/tmp/holoscan-finance/endpoints.json"
 
 

@@ -161,6 +161,30 @@ def test_cpu_windows_and_final_state_equal_the_bar_builder():
     assert_same_snapshot(stats.symbol_snapshot, builder.symbol_snapshot())
 
 
+def test_the_bars_synchronize_before_each_window_is_emitted(monkeypatch):
+    """The producer's half of the publish contract: risk reads a window's device parts on
+    its own stream, which only this synchronize orders after the bar kernels. Per window:
+    synchronize, then the drained key, the emit and the emitted count."""
+    order = []
+
+    class Builder(BarBuilder):
+        def synchronize(self) -> None:
+            order.append("synchronize")
+            super().synchronize()
+
+    class Stats(BarsStats):
+        def __setattr__(self, name: str, value: object) -> None:
+            if name in ("last_window_key", "windows_emitted") and value:
+                order.append(name)
+            super().__setattr__(name, value)
+
+    monkeypatch.setattr(quote_bars_module, "BarBuilder", Builder)
+    stats = Stats()
+    windows = run_bars(host_messages(1), knob=ScriptedKnob(feed(1)), stats=stats, backend="cpu")
+    assert len(windows) > 5
+    assert order == ["synchronize", "last_window_key", "windows_emitted"] * len(windows)
+
+
 @pytest.mark.parametrize(("period_ms", "snapshots"), [(60_000, 2), (0, 1)])
 def test_symbol_snapshot_cadence(period_ms, snapshots):
     stats = RecordingBarsStats()

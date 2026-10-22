@@ -4,8 +4,9 @@
 
 Without this the first market-data batches stall behind CUDA JIT compilation. Each
 operator warms only its own kernels in ``start()``: the sources the gather and decode
-RawModule, the bars operator both bar paths and ``apply_sequence``. Both functions run once
-per process and device and log "GPU <x> kernels ready in N s".
+RawModule, the bars operator both bar paths and ``apply_sequence``, the risk operator (and
+the spawned GPU risk worker) the rolling-risk kernels. Each function runs once per process
+and device and logs "GPU <x> kernels ready in N s".
 """
 
 from __future__ import annotations
@@ -127,3 +128,26 @@ def warm_bars_kernels(settings: Mapping[str, float], gpu_device: int = 0) -> flo
         bars.window()
 
     return _once("bars", gpu_device, warm)
+
+
+def warm_risk_kernels(gpu_device: int = 0) -> float:
+    """The rolling-risk kernels: a small window through the rebuild, slides of both
+    window-buffer parities from device parts (as CUDA graphs), a host window and a supplied
+    variance; returns seconds (0.0 when this device is already warm)."""
+
+    def warm(cp) -> None:
+        from .covariance import CovarianceEngine
+
+        rows = np.random.default_rng(0).normal(0.0, 1e-3, (8, 5))
+        rows[1, 2] = np.nan
+        times = np.arange(8, dtype=np.int64)
+        parts = tuple(cp.asarray(row) for row in rows)
+        cp.cuda.Device(gpu_device).synchronize()  # complete parts, as the bars emit them
+        engine = CovarianceEngine("gpu", gpu_device=gpu_device, window_bars=4)
+        for end in (4, 5, 6):
+            engine.update(None, times[end - 4 : end], parts=parts[end - 4 : end])
+        engine.update(rows[3:7], times[3:7])
+        observed = np.var(rows[4:8], axis=0, ddof=1)
+        engine.update(rows[4:8], times[4:8], observed_variance=observed)
+
+    return _once("risk", gpu_device, warm)

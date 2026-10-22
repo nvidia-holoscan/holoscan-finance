@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Spawned CPU and GPU workers agree after a roll and a seek, and ``gpu_window`` runs in a
-pinned worker."""
+"""Spawned CPU and GPU workers agree after a roll and a seek, ``gpu_window`` runs in a
+pinned worker, and fed only new bars it matches full windows."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 
 import numpy as np
 import pytest
+from library.test_workers import check_new_bars_only_match_full_windows
 
 from holoscan_finance.analytics.agreement import agreement
 from holoscan_finance.analytics.workers import cpu_window, gpu_window, start_worker_pool
@@ -48,3 +49,7 @@ def test_gpu_window_in_a_pinned_worker():
     assert result["gpu_name"] and result["method"] == "rebuild"
     oracle = np.cov(rows[:, result["eligible_indices"]], rowvar=False)
     np.testing.assert_allclose(result["covariance_probes"], oracle, rtol=1e-10, atol=1e-16)
+
+
+def test_a_gpu_worker_fed_new_bars_only_matches_full_windows():
+    check_new_bars_only_match_full_windows(gpu_window, backend="gpu", window_bars=20)

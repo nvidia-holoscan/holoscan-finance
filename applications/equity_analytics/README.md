@@ -48,7 +48,10 @@ default `--host 127.0.0.1`, so after `holoscan run equity_analytics replay` open
 endpoints control the run: pass `--run-args "--host 0.0.0.0"` only on a trusted, isolated
 network ([SECURITY.md](../../SECURITY.md)). Inside the dev container (`holoscan run-container`), add
 `--local`. `GET /plan` returns the compiled lanes, edges and clocks, and `/snapshot`
-carries them as `engine`.
+carries them as `engine`. `GET /healthz` answers 200 once the ingest front end receives
+(503 before, after a stop, and once a finite replay has played its last pass, while the
+dashboard stays up and the body says `"input_ended": true`): start an external sender on
+the 200, as `replay_sender` does.
 
 For a headless, finite run directly from the repository root inside the Holoscan 5.0
 image (`scripts/dev5.sh '<command>'`):
@@ -96,7 +99,7 @@ and the placement as JSON. `--expect-windows N` requires N analyzed windows (and
 - Param-gated optional ports: `QuoteBarsOp.window`, `RollingRiskOp.validate`.
 - `OnClock` sources with hold-and-retry on `BLOCKING` edges, and a lossless same-lane
   `OnEach` chain: no thread hop per packet.
-- A `DROP_OLDEST`/1 latest-only edge from bars into an `OnClock(1 ms)` + `DrainAll` risk
+- A `DROP_OLDEST`/1 latest-only edge from bars into an `OnClock(250 µs)` + `DrainAll` risk
   operator, so analysis runs on arrival at a bounded rate (the minimum update interval).
 - Authored lanes with `ThreadPlacement`; `--ingest-cpus` and `--ingest-busy-poll` place
   the ingest lane, and no lane runs on the DAQIRI lcores.

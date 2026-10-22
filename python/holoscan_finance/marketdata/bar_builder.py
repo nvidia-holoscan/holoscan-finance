@@ -172,6 +172,15 @@ class BarBuilder:
         self.stale_packets += tracker.stale_packets
         self.sequence_gaps += tracker.sequence_gaps
 
+    def synchronize(self) -> None:
+        """Wait for the bars' CUDA work (gpu; a no-op on the cpu backend): the producer's half
+        of the publish contract, so a consumer on another stream reads complete parts."""
+        if self._gpu:
+            import cupy as cp
+
+            with self._device():
+                cp.cuda.get_current_stream().synchronize()
+
     def counters(self) -> BarCounters | None:
         """The engine's exact counters (gpu: one 40-byte D2H); None before the first reset."""
         engine = self.engine

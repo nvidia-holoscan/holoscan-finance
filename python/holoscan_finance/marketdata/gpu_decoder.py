@@ -5,13 +5,11 @@
 Packets from a sender port other than the directory's are stale and never reach pass 2;
 accepted packets of one call become one ``GpuReplayBatch`` whose columns stay on the GPU.
 Both GPU sources own one decoder each (through ``ingest.gpu_ingest.GpuIngest``), which reads
-the directory immediately before decoding. ``PacketView`` is the per-packet record a
-latency capture counts.
+the directory immediately before decoding.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sized
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -33,29 +31,6 @@ class DecodeCounts:
     messages: int
     stale: int
     malformed: int
-
-
-class PacketView:
-    """Minimal ReplayBatch-shaped record for LatencyCapture.record_packet."""
-
-    __slots__ = (
-        "events",
-        "generation",
-        "sequence",
-        "sequence_count",
-        "recv_wall_ns",
-    )
-
-    def __init__(
-        self,
-        events: Sized,
-        generation: int,
-        sequence: int,
-        sequence_count: int,
-        recv_wall_ns: int,
-    ) -> None:
-        self.events, self.generation, self.sequence = events, generation, sequence
-        self.sequence_count, self.recv_wall_ns = sequence_count, recv_wall_ns
 
 
 class GpuMitchDecoder:
@@ -105,16 +80,3 @@ class GpuMitchDecoder:
             int(recv_ns[idx[-1]]),
         )
         return [batch], DecodeCounts(int(dec.wire_count[idx].sum()), stale, malformed)
-
-    @staticmethod
-    def capture_views(batch: GpuReplayBatch) -> Iterator[PacketView]:
-        """One ``PacketView`` per packet of ``batch``, for ``CaptureTap``."""
-        ends = np.r_[batch.packet_offsets[1:], batch.n_events]
-        for k in range(batch.n_packets):
-            yield PacketView(
-                range(int(ends[k] - batch.packet_offsets[k])),
-                batch.generation,
-                int(batch.sequence[k]),
-                int(batch.wire_count[k]),
-                int(batch.packet_recv_ns[k]),
-            )

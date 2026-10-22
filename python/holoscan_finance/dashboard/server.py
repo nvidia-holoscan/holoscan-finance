@@ -3,9 +3,11 @@
 """HTTP for the dashboard and the replay tools, and the uvicorn run loop.
 
 ``make_app`` serves the dashboard endpoints, bodies and 422 mapping (``ValueError``,
-``TypeError``, ``KeyError``), including ``GET /plan`` and ``GET /healthz``. Handlers are
-``async def`` (no thread-pool hop per request: measured sub-ms tails under load); only the
-blocking full-day start and the GIL fault injection go to worker threads. ``serve`` is
+``TypeError``, ``KeyError``, ``OverflowError``), including ``GET /plan`` and
+``GET /healthz`` (200 once the ingest front end receives, else 503: a sender waits for
+it). Handlers are ``async def`` (no thread-pool hop per request: measured
+sub-ms tails under load); only the blocking full-day start and the GIL fault injection go
+to worker threads. ``serve`` is
 pattern B: uvicorn owns the main thread and SIGINT, the FastAPI lifespan owns the
 ``RunSession`` (stopped in about 1 ms on shutdown, but waited for without a bound, so the
 report and exit code always see a stopped graph). The port is bound before the graph
@@ -30,7 +32,7 @@ from typing import Any
 
 import anyio
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .model import DashboardModel
 
@@ -44,7 +46,7 @@ STOP_WARNING_S = 10.0
 def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:
     try:
         return fn(payload)
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
         raise HTTPException(422, detail=str(exc)) from exc
 
 
@@ -61,7 +63,9 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
 
     @app.get("/snapshot")
     async def snapshot():
-        return model.snapshot()
+        # Pre-encoded: FastAPI's generic encoder took about 5 ms of interpreter lock per
+        # request at 2,886 symbols, time the data-plane lanes wait for.
+        return Response(model.snapshot_json(), media_type="application/json")
 
     @app.get("/plan")
     async def plan():
@@ -69,7 +73,19 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
 
     @app.get("/healthz")
     async def healthz():
-        return {"graph_status": ctx.status.graph_status, "termination": ctx.status.termination}
+        # Ready means receiving: the graph runs and the front end's socket is bound (or its
+        # NIC or replay drain runs). Before that, once a finite input has ended (a replay's
+        # last pass: the graph and the dashboard keep running, "input_ended" true), and
+        # after a stop or an error, 503.
+        status = ctx.status
+        ready = status.ready()
+        body = {
+            "ready": ready,
+            "graph_status": status.graph_status,
+            "termination": status.termination,
+            "input_ended": status.input_ended(),
+        }
+        return JSONResponse(body, status_code=200 if ready else 503)
 
     @app.post("/manifest")
     async def manifest(payload: dict):
@@ -90,7 +106,7 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
     @app.post("/replay/fullday")
     async def fullday(payload: dict):
         def start(p: dict) -> dict:
-            return ctx.fullday.start(int(p.get("pps", 200_000)))
+            return ctx.fullday.start(p.get("pps", 200_000))  # start() checks the type
 
         # Waits up to 60 s for the replay controller: never on the event loop.
         return await anyio.to_thread.run_sync(_mutate, start, payload)

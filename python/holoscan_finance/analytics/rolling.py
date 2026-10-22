@@ -5,11 +5,16 @@
 
 A one-window slot keeps only the newest window, and ``poll`` analyzes it at most once per
 ``min_interval_ns`` and only while no CPU comparison is in flight, so a window is picked
-up on arrival: a 1 ms poll measured a 0.99 ms pick-up, where a 50 ms clock added 28 ms at
-p50. Inline it keeps a throwaway engine per generation and ranks validated windows by host
-variance; with ``executor="process"`` it runs ``gpu_window``/``cpu_window`` in one spawned
-worker, off the decoder's GIL. Never imports Holoscan; CuPy only inside the inline GPU
-path.
+up on arrival, within the operator's poll period, where a 50 ms clock added 28 ms at p50.
+Inline it keeps one engine, fed the window's parts (only the new bars are copied in),
+and resets it on a new generation; with ``executor="process"`` it runs
+``gpu_window``/``cpu_window`` in one spawned worker, off the decoder's GIL. The worker
+keeps the window it analyzed last, so a window that slides from it travels as its new
+bars only (the full window after a gap, a new generation or a lost worker state), and
+results come back as arrays. A CPU worker is tuned for a universe when its manifest
+arrives (``prepare``), before its first window, or in ``RollingRiskOp.start`` when the
+universe is known before the graph runs (replay). Never imports Holoscan; CuPy only inside
+the inline GPU path.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..marketdata.covariance import CovarianceEngine, gpu_name
+from ..marketdata.covariance import CovarianceEngine, gpu_name, slide
 from ..payloads import BarWindow, RiskUpdate
 from ..telemetry.stats import RiskStats
 from . import workers
@@ -39,8 +44,10 @@ class RollingRisk:
     With ``cross_check`` each analysis first claims ``gate`` (``try_claim``); a claimed
     window is ``validated`` and carries a host copy of its rows for the CPU comparison, and
     while a claim is open no window is analyzed (``ResultsStore`` releases it after
-    publishing the comparison). ``host_variance`` ranks every inline analysis by the NumPy
-    variance of a host copy, so a NumPy reference picks identical instruments.
+    publishing the comparison). Each engine computes its own variance, the GPU's bit for
+    bit ``np.var``, so the comparison sees identical eligibility and order and both sides
+    time the same work. ``host_variance`` ranks every inline analysis by the NumPy variance
+    of a host copy instead (a NumPy reference's own coordinates).
     """
 
     def __init__(
@@ -79,26 +86,51 @@ class RollingRisk:
         self._generation: int | None = None
         self._pool: ProcessPoolExecutor | None = None
         self._future: Future | None = None
-        self._job: tuple[BarWindow, bool, int, np.ndarray] | None = None
+        self._job: tuple[BarWindow, bool, int, np.ndarray | None] | None = None
+        self._sent: tuple[int, np.ndarray] | None = None  # the worker's window: generation, times
+        self._tuning = workers.UniverseTuning(
+            "CPU risk worker", full_window_bars, bar_seconds, cpu_threads
+        )
         self._failed = False
 
     def start(self) -> None:
-        """Pre-spawn the worker (process), or activate the device on this thread (inline GPU)."""
+        """Pre-spawn the worker (process), or activate the device on this thread and load the
+        risk kernels (inline GPU)."""
         if self.executor == "process":
-            self._pool = workers.start_worker_pool(self._worker_cpus)
+            gpu_device = self._gpu_device if self.backend == "gpu" else None
+            self._pool = workers.start_worker_pool(self._worker_cpus, gpu_device=gpu_device)
         elif self.backend == "gpu":
             import cupy as cp
+
+            from ..marketdata.warmup import warm_risk_kernels
 
             cp.cuda.Device(self._gpu_device).use()
             # The first query reads ~100 driver attributes under the GIL: never per window.
             gpu_name(cp, self._gpu_device)
+            warm_risk_kernels(self._gpu_device)
 
     def stop(self) -> None:
         if self._pool is not None:
             self._pool.shutdown(wait=True, cancel_futures=True)
             self._pool = None
-        self._future = self._job = self._engine = None
+        self._future = self._job = self._engine = self._sent = None
+        self._tuning.reset()
         self.stats.busy = False
+
+    @property
+    def tuning_pending(self) -> bool:
+        """A ``prepare`` tuning has not been collected by ``poll`` yet."""
+        return self._tuning.pending
+
+    def prepare(self, width: int, *, wait: bool = False) -> None:
+        """A CPU worker (``executor="process"``): tune it for a universe of ``width``
+        instruments before its first window (``tune_cpu``), once per width, when it is idle
+        (call it again until then); ``wait``: return once the tuning is done. Otherwise a
+        no-op."""
+        if self.backend == "cpu" and self._pool is not None and self._future is None:
+            self._tuning.submit(self._pool, width)
+            if wait:
+                self._tuning.wait()
 
     def offer(self, window: BarWindow) -> None:
         """Make ``window`` the next one to analyze; a waiting older window is superseded."""
@@ -142,40 +174,66 @@ class RollingRisk:
         return self._finish(window, result, rows_host, validated, started)
 
     def _update(self, window: BarWindow, validated: bool) -> tuple[dict, np.ndarray | None]:
-        rows = window.rows
         rows_host = observed = None
-        if validated or self._host_variance:
-            rows_host = _host(rows)
+        if self._host_variance:
+            rows_host = _host(window.rows)
             observed = np.var(rows_host, axis=0, ddof=1)
-        if self._engine is None or window.generation != self._generation:
-            # First window of a generation: a throwaway engine compiles the kernels and
-            # allocates workspaces, so the kept engine's timings exclude that cost.
-            self._new_engine().update(rows, window.times, observed_variance=observed)
-            self._engine, self._generation = self._new_engine(), window.generation
-        result = self._engine.update(rows, window.times, observed_variance=observed)
+        if self._engine is None:
+            self._engine = CovarianceEngine(
+                self.backend,
+                bar_seconds=self._bar_seconds,
+                gpu_device=self._gpu_device,
+                window_bars=self._full_window_bars,
+            )
+        engine, update = self._engine, self._engine.update
+        if window.generation != self._generation:
+            if engine.width != len(window.parts[0]):
+                # The first window of a universe allocates the workspaces: run it untimed.
+                update(None, window.times, parts=window.parts, observed_variance=observed)
+            engine.reset()
+            self._generation = window.generation
+        result = update(None, window.times, parts=window.parts, observed_variance=observed)
+        if validated and rows_host is None:  # the CPU comparison's copy, after the result
+            rows_host = _host(window.rows)
         return result, rows_host
 
-    def _new_engine(self) -> CovarianceEngine:
-        return CovarianceEngine(
-            self.backend, bar_seconds=self._bar_seconds, gpu_device=self._gpu_device
-        )
-
     def _poll_process(self) -> RiskUpdate | None:
+        if not self._tuning.collect():
+            return None
         update = None
         if self._future is not None:
             if not self._future.done():
                 return None
             update = self._collect()
+            if self._future is not None:  # resubmitted in full (WindowUnknown): in flight
+                return update
         if not self._failed and (job := self._take()) is not None:
             self._submit(*job)
         return update
 
-    def _submit(self, window: BarWindow, validated: bool, started: int) -> None:
-        rows, times, generation = _host(window.rows), window.times, window.generation
+    def _submit(
+        self, window: BarWindow, validated: bool, started: int, *, full: bool = False
+    ) -> None:
+        """Send the window's new bars (all of them unless it slides from the worker's last
+        window), plus the host copy a validated window carries."""
+        times, generation = window.times, window.generation
+        new = len(times)
+        if not full and self._sent is not None and self._sent[0] == generation:
+            step = slide(self._sent[1], times)
+            new = len(times) if step is None else step[1]
+        rows = _host_rows(window.parts[len(times) - new :])
+        self._sent = (generation, times)
         try:
             if self.backend == "gpu":
                 future = self._pool.submit(
-                    workers.gpu_window, rows, times, generation, self._bar_seconds, self._gpu_device
+                    workers.gpu_window,
+                    rows,
+                    times,
+                    generation,
+                    self._bar_seconds,
+                    self._gpu_device,
+                    self._full_window_bars,
+                    arrays=True,
                 )
             else:
                 future = self._pool.submit(
@@ -186,20 +244,27 @@ class RollingRisk:
                     self._bar_seconds,
                     self._cpu_threads,
                     self._full_window_bars,
+                    arrays=True,
                 )
         except BrokenExecutor as exc:
             # The worker died while idle: _collect records it as it records a failed job.
             future = Future()
             future.set_exception(exc)
-        self._future, self._job = future, (window, validated, started, rows)
+        # The cross-check's host copy is stacked while the worker computes.
+        rows_host = _host(window.rows) if validated else None
+        self._future, self._job = future, (window, validated, started, rows_host)
         self.stats.busy = True
 
     def _collect(self) -> RiskUpdate | None:
-        future, (window, validated, started, rows) = self._future, self._job
+        future, (window, validated, started, rows_host) = self._future, self._job
         self._future = self._job = None
         self.stats.busy = False
         try:
             result = future.result()
+        except workers.WindowUnknown:
+            # The worker lost its window (a new worker process): send it in full.
+            self._submit(window, validated, started, full=True)
+            return None
         except Exception as exc:
             # Record the error and stop analyzing. No comparison will come for this window,
             # so its claim is void.
@@ -208,7 +273,9 @@ class RollingRisk:
             if validated:
                 self._gate.release()
             return None
-        return self._finish(window, result, rows if validated else None, validated, started)
+        for key in workers.ARRAY_KEYS:
+            result[key] = result[key].tolist()
+        return self._finish(window, result, rows_host, validated, started)
 
     def _finish(
         self,
@@ -230,3 +297,8 @@ class RollingRisk:
 def _host(rows: object) -> np.ndarray:
     """Window rows on the host (a D2H copy of a device window)."""
     return rows if isinstance(rows, np.ndarray) else rows.get()
+
+
+def _host_rows(parts: tuple) -> np.ndarray:
+    """``(len(parts), N)`` host rows of per-bar vectors (host, or device: one D2H each)."""
+    return np.stack([p if isinstance(p, np.ndarray) else p.get() for p in parts])

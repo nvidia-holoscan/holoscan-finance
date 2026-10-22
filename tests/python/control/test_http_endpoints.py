@@ -19,7 +19,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from apphelpers import equity_args
 
+from holoscan_finance.app.context import EquityContext
+from holoscan_finance.app.runner import cpu_sets
 from holoscan_finance.control import fullday as fullday_module
 from holoscan_finance.control.directory import ReplayDirectory
 from holoscan_finance.control.feed import FeedControl
@@ -33,7 +36,7 @@ from holoscan_finance.ref import Knob
 from holoscan_finance.settings import BarSettings
 from holoscan_finance.telemetry.capture import CaptureTap, LatencyCapture
 from holoscan_finance.telemetry.stalls import StallMonitor
-from holoscan_finance.telemetry.stats import BarsStats, IngestStats, RiskStats
+from holoscan_finance.telemetry.stats import BarsStats, IngestStats, RiskStats, SourceProbe
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
@@ -101,7 +104,9 @@ def make_ctx(mode="replay", backend="compare", replay_control=None):
         args=SimpleNamespace(ingest=mode, analytics_backend=backend, interval=0.05),
         settings=settings, directory=directory, feed=feed, ingest_stats=ingest,
         bars_stats=bars, risk_stats=RiskStats(), tap=tap, results=results,
-        stall_monitor=monitor, fullday=fullday, status=RunStatus(), plan_summary=PLAN,
+        stall_monitor=monitor, fullday=fullday,
+        status=RunStatus(receiving=ingest.ready, input_ended=lambda: ingest.eof),
+        plan_summary=PLAN,
     )  # fmt: skip
 
 
@@ -125,9 +130,75 @@ def test_plan_and_healthz():
     ctx = make_ctx()
     client = client_for(ctx)
     assert client.get("/plan").json() == PLAN
-    assert client.get("/healthz").json() == {"graph_status": "starting", "termination": None}
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    assert r.json() == {
+        "ready": False, "graph_status": "starting", "termination": None, "input_ended": False
+    }  # fmt: skip
     ctx.status.graph_status, ctx.status.termination = "stopped", "FAILED"
-    assert client.get("/healthz").json() == {"graph_status": "stopped", "termination": "FAILED"}
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    assert r.json() == {
+        "ready": False, "graph_status": "stopped", "termination": "FAILED", "input_ended": False
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize("mode", ["udp", "replay"])
+def test_healthz_answers_200_only_while_the_ingest_front_end_receives(mode):
+    """The graph runs some time before the source has bound its socket (or started its
+    drain): a sender started on a 200 then lost its first packets. /healthz is 503 until
+    the front end receives, as /snapshot's network.ready says, and again after an error."""
+    ctx = make_ctx(mode)
+    client = client_for(ctx)
+    ctx.status.graph_status, ctx.status.termination = "running", "RUNNING"
+    for _ in range(2):  # the graph runs, the source has not opened (then: its drain is down)
+        r = client.get("/healthz")
+        assert r.status_code == 503 and r.json()["ready"] is False
+        assert client.get("/snapshot").json()["network"]["ready"] is False
+        ctx.ingest_stats.opened = True
+    alive = [True]
+    ctx.ingest_stats.attach(SourceProbe(lambda: alive[0], lambda: 0, lambda: 0, lambda: None))
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {
+        "ready": True, "graph_status": "running", "termination": "RUNNING", "input_ended": False
+    }  # fmt: skip
+    assert client.get("/snapshot").json()["network"]["ready"] is True
+    ctx.ingest_stats.error = "UDP RX failed: boom"
+    assert client.get("/healthz").status_code == 503
+    ctx.ingest_stats.error = None
+    alive[0] = False
+    assert client.get("/healthz").status_code == 503
+
+
+def test_healthz_tells_a_finished_replay_from_one_not_started():
+    """A finite replay's drain ends after its last pass (``--replay-loops 1`` by default)
+    while the graph and the dashboard keep running: /healthz is 503 then, as nothing is
+    received any more, and its body says the input ended, which a replay that has not
+    started does not say (a short capture can end before a poller ever sees the 200)."""
+    ctx = make_ctx("replay")
+    client = client_for(ctx)
+    ctx.status.graph_status, ctx.status.termination = "running", "RUNNING"
+    assert client.get("/healthz").json()["input_ended"] is False  # not started
+    alive = [True]
+    ctx.ingest_stats.opened = True
+    ctx.ingest_stats.attach(SourceProbe(lambda: alive[0], lambda: 0, lambda: 0, lambda: None))
+    assert client.get("/healthz").status_code == 200
+    alive[0], ctx.ingest_stats.eof = False, True  # the last pass played, everything emitted
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    assert r.json() == {
+        "ready": False, "graph_status": "running", "termination": "RUNNING", "input_ended": True
+    }  # fmt: skip
+    assert client.get("/").status_code == 200 and client.get("/snapshot").status_code == 200
+
+
+def test_the_apps_run_status_reads_the_end_of_input_from_its_ingest_stats():
+    args = equity_args("--ingest", "udp")
+    ctx = EquityContext.from_args(args, cpu_sets(args))
+    assert ctx.status.input_ended() is False
+    ctx.ingest_stats.eof = True
+    assert ctx.status.input_ended() is True
 
 
 def test_a_failed_session_shows_in_healthz_and_snapshot():
@@ -152,7 +223,11 @@ def test_a_failed_session_shows_in_healthz_and_snapshot():
     ctx.status.graph_status = "running"
     ctx.status.from_session(session)
     client = client_for(ctx)
-    assert client.get("/healthz").json() == {"graph_status": "stopped", "termination": "FAILED"}
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    assert r.json() == {
+        "ready": False, "graph_status": "stopped", "termination": "FAILED", "input_ended": False
+    }  # fmt: skip
     assert client.get("/snapshot").json()["error"] == "risk: RuntimeError: boom"
 
 
@@ -180,6 +255,7 @@ def test_feedrate_rules():
         ({"speed": 101}, "invalid replay control"),
         ({"loops": 1}, "unsupported replay control"),
         ({"paused": "yes"}, "invalid replay control"),
+        ({"speed": "10"}, "invalid replay control"),  # the sender reads it back as a number
     ):
         r = client.post("/feedrate", json=body)
         assert (r.status_code, r.json()["detail"]) == (422, detail)
@@ -272,6 +348,71 @@ def test_fullday_endpoint(monkeypatch):
     assert r.status_code == 422 and "already running" in r.json()["detail"]
     s = client.get("/snapshot").json()
     assert s["fullday_available"] is True and s["fullday"]["base"] is None
+
+
+BIG = int("9" * 400)  # valid JSON; float() raises OverflowError
+
+
+def raw(client, path: str, body: bytes):
+    """POST a JSON body as bytes: Python's parser also reads 1e999 (inf) and NaN."""
+    return client.post(path, content=body, headers={"content-type": "application/json"})
+
+
+def test_numbers_out_of_range_are_422_and_change_nothing():
+    """A huge integer, or a number only JSON extensions parse (1e999, NaN), is a 422."""
+    ctx = make_ctx()
+    client = client_for(ctx)
+    client.post("/manifest", json=manifest(1))
+    ctx.results.live = {"bars": ctx.settings.window_bars}
+    before = client.get("/feedrate").json()
+    for key in ("speed", "rate", "seek"):
+        assert client.post("/feedrate", json={key: BIG}).status_code == 422
+        r = raw(client, "/feedrate", f'{{"{key}": 1e999}}'.encode())
+        assert r.status_code == 422, key
+    assert client.get("/feedrate").json() == before
+    for body in ({"seconds": BIG}, {"seconds": "5"}, {"seconds": True}):
+        assert client.post("/capture", json=body).status_code == 422, body
+    assert raw(client, "/capture", b'{"seconds": NaN}').status_code == 422
+    assert client.get("/capture").json() == {}
+
+
+def test_fullday_pps_must_be_an_integer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(fullday_module, "replay_request", lambda u, p, timeout=5: calls.append(p))
+    client = client_for(make_ctx(replay_control="http://controller.invalid"))
+    for body in ({"pps": "200000"}, {"pps": 2.7}, {"pps": True}, {"pps": BIG}):
+        assert client.post("/replay/fullday", json=body).status_code == 422, body
+    assert raw(client, "/replay/fullday", b'{"pps": 1e999}').status_code == 422
+    assert calls == [] and client.get("/feedrate").json()["paused"] is False
+
+
+def test_a_non_finite_sender_report_is_dropped_and_the_snapshot_stays_up():
+    client = client_for(make_ctx())
+    client.post("/manifest", json=manifest(1))
+    for value in (b"1e999", b"NaN", b"-Infinity", b"true"):
+        body = b'{"seek_seq": 1, "generation": 1, "sent": 1, "loops": 0, "position": %s}' % value
+        assert raw(client, "/feedstatus", body).status_code == 200
+        r = client.get("/snapshot")
+        assert r.status_code == 200, value
+        assert r.json()["sender_status"] == {"seek_seq": 1, "generation": 1, "sent": 1, "loops": 0}
+
+
+def test_a_manifest_the_snapshot_could_not_serve_is_rejected():
+    """A lone surrogate symbol (a JSON escape) or a non-finite profile entry is a 422, and
+    the snapshot keeps serving the current generation."""
+    client = client_for(make_ctx())
+    client.post("/manifest", json=manifest(1))
+    base = json.dumps(manifest(2, 50002))
+    for bad in (
+        base.replace('"A"', '"\\ud800"'),
+        base.replace("[[34200, 10]]", "[[1e999, 10]]"),
+        base.replace("[[34200, 10]]", "[[NaN, 10]]"),
+        base.replace("[[34200, 10]]", "[[34200, true]]"),
+        base.replace("[[34200, 10]]", "[[34200]]"),
+    ):
+        assert raw(client, "/manifest", bad.encode()).status_code == 422, bad
+    r = client.get("/snapshot")
+    assert r.status_code == 200 and r.json()["generation"] == 1
 
 
 def test_hold_gil_exists_only_with_fault_injection(monkeypatch):
@@ -442,8 +583,11 @@ def test_serve_exit_codes_and_stop_reasons(case, rc, stop_reason, termination, t
         assert r["status"]["error"] == "counter: RuntimeError: injected failure"
     else:
         assert r["status"]["error"] is None
-    if case == "signal":
-        assert r["healthz"] == {"graph_status": "running", "termination": "RUNNING"}
+    if case == "signal":  # a graph without an ingest front end is ready once it runs
+        assert r["healthz"] == {
+            "ready": True, "graph_status": "running", "termination": "RUNNING",
+            "input_ended": False,
+        }  # fmt: skip
 
 
 @pytest.mark.sdk

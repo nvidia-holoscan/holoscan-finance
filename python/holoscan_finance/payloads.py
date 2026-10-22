@@ -53,10 +53,13 @@ class BarWindow:
     # cached_property writes the instance __dict__ directly, which a frozen dataclass allows.
     @functools.cached_property
     def rows(self) -> Any:
+        """The ``(bars, N)`` window; a device window is stacked on its parts' device,
+        whichever device is current in the consumer's thread."""
         if self.device:
             import cupy as cp
 
-            return cp.stack(self.parts)
+            with self.parts[0].device:
+                return cp.stack(self.parts)
         return np.stack(self.parts)
 
 

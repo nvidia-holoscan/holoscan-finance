@@ -96,14 +96,15 @@ def test_the_gate_blocks_until_the_comparison_is_published():
     assert second.validated and second.window.completed_bars == 21 and gate.claims == 2
 
 
-def test_a_validated_window_carries_its_rows_and_ranks_by_host_variance():
+def test_a_validated_window_carries_its_rows_and_ranks_by_its_own_variance():
+    """As the CPU comparison does: no supplied variance, so both time the same work."""
     r = risk(cross_check=True, gate=CrossCheckGate())
     w = window(20)
     r.offer(w)
     update = r.poll()
     host = np.stack(w.parts)
     np.testing.assert_array_equal(update.rows_host, host)
-    want = CovarianceEngine().update(host, w.times, observed_variance=np.var(host, axis=0, ddof=1))
+    want = CovarianceEngine().update(host, w.times)
     for key in ("method", "eligible_indices", "heatmap_indices", "bars", "universe"):
         assert update.result[key] == want[key], key
     np.testing.assert_allclose(update.result["annual_vol"], want["annual_vol"], rtol=1e-12)
@@ -125,13 +126,17 @@ def test_host_variance_without_validation_keeps_the_host_copy():
     assert not update.validated and update.rows_host is not None
 
 
-def test_each_generation_gets_a_throwaway_engine_then_a_fresh_one(monkeypatch):
-    built = []
+def test_one_engine_is_reset_per_generation_and_allocates_once_per_universe(monkeypatch):
+    built, updates = [], []
 
     class Counting(CovarianceEngine):
         def __init__(self, *args, **kwargs):
             built.append(args)
             super().__init__(*args, **kwargs)
+
+        def update(self, *args, **kwargs):
+            updates.append(self.width)
+            return super().update(*args, **kwargs)
 
     monkeypatch.setattr(rolling, "CovarianceEngine", Counting)
     clock = Clock()
@@ -142,10 +147,12 @@ def test_each_generation_gets_a_throwaway_engine_then_a_fresh_one(monkeypatch):
         clock.ns += 100 * MS
         r.offer(window(end, generation=generation, rows=rows))
         methods.append(r.poll().result["method"])
-    # Generation 2 reuses generation 1's bar times with other returns: only a fresh engine
-    # accepts that (the kept one would raise "completed bars changed").
+    # Generation 2 reuses generation 1's bar times with other returns: only a reset engine
+    # accepts that (without it the engine would raise "completed bars changed").
     assert methods == ["rebuild", "incremental", "rebuild"]
-    assert len(built) == 4
+    assert len(built) == 1
+    # The first window of the universe runs once untimed to allocate; later ones once.
+    assert updates == [None, 9, 9, 9]
     assert r.stats.last_generation == 2
 
 
@@ -243,5 +250,30 @@ def test_a_worker_that_died_while_idle_is_recorded_like_a_failed_job():
             time.sleep(0.002)
         assert r.stats.error.startswith("Analytics failed: ")
         assert not gate.in_flight and not r.stats.busy and r.stats.analyzed == 0
+    finally:
+        r.stop()
+
+
+def test_a_window_the_worker_lost_is_resent_in_full_and_published():
+    """WindowUnknown (a worker that lost its window) resends the window in full; a newer
+    window waiting meanwhile is analyzed after it, never in its place."""
+    pytest.importorskip("threadpoolctl")
+    r = RollingRisk(backend="cpu", executor="process", cpu_threads=1, min_interval_ns=0)
+    r.start()
+    try:
+        r.offer(window(20))
+        _wait_for_update(r)
+        r._pool.submit(workers.reset).result(timeout=60)  # the worker forgets its window
+        r.offer(window(21))
+        assert r.poll() is None  # submitted: the new bar only
+        while not r._future.done():
+            time.sleep(0.002)
+        r.offer(window(22))  # waits in the slot
+        assert r.poll() is None  # WindowUnknown: 21 resent in full, 22 still waiting
+        first = _wait_for_update(r)
+        second = _wait_for_update(r)
+        assert [first.window.completed_bars, second.window.completed_bars] == [21, 22]
+        assert first.result["method"] == "rebuild" and second.result["method"] == "incremental"
+        assert r.stats.error is None
     finally:
         r.stop()

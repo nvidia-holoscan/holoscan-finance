@@ -15,9 +15,11 @@ from test_gpu_decode import MIDNIGHT, UNIVERSE, host_decode, to_slots
 from holoscan_finance.marketdata import warmup
 from holoscan_finance.marketdata.gpu_decoder import DecodeCounts, GpuMitchDecoder
 from holoscan_finance.marketdata.gpu_mitch import FIELDS
+from holoscan_finance.marketdata.records import EVENT_DTYPE, ReplayBatch
 from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE
 from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
+from holoscan_finance.telemetry.capture import CaptureTap, LatencyCapture
 
 pytestmark = pytest.mark.gpu
 cp = pytest.importorskip("cupy")
@@ -100,16 +102,25 @@ def test_only_malformed_packets_give_no_batch():
     assert batches == [] and counts == DecodeCounts(0, 0, 3)
 
 
-def test_capture_views_describe_every_packet():
+def test_a_latency_capture_counts_every_packet_of_a_decoded_batch():
+    """``CaptureTap.record_gpu_batch`` on a decoded batch counts exactly what recording the
+    host decode's packets one at a time counts."""
     payloads = synthetic_stream(np.random.default_rng(6), 30, UNIVERSE, MIDNIGHT)
     (batches, _), recv = decode(payloads, np.full(30, PORT))
     _, nev, wire, seq, _ = host_decode(payloads)
-    views = list(GpuMitchDecoder.capture_views(batches[0]))
-    assert [len(v.events) for v in views] == nev.tolist()
-    assert [(v.sequence, v.sequence_count, v.recv_wall_ns) for v in views] == list(
-        zip(seq.tolist(), wire.tolist(), recv.tolist())
-    )
-    assert {v.generation for v in views} == {9}
+    tap, want = CaptureTap(), LatencyCapture(60, 9, start_ns=int(recv[3]))
+    tap.capture = LatencyCapture(60, 9, start_ns=int(recv[3]))  # the first 3 fall outside
+    tap.record_gpu_batch(batches[0])
+    for k in range(30):
+        events = np.zeros(int(nev[k]), EVENT_DTYPE)
+        want.record_packet(
+            ReplayBatch(events, 9, int(recv[k]), int(seq[k]), wire_count=int(wire[k]))
+        )
+    got = tap.capture
+    assert want.packet_count == 27 and want.events == int(nev[3:].sum())
+    for key in ("packet_count", "events", "wire_messages", "sequence_gaps", "reordered"):
+        assert getattr(got, key) == getattr(want, key), key
+    assert got.expected_sequence == want.expected_sequence and not got.generation_changed
 
 
 def test_decode_warm_up_runs_once_per_device(monkeypatch, caplog):

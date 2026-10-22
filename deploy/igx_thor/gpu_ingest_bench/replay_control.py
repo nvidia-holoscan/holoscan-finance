@@ -11,9 +11,9 @@ is prepared ahead in the background -- after each replay finishes, never during 
 
 Runs privileged with host networking (tcpreplay writes raw frames on the NIC):
 
-    python3 replay_control.py --pcap base.pcap --base-port 60305 --packets 2880565 \\
-        --nic enP4p3s0f0np0 --tcpreplay-dir /xb/root/usr/bin --app http://127.0.0.1:8080 \\
-        --tape /data/tape --work /xb/replay_control
+    python3 replay_control.py --pcap data/nyq/day.pcap --base-port <PORT> --packets <PACKETS> \\
+        --nic enP4p3s0f0np0 --tcpreplay-dir ~/tools/root/usr/bin --app http://127.0.0.1:8080 \\
+        --tape data/nyq/tape --work <WORK_DIR>
 """
 
 from __future__ import annotations

@@ -23,12 +23,13 @@ for d in *.deb; do dpkg -x "$d" root; done   # binaries: root/usr/bin
    PYTHONPATH=python python3 -m holoscan_finance.tools.bench_replay inspect ~/bench/capture.pcap
    ```
 
-   The largest source port is the new generation. Keep only its packets and check
-   that sequences are continuous:
+   The largest source port is the new generation. Keep only its packets as the recorded
+   day's pcap (`data/nyq/day.pcap`, beside its tape `data/nyq/tape`) and check that
+   sequences are continuous:
 
    ```bash
-   tcpdump -r ~/bench/capture.pcap -w ~/bench/base.pcap 'udp src port <PORT>'
-   PYTHONPATH=python python3 -m holoscan_finance.tools.bench_replay inspect ~/bench/base.pcap --port <PORT>
+   tcpdump -r ~/bench/capture.pcap -w data/nyq/day.pcap 'udp src port <PORT>'
+   PYTHONPATH=python python3 -m holoscan_finance.tools.bench_replay inspect data/nyq/day.pcap --port <PORT>
    ```
 
 2. **Stop anything else using the ConnectX port** (e.g. `igx_down.sh`).
@@ -38,8 +39,8 @@ for d in *.deb; do dpkg -x "$d" root; done   # binaries: root/usr/bin
    from the manifest's sender port and each generation needs a new one:
 
    ```bash
-   BASE_PCAP=~/bench/base.pcap BASE_PORT=<PORT> TCPREPLAY_DIR=~/tools/root/usr/bin \
-   TAPE_DIR=/path/to/nyq-equities-2025-04-01 RECEIVER_IMAGE=holoscan-finance:hsdk5-daqiri \
+   BASE_PCAP=$PWD/data/nyq/day.pcap BASE_PORT=<PORT> TCPREPLAY_DIR=~/tools/root/usr/bin \
+   TAPE_DIR=$PWD/data/nyq/tape RECEIVER_IMAGE=holoscan-finance:hsdk5-daqiri \
    GPU_UUID=GPU-... MODES="gpudirect daqiri-host" RATES="4500 10000 20000 50000 75000" \
    deploy/igx_thor/gpu_ingest_bench/sweep.sh
    ```

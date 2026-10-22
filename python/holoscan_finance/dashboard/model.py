@@ -3,14 +3,19 @@
 """The ``/snapshot`` JSON, built from host objects only.
 
 The bars lane publishes exact counters per batch and a symbol snapshot at most every
-250 ms, so a snapshot (about 1-3 ms of Python) never touches CUDA, never takes a
-data-plane lock, and reads the directory without a lock. ``index.html``, ``measure.py``
+250 ms, so a snapshot never touches CUDA, never takes a data-plane lock, and reads the
+directory without a lock. ``snapshot_json`` encodes it with ``json.dumps`` (strict: no NaN,
+no NumPy scalars) and reuses the encoding of the two large blocks, the live result (per
+published result) and the universe (per directory), so a request holds the interpreter
+lock for about a millisecond at 2,886 symbols. ``index.html``, ``measure.py``
 and ``compare_runs.py`` read the ``network`` constants; ``network.ingest`` is the
 canonical ingest mode (``udp``, ``daqiri-host``, ``gpudirect`` or ``replay``).
 """
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import time
 from typing import Any
@@ -34,6 +39,38 @@ def _number(value: float) -> float | None:
     return float(value) if np.isfinite(value) else None
 
 
+def _not_json(value: Any) -> Any:
+    raise TypeError(f"/snapshot holds a {type(value).__name__}, which is not plain JSON")
+
+
+def dumps(value: Any) -> str:
+    """Strict compact JSON, as Starlette's ``JSONResponse`` renders it; a non-finite float
+    (no JSON number carries it) is encoded as null rather than failing the snapshot."""
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), default=_not_json
+        )
+    except ValueError:
+        return json.dumps(
+            _finite(value),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            default=_not_json,
+        )
+
+
+def _finite(value: Any) -> Any:
+    """``value`` with every non-finite float as None (containers copied)."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
 class DashboardModel:
     """Read side of the dashboard over an ``EquityContext`` (or any object with its
     attribute names: ``args``, ``settings``, ``directory``, ``feed``, ``results``, ``tap``,
@@ -42,9 +79,33 @@ class DashboardModel:
 
     def __init__(self, ctx: Any) -> None:
         self.ctx = ctx
+        self._encoded: dict[str, tuple[Any, str]] = {}  # key -> (object, its JSON)
 
     def snapshot(self) -> dict:
         """``GET /snapshot`` (including ``engine``)."""
+        result = self._snapshot()
+        result["universe"] = list(result["universe"])
+        return result
+
+    def snapshot_json(self) -> bytes:
+        """``snapshot()`` as UTF-8 JSON. The live result is replaced, never mutated, when a
+        result is published, and the universe is the directory's tuple: each is encoded
+        once and reused while the same object is current."""
+        result = self._snapshot()
+        blocks = [f'"{key}":{self._encode(key, result.pop(key))}' for key in ("live", "universe")]
+        rest = dumps(result)
+        return ("{" + ",".join([*blocks, rest[1:-1]] if len(rest) > 2 else blocks) + "}").encode()
+
+    def _encode(self, key: str, value: Any) -> str:
+        cached = self._encoded.get(key)
+        if cached is not None and cached[0] is value:
+            return cached[1]
+        encoded = dumps(list(value) if isinstance(value, tuple) else value)
+        self._encoded[key] = (value, encoded)
+        return encoded
+
+    def _snapshot(self) -> dict:
+        """The snapshot, with the universe as the directory's own tuple."""
         c = self.ctx
         d = c.directory.current  # one lock-free read: every part below uses this generation
         view = c.results.view()
@@ -65,7 +126,7 @@ class DashboardModel:
             history=view["history"],
             capture=c.tap.status(),
             profile={k: d.manifest[k] for k in PROFILE_KEYS} if d is not None else {},
-            universe=list(d.symbols) if d is not None else [],
+            universe=d.symbols if d is not None else (),
         )
         if d is not None:  # observations exist from the first manifest on
             # One read: the bars lane replaces the counters per batch and drops them at a
@@ -188,7 +249,10 @@ class DashboardModel:
     def start_capture(self, payload: dict) -> dict:
         """``POST /capture``: needs a full return window. ValueError otherwise."""
         c = self.ctx
-        seconds = float(payload.get("seconds", 120))
+        seconds = payload.get("seconds", 120)
+        if type(seconds) not in (int, float):  # float() would also take "5" or true
+            raise ValueError("capture seconds must be a number")
+        seconds = float(seconds)
         if c.tap.active:
             raise ValueError("finish the previous capture before starting another")
         live = c.results.live

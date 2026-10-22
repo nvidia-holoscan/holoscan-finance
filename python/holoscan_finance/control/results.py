@@ -104,13 +104,14 @@ class ResultsStore:
                     return
                 result = self._publish_risk(update)
                 capture = self.tap.capture
-            # After our lock (dict building only): record_single copies the window to the
-            # host and hashes it. LatencyCapture has its own lock.
-            if capture is not None:
+            # After our lock (dict building only), and only for a window inside an open
+            # capture: record_single copies the window to the host and hashes it.
+            # LatencyCapture has its own lock.
+            if capture is not None and capture.includes(update.window.recv_ns):
                 if self.backend == "compare":
                     capture.record_gpu(_work(update), result)
                 else:
-                    capture.record_single(_work(update), result, update.result)
+                    capture.record_single(_work(update, rows=True), result, update.result)
         except Exception as exc:
             self._fail(f"Analytics failed: {exc}")
 
@@ -160,7 +161,7 @@ class ResultsStore:
         w, cpu, gpu = cmp.update.window, cmp.cpu, cmp.update.result
         ok, matched, usable = cmp.agreement, cmp.matched_work, cmp.usable
         capture = self.tap.capture
-        if capture is not None:
+        if capture is not None and capture.includes(w.recv_ns):
             capture.record_cpu(_work(cmp.update), cpu, gpu, ok and matched)
         now = time.time_ns()
         self.comparisons += 1
@@ -242,11 +243,12 @@ class ResultsStore:
             )
 
 
-def _work(update: RiskUpdate) -> dict:
-    """The work dict ``LatencyCapture`` records from. ``rows`` was materialized (and
-    cached on the window) by the risk operator, so this costs no GPU work."""
+def _work(update: RiskUpdate, *, rows: bool = False) -> dict:
+    """The work dict ``LatencyCapture`` records from; with ``rows`` (``record_single``
+    hashes them) the window's rows, the host copy if the update carries one, else the
+    window's parts stacked (on their device)."""
     w = update.window
-    work = dict(rows=w.rows, times=w.times, generation=w.generation, recv_ns=w.recv_ns)
-    if update.rows_host is not None:
-        work["rows_host"] = update.rows_host
+    work = dict(times=w.times, generation=w.generation, recv_ns=w.recv_ns)
+    if rows:
+        work["rows"] = update.rows_host if update.rows_host is not None else w.rows
     return work
