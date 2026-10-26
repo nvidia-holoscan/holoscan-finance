@@ -47,7 +47,7 @@ done
 if [[ "$MODE" == gpudirect ]]; then
     ACCEL+=(--mount "type=bind,src=$KERNEL_CACHE_DIR,dst=/kernel-cache" -e CUPY_CACHE_DIR=/kernel-cache)
 fi
-APP_ARGS=(applications/equity_analytics/equity_analytics.py --ingest "$MODE"
+APP_ARGS=(examples/equity_analytics/equity_analytics.py --ingest "$MODE"
     --host "$WEB_HOST" --port "$WEB_PORT" --udp-port "$UDP_PORT"
     --nic-pcie "$NIC_PCIE" --nic-master-core "$NIC_MASTER_CORE" --nic-rx-core "$NIC_RX_CORE"
     --cpu-threads "$CPU_THREADS" --analytics-backend "${ANALYTICS_BACKEND:-compare}")

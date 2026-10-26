@@ -1,6 +1,7 @@
 # Operators
 
-Ten Holoscan SDK 5.0 operators for streaming market data. Each is a thin adapter (ports,
+The ten Holoscan SDK 5.0 operators of the Holoscan Module for Financial Services Industry
+(`holoscan-finance`), for streaming market data. Each is a thin adapter (ports,
 Params, contract, lifecycle) around a library processor in `holoscan_finance` that holds the
 logic and is tested without Holoscan. Import them from `holoscan_finance.operators` (or the
 module alias `holoscan.finance.operators`); edge presets live in
@@ -22,9 +23,9 @@ module alias `holoscan.finance.operators`); edge presets live in
 
 ## Data flow
 
-The applications compose these operators in plain sight
-([equity_analytics](../applications/equity_analytics/README.md),
-[market_data_bench](../applications/market_data_bench/README.md)). Bracketed names are
+The example applications compose these operators in plain sight
+([equity_analytics](../examples/equity_analytics/README.md),
+[market_data_bench](../examples/market_data_bench/README.md)). Bracketed names are
 authored lanes (runtime threads); the `market_data_bench --check` reference adds a
 `reference` lane with a second `QuoteBarsOp(cpu)` fed by the same GPU source:
 
@@ -97,5 +98,5 @@ Applications author every lane with `graph.partition(name)` and place it with
 That is why a `CallbackSinkOp` shares its producer's lane, why `RiskSummaryOp` (fed only from
 the `analytics` lane) gets its own `topics` lane, and why the cross-check and its publisher
 form the `crosscheck` lane. Every operator is authored, so the compiler never creates an
-automatic partition; the applications check this and their edge policies on `plan.json()`
+automatic partition; the example applications check this and their edge policies on `plan.json()`
 before running.

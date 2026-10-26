@@ -1,36 +1,52 @@
-# Streaming NYQ equity analytics with Holoscan SDK 5
+# Holoscan Module for Financial Services Industry
 
-Replays one recorded trading day of LSEG NYQ trades and quotes as MITCH over UDP and
-continuously computes five-second quote returns, historical volatility and
-cross-instrument correlation. A Holoscan SDK 5 graph runs the receiver, MITCH decode,
-quote bars and analytics; custom CUDA kernels (CuPy) compute the rolling statistics on the
-GPU, and a NumPy/SciPy worker computes the same windows with the same algorithm on the CPU
-for comparison. With GPUDirect
-ingest, packets go from the NIC straight into GPU memory and CUDA kernels decode them and
-build the quote bars.
-
-The repository is the Holoscan module `holoscan-finance`: ten reusable, pure-Python
-operators in the package `holoscan_finance` (published by Holoscan as
-`holoscan.finance`), and two applications composed from them. It runs on the
+`holoscan-finance` is a self-contained [Holoscan SDK 5](https://developer.nvidia.com/holoscan-sdk)
+Module for building streaming financial-services applications. It provides reusable
+operators for market-data ingest, decoding, bar building and rolling risk analytics, the
+libraries behind them, command-line tools, and two example applications composed from the
+operators. Everything is pure Python: the package `holoscan_finance` is published by
+Holoscan as `holoscan.finance`, and the module runs on the
 `nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13` image with `holoscan-cli` 5.0.0.
+
+| The module provides | Where |
+| --- | --- |
+| Ten [operators](#operators): four receive sources (kernel UDP, DAQIRI into pinned host memory, DAQIRI GPUDirect into GPU memory, and a NIC-free GPU replay of a capture), MITCH decode, event-time quote bars, rolling GPU risk, a CPU cross-check, a callback sink and a holomq risk summary | `holoscan_finance.operators`; a catalog entry per operator under [operators/](operators/README.md) |
+| The libraries the operators wrap: the MITCH codec, CUDA decode and quote-bar kernels, the covariance engine, receive accounting, the control plane, telemetry and validation, all tested without Holoscan | `holoscan_finance.marketdata`, `nyq`, `ingest`, `analytics`, `control`, `telemetry`, `validation` |
+| Application plumbing (flags, authored lanes and CPU placement, plan rules, runner, drained predicate) and a web dashboard | `holoscan_finance.app`, `holoscan_finance.dashboard` |
+| CPU-only [tools](#tools): synthetic data, tape preparation, a paced replay sender, measurement and benchmarks | `holoscan_finance.tools` |
+| Two [example applications](#examples): a live dashboard and a headless, verified benchmark, both `holoscan run` targets | [examples/](examples/) |
+
+An application built on the module is a composition: it picks operators, wires them with
+the module's edge presets, places its lanes and states the plan rules it relies on. It
+defines no operator classes. [Composing an application](#composing-an-application) shows
+the pattern, [architecture](docs/ARCHITECTURE.md) explains how the examples are laid out,
+and [adding an operator](docs/ARCHITECTURE.md#adding-an-operator) extends the module.
+
+## Examples
+
+The examples replay one recorded trading day of LSEG NYQ trades and quotes as MITCH over
+UDP and continuously compute five-second quote returns, historical volatility and
+cross-instrument correlation. A Holoscan SDK 5 graph runs the receiver, MITCH decode, quote
+bars and analytics; custom CUDA kernels (CuPy) compute the rolling statistics on the GPU,
+and a NumPy/SciPy worker computes the same windows with the same algorithm on the CPU for
+comparison. With GPUDirect ingest, packets go from the NIC straight into GPU memory and
+CUDA kernels decode them and build the quote bars.
 
 **Data: historical LSEG/Refinitiv equity data — NYQ dataset** (April 1, 2025;
 licensed, not in Git). See [methodology](docs/METHODOLOGY.md) for the data, wire
-format and calculation conventions. Without it, the applications run on a deterministic
+format and calculation conventions. Without it, the examples run on a deterministic
 synthetic day (`python -m holoscan_finance.tools.synth`), which their `holoscan run` modes
 generate.
 
-## What the applications demonstrate
-
-| Application | What it is | Front ends |
+| Example | What it is | Front ends |
 | --- | --- | --- |
-| [`equity_analytics`](applications/equity_analytics/README.md) | The live dashboard: MITCH feed → quote bars → rolling risk → web UI, with an optional live CPU cross-check of every validated GPU window (`--analytics-backend compare`) | `udp` (kernel socket), `daqiri-host` (DAQIRI into pinned host memory), `gpudirect` (DAQIRI GPUDirect into GPU memory), `replay` (pcap frames staged in GPU memory: the GPUDirect chain without a NIC) |
-| [`market_data_bench`](applications/market_data_bench/README.md) | Headless, finite and verified: replays a pcap from GPU memory through gather → decode → quote bars (→ risk) and reports throughput, loss, lag and placement against pass/fail gates. With `--check`, the same decoded stream also feeds a CPU `QuoteBarsOp`, and every GPU window is compared with its CPU twin in the graph | `replay` |
+| [`equity_analytics`](examples/equity_analytics/README.md) | The live dashboard: MITCH feed → quote bars → rolling risk → web UI, with an optional live CPU cross-check of every validated GPU window (`--analytics-backend compare`) | `udp` (kernel socket), `daqiri-host` (DAQIRI into pinned host memory), `gpudirect` (DAQIRI GPUDirect into GPU memory), `replay` (pcap frames staged in GPU memory: the GPUDirect chain without a NIC) |
+| [`market_data_bench`](examples/market_data_bench/README.md) | Headless, finite and verified: replays a pcap from GPU memory through gather → decode → quote bars (→ risk) and reports throughput, loss, lag and placement against pass/fail gates. With `--check`, the same decoded stream also feeds a CPU `QuoteBarsOp`, and every GPU window is compared with its CPU twin in the graph | `replay` |
 
-Both are plain compositions: an application file builds the graph from
-`holoscan_finance.operators`, states the plan rules it promises, and calls shared plumbing.
-It defines no operator classes. The Holoscan 5 features they show, none of them on the
-per-packet path:
+Both are plain compositions: an example file builds the graph from
+`holoscan_finance.operators`, states the plan rules it promises, and calls the module's
+shared plumbing. It defines no operator classes. The Holoscan 5 features they show, none of
+them on the per-packet path:
 
 | Feature | `equity_analytics` | `market_data_bench` |
 | --- | --- | --- |
@@ -109,8 +125,12 @@ non-root container without DAQIRI. They run only through the Thor launchers in
 Each has a catalog entry with its ports, parameters, contract, recommended edges and
 threads under [operators/](operators/README.md). They are thin adapters around library
 classes in `holoscan_finance` that hold the logic and are tested without Holoscan.
-Applications import the canonical package; elsewhere use the alias, as in this
-simplified version of the `equity_analytics` replay chain:
+
+### Composing an application
+
+The examples import the canonical package `holoscan_finance`; an application outside this
+checkout uses the alias `holoscan.finance`, as in this simplified version of the
+`equity_analytics` replay chain:
 
 ```python
 import holoscan as hs
@@ -179,7 +199,7 @@ in [deploy/igx_thor](deploy/igx_thor/README.md).
 
 ## Results (Holoscan SDK 5.0, 2026-10-21 and 22)
 
-Measured on the final code on IGX Thor (14 Arm cores) with the RTX PRO 6000 Blackwell Max-Q
+Measured with the example applications and the module's tools, on the final code, on IGX Thor (14 Arm cores) with the RTX PRO 6000 Blackwell Max-Q
 GPU, in the Holoscan 5.0.0 image through `scripts/dev5.sh`, with no other GPU application
 on the host during the timed runs (runs during which another user's container appeared were
 repeated or replaced). The end-to-end, ingest and per-window runs of both passes kept the
@@ -263,7 +283,7 @@ The custom CUDA kernels are in
 [gpu_bars.py](python/holoscan_finance/marketdata/gpu_bars.py) and, for the analytics,
 [_risk_kernels.py](python/holoscan_finance/marketdata/_risk_kernels.py) (driven by
 [covariance.py](python/holoscan_finance/marketdata/covariance.py)). The graph is
-[equity_analytics.py](applications/equity_analytics/equity_analytics.py).
+[equity_analytics.py](examples/equity_analytics/equity_analytics.py).
 
 ### Data
 
@@ -280,8 +300,8 @@ The custom CUDA kernels are in
 | --- | --- |
 | `python/holoscan_finance/` | The package: `operators/` (the ten operators and edge presets), the libraries they wrap (`marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`), the dashboard, the shared app plumbing (`app`) and the tools |
 | `operators/<name>_op/` | Catalog entries: `metadata.json` and a README per operator ([index](operators/README.md)) |
-| `applications/<app>/` | The two applications: the composition, `metadata.json` (the `holoscan run` modes) and a README |
-| `metadata.json`, `pyproject.toml`, `CMakeLists.txt`, `Dockerfile` | Module metadata for holoscan-cli, the wheel, the build-tree staging (nothing is compiled) and the dev image |
+| `examples/<name>/` | The two example applications: the composition, `metadata.json` (the `holoscan run` modes) and a README |
+| `metadata.json`, `pyproject.toml`, `CMakeLists.txt`, `Dockerfile` | Module metadata for holoscan-cli (the examples are its `subprojects.applications`, the key the module schema uses), the wheel and the CLI search paths, the build-tree staging (nothing is compiled) and the dev image |
 | `tests/python/` | pytest tiers: `library`, `control`, `gpu`, `operators`, `graphs`, `app`, `e2e`, `packaging`, `deploy` |
 | `deploy/igx_thor/`, `docs/` | Thor launchers, the DAQIRI image and benchmarks; architecture, GPU ingest, methodology and validation docs |
 
@@ -318,10 +338,10 @@ Debian packages. Extras:
 
 ## Limits
 
-This is historical replay with live computation, not a production risk model. A full
+The examples are historical replay with live computation, not a production risk model. A full
 window has 60 returns, so the covariance matrix has rank at most 59; correlations are
-descriptive and noisy, and annualized volatility is not a forecast. The demo uses the
-supplied NYQ quote fields and does not reconstruct NBBO. Throughput is measured on one
+descriptive and noisy, and annualized volatility is not a forecast. The examples use the
+supplied NYQ quote fields and do not reconstruct NBBO. Throughput is measured on one
 host with a capture replayed at a uniform rate (from GPU memory, or with `tcpreplay` in PHY
 loopback), not with an external feed.
 

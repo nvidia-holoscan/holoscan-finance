@@ -3,7 +3,7 @@
 """The module's catalog metadata is valid for holoscan-cli 5.0.0 and agrees with the code.
 
 ``holoscan list``, ``modes``, ``build`` and ``run`` read the root ``metadata.json`` and the
-catalog entries under ``operators/`` and ``applications/``; the wheel and the CMake staging
+catalog entries under ``operators/`` and ``examples/``; the wheel and the CMake staging
 read ``pyproject.toml`` and ``CMakeLists.txt``. These checks keep the copies of the same facts
 (names, versions, the ``holoscan.finance`` entry point) from drifting.
 """
@@ -31,7 +31,7 @@ _spec.loader.exec_module(validate_metadata)
 
 
 def catalog(kind: str) -> list[str]:
-    """Catalog directories (with a metadata.json) under operators/ or applications/."""
+    """Catalog directories (with a metadata.json) under operators/ or examples/."""
     return sorted(path.parent.name for path in (REPO / kind).glob("*/metadata.json"))
 
 
@@ -61,7 +61,7 @@ def test_every_metadata_file_validates_against_the_cli_schemas_without_warnings(
 
 
 def test_every_metadata_file_is_a_holoscan_5_entry_with_the_module_authors():
-    # One author list for the module, its operators and its applications.
+    # One author list for the module, its operators and its example applications.
     authors = [a["name"] for a in MODULE["authors"]]
     assert authors == ["Bruce Hashemian", "Jake Goldberg"]
     files = sorted(validate_metadata.iter_metadata_files(REPO))
@@ -77,7 +77,8 @@ def test_every_metadata_file_is_a_holoscan_5_entry_with_the_module_authors():
 
 def test_subprojects_list_every_catalog_entry():
     assert sorted(MODULE["subprojects"]["operators"]) == catalog("operators")
-    assert sorted(MODULE["subprojects"]["applications"]) == catalog("applications")
+    # The module schema names the key "applications"; the directory is examples/.
+    assert sorted(MODULE["subprojects"]["applications"]) == catalog("examples")
 
 
 def test_operator_names_match_the_operator_registry_and_the_catalog():
@@ -90,10 +91,10 @@ def test_operator_names_match_the_operator_registry_and_the_catalog():
         assert name == snake_case(data["name"]), f"{name} holds {data['name']}"
 
 
-def test_applications_require_only_catalog_operators():
+def test_examples_require_only_catalog_operators():
     operators = set(catalog("operators"))
-    for name in catalog("applications"):
-        kind, data = entry(REPO / "applications" / name / "metadata.json")
+    for name in catalog("examples"):
+        kind, data = entry(REPO / "examples" / name / "metadata.json")
         assert kind == "application" and data["name"] == name
         required = set(data["requirements"].get("operators", []))
         assert required <= operators, f"{name} requires {sorted(required - operators)}"

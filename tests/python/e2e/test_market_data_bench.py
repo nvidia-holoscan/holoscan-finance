@@ -20,7 +20,7 @@ from apphelpers import REPO, child_env
 
 pytestmark = [pytest.mark.sdk, pytest.mark.gpu, pytest.mark.slow]
 
-BENCH = REPO / "applications" / "market_data_bench" / "market_data_bench.py"
+BENCH = REPO / "examples" / "market_data_bench" / "market_data_bench.py"
 
 
 def run(*argv: str) -> subprocess.CompletedProcess:

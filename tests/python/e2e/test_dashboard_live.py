@@ -28,7 +28,7 @@ httpx = pytest.importorskip("httpx")
 pytestmark = [pytest.mark.sdk, pytest.mark.gpu, pytest.mark.slow]
 
 REPO = Path(__file__).parents[3]
-APP = REPO / "applications/equity_analytics/equity_analytics.py"
+APP = REPO / "examples/equity_analytics/equity_analytics.py"
 WINDOW_BARS = 12  # --window-seconds 60 / --bar-seconds 5: a full window within seconds
 SNAPSHOT_KEYS = {
     "graph_status", "error", "comparison_failure", "settings",

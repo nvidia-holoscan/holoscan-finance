@@ -1,14 +1,15 @@
 # market_data_bench
 
-A headless, finite benchmark of the production GPU market-data chain, with no NIC. It
-replays the Ethernet frames of a MITCH capture from GPU memory through the same gather
-kernel, device ring, receive accounting, GPU MITCH decode and GPU quote bars as the
-GPUDirect path, optionally adds the GPU risk lane, and stops as soon as everything is
-decoded and built. It reports throughput, loss, replay lag and placement, applies gates
-to them, and with `--check` proves that every bar the GPU built is bit-identical to the
-CPU backend and to an independent host decode of the capture.
+An example application of the Holoscan Module for Financial Services Industry: a headless,
+finite benchmark of the production GPU market-data chain, with no NIC. It replays the
+Ethernet frames of a MITCH capture from GPU memory through the same gather kernel, device
+ring, receive accounting, GPU MITCH decode and GPU quote bars as the GPUDirect path,
+optionally adds the GPU risk lane, and stops as soon as everything is decoded and built. It
+reports throughput, loss, replay lag and placement, applies gates to them, and with
+`--check` proves that every bar the GPU built is bit-identical to the CPU backend and to an
+independent host decode of the capture.
 
-The application is one plain composition of `holoscan.finance` operators
+The example is one plain composition of the module's operators
 ([`market_data_bench.py`](market_data_bench.py), with no operator classes of its own):
 
 ```text
@@ -58,7 +59,7 @@ Or directly, from the repository root inside the Holoscan 5.0 image
 
 ```bash
 python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 50000 --seconds 1800 --reuse
-python3 applications/market_data_bench/market_data_bench.py \
+python3 examples/market_data_bench/market_data_bench.py \
     --pcap data/synth/day.pcap --tape data/synth/tape --pps 0 --check --require-lossless --report out/check.json
 ```
 

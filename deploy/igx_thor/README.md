@@ -50,7 +50,7 @@ they import only `holoscan_finance` tools, which never import the SDK.
 The launcher mounts this checkout read-only and checks imports (Holoscan SDK 5, the
 operators, DAQIRI with the bindings the ingest mode needs), GPU, NIC vendor, CPU affinity
 and hugepages before starting; DAQIRI failure never falls back to sockets. The receiver
-runs `applications/equity_analytics/equity_analytics.py --ingest daqiri-host|gpudirect` with
+runs `examples/equity_analytics/equity_analytics.py --ingest daqiri-host|gpudirect` with
 `--nic-pcie`, `--nic-master-core` and `--nic-rx-core` from the variables below. It gets a
 private IPC namespace with `--shm-size=4g`, never `--ipc=host`: DPDK needs the
 bind-mounted `/dev/hugepages`, not the host's IPC namespace, and a root Holoscan 5 process

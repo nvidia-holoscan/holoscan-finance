@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Application test helpers: load an app by file path, parse its flags, build dry contexts.
 
-The applications are scripts, not package modules, so ``load_app`` imports
-``applications/<name>/<name>.py`` by path. ``dry_equity_context`` holds the objects that
+The example applications are scripts, not package modules, so ``load_app`` imports
+``examples/<name>/<name>.py`` by path. ``dry_equity_context`` holds the objects that
 ``equity_analytics.compose()`` and ``rules()`` read, with no I/O, no GPU and no control
 plane, so the plan tests compile every mode and option on the CPU-only tier; their CPU
 sets come from ``runner.cpu_sets``, which leaves the test process as it is. ``child_env``
@@ -32,8 +32,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 @functools.cache
 def load_app(name: str) -> ModuleType:
-    """``applications/<name>/<name>.py`` as a module named ``app_<name>`` (loaded once)."""
-    path = REPO / "applications" / name / f"{name}.py"
+    """``examples/<name>/<name>.py`` as a module named ``app_<name>`` (loaded once)."""
+    path = REPO / "examples" / name / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"app_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

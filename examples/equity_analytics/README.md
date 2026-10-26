@@ -1,11 +1,12 @@
 # equity_analytics
 
-A live NYQ equity dashboard on Holoscan SDK 5. The MITCH feed flows into five-second quote
-bars, then rolling volatility, covariance and correlation on the GPU, then a web page. In
-the default `compare` mode, a CPU worker recomputes every validated window alongside, so
+An example application of the Holoscan Module for Financial Services Industry: a live NYQ
+equity dashboard on Holoscan SDK 5. The MITCH feed flows into five-second quote bars, then
+rolling volatility, covariance and correlation on the GPU, then a web page. In the default
+`compare` mode, a CPU worker recomputes every validated window alongside, so
 each published GPU result has a matched CPU result.
 
-The application is one plain composition of `holoscan.finance` operators
+The example is one plain composition of the module's operators
 ([`equity_analytics.py`](equity_analytics.py), with no operator classes of its own). Only
 the front end changes between ingest modes; every operator after it is shared:
 
@@ -58,7 +59,7 @@ image (`scripts/dev5.sh '<command>'`):
 
 ```bash
 python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 50000 --seconds 1800 --reuse
-python3 applications/equity_analytics/equity_analytics.py --ingest replay \
+python3 examples/equity_analytics/equity_analytics.py --ingest replay \
     --pcap data/synth/day.pcap --tape data/synth/tape --replay-pps 0 \
     --port 0 --exit-when-drained --report out/eq.json
 ```

@@ -38,7 +38,7 @@ def test_smoke_mode_drains_analyzes_and_agrees(tmp_path: Path) -> None:
     assert synth.returncode == 0, synth.stderr[-3000:]
 
     done = run(
-        str(REPO / "applications/equity_analytics/equity_analytics.py"),
+        str(REPO / "examples/equity_analytics/equity_analytics.py"),
         "--ingest", "replay", "--pcap", str(data / "day.pcap"), "--tape", str(data / "tape"),
         "--replay-pps", "0", "--port", "0", "--exit-when-drained", "--timeout-s", "300",
         "--analytics-backend", "compare", "--expect-windows", "1", "--report", str(report),

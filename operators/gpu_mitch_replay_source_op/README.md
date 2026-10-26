@@ -51,7 +51,7 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
 | `nic_bufs` | int | `0` | `0`: hold forever. Otherwise a NIC buffer model (paced only): due frames beyond `nic_bufs` are dropped oldest first and show up as sequence gaps. A forming burst occupies buffers too, so it must cover `pps × rx_timeout` |
 | `start_delay_ms` | int | `0` | delay before the first frame is due |
 | `on_loop` | `Ref` | `Ref()` | `callable(pass_index) -> sender port \| None`, called only before pass k ≥ 1, after everything gathered was released and `settled` holds; a returned port is written into the feed frames' UDP source port |
-| `settled` | `Ref` | `Ref()` | `callable() -> bool`: before pass k ≥ 1 the drain also waits until it is true, so that every decoded batch has reached the bars (the applications pass `DrainedCondition.batches_consumed`); empty: no wait |
+| `settled` | `Ref` | `Ref()` | `callable() -> bool`: before pass k ≥ 1 the drain also waits until it is true, so that every decoded batch has reached the bars (the example applications pass `DrainedCondition.batches_consumed`); empty: no wait |
 | `keep_alive` | bool | `False` | `False`: the input ends after the last pass (`stats.eof`) |
 
 ## Behaviour

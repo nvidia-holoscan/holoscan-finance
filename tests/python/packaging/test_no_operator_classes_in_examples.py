@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Applications compose the module's operators; they never define their own.
+"""The example applications compose the module's operators; they never define their own.
 
-An application file is a ``compose()`` over ``holoscan_finance.operators`` plus settings and
+An example file is a ``compose()`` over ``holoscan_finance.operators`` plus settings and
 plan rules, so every operator stays reusable, documented in the catalog and testable on its
-own. This scans the application sources (AST, no import) for classes derived from
+own. This scans the sources under ``examples/`` (AST, no import) for classes derived from
 ``hs.Operator`` or from any ``...Op`` class.
 """
 
@@ -27,8 +27,8 @@ def operator_classes(path: Path) -> list[str]:
     return found
 
 
-def test_applications_define_no_operator_classes():
-    sources = sorted((REPO / "applications").rglob("*.py"))
-    assert sources, "no application sources found"
+def test_examples_define_no_operator_classes():
+    sources = sorted((REPO / "examples").rglob("*.py"))
+    assert sources, "no example sources found"
     offenders = [cls for path in sources for cls in operator_classes(path)]
     assert not offenders, "move these into holoscan_finance.operators:\n" + "\n".join(offenders)

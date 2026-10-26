@@ -1,15 +1,15 @@
 # Architecture
 
-How the two applications are put together on Holoscan SDK 5: the graphs, the lanes they
-run on, what flows between operators, how the dashboard reaches the data plane, and the
-performance invariants the layout protects. The operator reference is the
+How the module's two example applications are put together on Holoscan SDK 5: the graphs,
+the lanes they run on, what flows between operators, how the dashboard reaches the data
+plane, and the performance invariants the layout protects. The operator reference is the
 [catalog](../operators/README.md).
 
 ## Layers
 
 | Layer | Where | Imports |
 | --- | --- | --- |
-| Applications | `applications/<app>/<app>.py`: `compose()`, `rules()` and a short `main()` | `holoscan`, `holoscan_finance` |
+| Example applications | `examples/<app>/<app>.py`: `compose()`, `rules()` and a short `main()` | `holoscan`, `holoscan_finance` |
 | Shared app plumbing | `holoscan_finance.app` (CLI, CPU sets and lanes, contexts, runner, plan rules), `holoscan_finance.dashboard` | `holoscan` only inside functions; FastAPI in the server |
 | Operators | `holoscan_finance.operators`: ten thin adapters (ports, `Param`s, contract, lifecycle) | `holoscan` |
 | Library | `marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`, `tools` | NumPy; CuPy, SciPy, DuckDB and the rest only inside functions |
@@ -97,7 +97,7 @@ run in spawned worker processes (`gpu_window`, `cpu_window`): Python decode keep
 busy, and running SciPy or the GPU engine in the same process measurably slows both. The
 worker keeps the window it analyzed last, so risk sends it only each window's new bars.
 A spawned worker re-imports the application's top-level imports (Holoscan, FastAPI) once,
-when its pool starts in the operator's `start()`; the applications keep all work under
+when its pool starts in the operator's `start()`; the example applications keep all work under
 `main()`, so nothing runs twice. In host `compare` mode the CPU cross-check of a window
 starts when its GPU result is ready, so the host-mode `cpu_receive_to_result_ms` includes
 the GPU job; `cpu_ms`, `gpu_ms` and the speedup are measured inside the engines and

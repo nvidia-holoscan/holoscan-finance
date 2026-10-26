@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "holoscan-finance"
 version = "0.2.0"
-description = "Streaming NYQ equity analytics on Holoscan SDK 5: MITCH ingest (UDP, DAQIRI, GPUDirect, NIC-free replay), quote bars, rolling GPU risk."
+description = "Holoscan Module for Financial Services Industry: reusable Holoscan SDK 5 operators for streaming market data (MITCH ingest over UDP, DAQIRI, GPUDirect or NIC-free replay; quote bars; rolling GPU risk) and example applications."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -38,7 +38,7 @@ holoscan_finance = ["py.typed", "dashboard/webui/*.html", "ingest/native/*.cpp"]
 cuda = 13
 workspace-name = "holoscan-finance"
 forward-env = ["CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "HOLOSCAN_FINANCE_NATIVE_DRAIN", "HOLOSCAN_FINANCE_FAULTS"]
-search-paths = ["operators", "applications"]
+search-paths = ["operators", "examples"]
 docker-run-args = ["--tmpfs=/dev/shm:rw,exec,size=4g"]      # never share the host /dev/shm (SECURITY.md, shared-memory topics); no --as-root needed
 
 [tool.holoscan.base-images]

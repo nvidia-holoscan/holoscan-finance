@@ -120,8 +120,8 @@ threads: `scripts/dev5.sh` gives the container 12 CPUs, numba refuses more, and 
 ### 4. Graph bit identity (`market_data_bench --check`)
 
 ```bash
-python3 applications/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 0 --check --require-lossless --report out/check.json
-python3 applications/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 200000 --check --require-lossless --report out/check_200k.json
+python3 examples/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 0 --check --require-lossless --report out/check.json
+python3 examples/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 200000 --check --require-lossless --report out/check_200k.json
 ```
 
 Pass: `ok`; every `check.*` value true; `max_ulps ≤ 1`. The source holds every batch until
@@ -131,7 +131,7 @@ GPU chain (step 6 measures throughput).
 ### 5. Paced lossless (timing pass, 3 runs)
 
 ```bash
-python3 applications/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 200000 --nic-bufs 114688 --risk gpu --require-lossless --require-realtime --max-lag-p99-ms 5 --report out/paced_<i>.json
+python3 examples/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 200000 --nic-bufs 114688 --risk gpu --require-lossless --require-realtime --max-lag-p99-ms 5 --report out/paced_<i>.json
 ```
 
 Pass: all three runs `ok`.
@@ -139,7 +139,7 @@ Pass: all three runs `ok`.
 ### 6. Throughput headroom (timing pass)
 
 ```bash
-python3 applications/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 0 --report out/tput_<i>.json
+python3 examples/market_data_bench/market_data_bench.py --pcap data/nyq/day.pcap --tape data/nyq/tape --pps 0 --report out/tput_<i>.json
 ```
 
 Pass: `msgs_per_s ≥ 13.2e6`, twice the 6.6M msgs/s line rate, in every run (two runs
@@ -148,7 +148,7 @@ here); otherwise the fallback of a separate `bars` lane is evaluated and reporte
 ### 7. Full chain with compare (timing pass)
 
 ```bash
-python3 applications/equity_analytics/equity_analytics.py --ingest replay --pcap data/nyq/day.pcap --tape data/nyq/tape --replay-pps 200000 --analytics-backend compare --port 0 --exit-when-drained --report out/chain.json --expect-windows 10
+python3 examples/equity_analytics/equity_analytics.py --ingest replay --pcap data/nyq/day.pcap --tape data/nyq/tape --replay-pps 200000 --analytics-backend compare --port 0 --exit-when-drained --report out/chain.json --expect-windows 10
 ```
 
 Pass: exit 0; every comparison `agreement and matched_work`; `receive_to_result_ms` p50 and
@@ -178,13 +178,13 @@ python3 -m holoscan_finance.tools.risk_bench --kinds 500 --cadence-ms 0 --sizes 
 python3 -m holoscan_finance.tools.risk_bench --kinds 300 --sizes 50 --backends gpu,gpu-host,cpu,compare --returns data/nyq/bars.npz --check --out out/kinds_50.json --table out/kinds_50.md
 ```
 
-The engines as the applications call them: `gpu` is `RollingRiskOp` inline on device bars
+The engines as the example applications call them: `gpu` is `RollingRiskOp` inline on device bars
 (the `replay` and `gpudirect` front ends); `gpu-host` and `cpu` are the spawned workers'
 functions, fed each window's new bars, as risk and the CPU cross-check send them (the GPU
 worker of the host front ends, and the CPU-only run); `compare` runs compare mode's two
 processors, the GPU `RollingRisk` validating every window and the CPU cross-check's spawned
 worker recomputing it, one validated window at a time, and reports both times. The CPU
-workers are tuned for the universe before the first window, as the applications tune them
+workers are tuned for the universe before the first window, as the example applications tune them
 when the manifest arrives. `--kinds C` times every window kind `C` times per size and
 backend, one cycle per new generation (as after a start or a seek): the first, 20-bar window
 of a generation (`first`), one-bar growth (`growth`), a full window that shares nothing with
@@ -218,13 +218,13 @@ The [separate-runs method](METHODOLOGY.md#separate-cpu-only-and-gpu-only-benchma
 localhost UDP, and the replay front end, each in one `scripts/dev5.sh` shell:
 
 ```bash
-python3 applications/equity_analytics/equity_analytics.py --ingest udp --analytics-backend cpu --port 8080 &   # then gpu
+python3 examples/equity_analytics/equity_analytics.py --ingest udp --analytics-backend cpu --port 8080 &   # then gpu
 # the sender waits until the receiver's /healthz answers 200 (its UDP socket is bound):
 python3 -m holoscan_finance.tools.replay_sender --data data/nyq/tape --port 26400 --control-url http://127.0.0.1:8080 &
 python3 -m holoscan_finance.tools.measure --seconds 120 --rate 75000 --output out/cpu-only.json                # gpu-only.json
 python3 -m holoscan_finance.tools.compare_runs --cpu out/cpu-only.json --gpu out/gpu-only.json --all-shared --output out/separate.json
 
-python3 applications/equity_analytics/equity_analytics.py --ingest replay --pcap data/nyq/day.pcap --tape data/nyq/tape --replay-pps 2344 --analytics-backend gpu --port 8080 &   # or compare
+python3 examples/equity_analytics/equity_analytics.py --ingest replay --pcap data/nyq/day.pcap --tape data/nyq/tape --replay-pps 2344 --analytics-backend gpu --port 8080 &   # or compare
 python3 -m holoscan_finance.tools.measure --seconds 120 --rate 75000 --output out/replay-gpu.json
 ```
 
@@ -288,7 +288,7 @@ groups and 8.67× at 131k. GPU decode alone is not faster at 16k-message groups:
 numba thread, but 0.49× four, 0.31× eight and 0.28× twelve. The numba rows are single runs
 of short timed steps, and their thread scaling is uneven (twelve threads are the fastest at
 16k-message groups and slower than eight at 131k). `decode_bench` times one pass per process,
-so its GPU figures include a one-time cost of the first pass, which the applications pay in
+so its GPU figures include a one-time cost of the first pass, which the example applications pay in
 the operators' `start()` warm-up, before data.
 
 ### Steps 5 and 6, paced and unpaced

@@ -34,7 +34,7 @@ processors: ``RollingRisk`` validating every window on the GPU (as ``gpu``) and
 ``CpuCrossCheck``'s spawned CPU worker recomputing it, one validated window at a time as
 the gate keeps them; it reports both engines' times per kind and checks every pair
 (agreement and matched work). The CPU workers are tuned for the universe before the first
-window, as the applications tune them when the manifest arrives. With ``--check`` the
+window, as the example applications tune them when the manifest arrives. With ``--check`` the
 results of the first ``--check-cycles`` cycles of each pass are checked against the NumPy
 oracle and, for ``gpu`` and ``gpu-host``, against the ``cpu`` backend's. The run ends with
 a table of p50 / p99 per size, pass and kind (also written to ``--table``), and

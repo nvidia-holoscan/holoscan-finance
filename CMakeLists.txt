@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(holoscan_finance
     VERSION 0.2.0
-    DESCRIPTION "Streaming NYQ equity analytics on Holoscan SDK 5"
+    DESCRIPTION "Holoscan Module for Financial Services Industry: streaming financial-services applications on Holoscan SDK 5"
     LANGUAGES NONE)
 
 if(NOT DEFINED FINANCE_BUILD_TESTING)

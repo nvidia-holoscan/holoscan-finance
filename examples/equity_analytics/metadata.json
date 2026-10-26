@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:application:v1",
   "application": {
     "name": "equity_analytics",
-    "description": "NYQ MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
+    "description": "Example application of the holoscan-finance module: NYQ MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -16,7 +16,7 @@
     "language": ["Python"],
     "version": "0.2.0",
     "changelog": {
-      "0.2.0": "Holoscan SDK 5.0 application composed from holoscan.finance operators."
+      "0.2.0": "Holoscan SDK 5.0 example application composed from holoscan.finance operators."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:application:v1",
   "application": {
     "name": "market_data_bench",
-    "description": "NIC-free MITCH replay through the production GPU chain (gather, decode, quote bars, optional risk): throughput, loss and lag gates, and in-graph GPU vs CPU bit identity.",
+    "description": "Example application of the holoscan-finance module: NIC-free MITCH replay through the production GPU chain (gather, decode, quote bars, optional risk) with throughput, loss and lag gates, and in-graph GPU vs CPU bit identity.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -16,7 +16,7 @@
     "language": ["Python"],
     "version": "0.2.0",
     "changelog": {
-      "0.2.0": "Holoscan SDK 5.0 application composed from holoscan.finance operators."
+      "0.2.0": "Holoscan SDK 5.0 example application composed from holoscan.finance operators."
     },
     "holoscan_sdk": {
       "minimum_required_version": "5.0.0",

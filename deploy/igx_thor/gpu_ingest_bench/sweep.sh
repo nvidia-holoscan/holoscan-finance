@@ -61,7 +61,7 @@ for mode in $MODES; do
         --cap-add IPC_LOCK --cap-add NET_ADMIN --cap-add SYS_NICE --ulimit memlock=-1 --ulimit stack=67108864 \
         -e HOLOSCAN_FINANCE_REPO=/workspace/holoscan-finance -e NVIDIA_DISABLE_REQUIRE=1 -e NVIDIA_VISIBLE_DEVICES=all \
         -e DAQIRI_DV_FLOW_EN=1 -e DAQIRI_RX_FLOW_GROUP=0 ${GPU:+-e CUDA_VISIBLE_DEVICES=$GPU} \
-        "$IMAGE" bash deploy/igx_thor/run_python.sh applications/equity_analytics/equity_analytics.py \
+        "$IMAGE" bash deploy/igx_thor/run_python.sh examples/equity_analytics/equity_analytics.py \
         --host 127.0.0.1 --port 8080 --udp-port 26400 --analytics-backend "$BACKEND" "${extra[@]}" >/dev/null
     for _ in $(seq 120); do curl -s --max-time 2 -o /dev/null "$U/feedrate" && break; sleep 2; done
     sleep 10; loopback; sleep 3

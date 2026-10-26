@@ -4,7 +4,7 @@
         "name": "holoscan-finance",
         "version": "0.2.0",
         "support_level": "community",
-        "description": "Streaming NYQ equity analytics on Holoscan SDK 5: pure-Python operators for MITCH ingest (kernel UDP, DAQIRI host memory, DAQIRI GPUDirect, NIC-free GPU replay), event-time quote bars, rolling GPU risk with a CPU cross-check, and the equity_analytics and market_data_bench applications.",
+        "description": "Holoscan Module for Financial Services Industry: a self-contained Holoscan SDK 5 module for building streaming financial-services applications. Pure-Python operators for MITCH ingest (kernel UDP, DAQIRI host memory, DAQIRI GPUDirect, NIC-free GPU replay), event-time quote bars and rolling GPU risk with a CPU cross-check, the libraries behind them, CPU-only tools, and the equity_analytics and market_data_bench example applications.",
         "authors": [
             {
                 "name": "Bruce Hashemian",

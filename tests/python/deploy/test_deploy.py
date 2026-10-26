@@ -70,7 +70,7 @@ def option(argv: list[str], flag: str) -> str:
 def test_external_receiver_runs_the_app_without_local_sender_or_loopback():
     commands = dry_run(NIC_PCIE="0000:81:00.0", GPU_UUID="GPU-test", WEB_PORT="8091")
     receiver = receiver_of(commands)
-    app = receiver.index("applications/equity_analytics/equity_analytics.py")
+    app = receiver.index("examples/equity_analytics/equity_analytics.py")
     assert receiver[app - 1] == "deploy/igx_thor/run_python.sh"
     assert option(receiver, "--ingest") == "daqiri-host"
     assert option(receiver, "--nic-pcie") == "0000:81:00.0"

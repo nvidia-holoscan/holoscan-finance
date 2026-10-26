@@ -7,7 +7,7 @@ rolling covariance/correlation analytics then run in the receiving process on th
 device-resident window (`RollingRiskOp`); the CPU comparator and the dashboard are the
 same as on the host paths.
 
-The front end is one flag on the same graph (`applications/equity_analytics`):
+The front end is one flag on the same graph (`examples/equity_analytics`):
 
 ```bash
 --ingest udp          # kernel UDP socket; Python decode
@@ -236,7 +236,7 @@ The numba rows are single runs of short timed steps, and their thread scaling is
 (twelve threads are the fastest at 16k-message groups and slower than eight at 131k). The
 CPU "decode + bars" columns are limited by the NumPy quote bars, which are single-threaded;
 a compiled CPU bars stage was not written. `decode_bench` times one pass per process, so its
-GPU figures include a one-time first-pass cost; the applications pay it in the operators'
+GPU figures include a one-time first-pass cost; the example applications pay it in the operators'
 `start()` warm-up, before data.
 
 What this shows:

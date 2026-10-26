@@ -1,4 +1,4 @@
-# Security Policy: Holoscan Finance
+# Security Policy: Holoscan Module for Financial Services Industry
 
 NVIDIA is dedicated to the security and trust of our software products and services, including
 all source code repositories managed through our organization.
@@ -43,14 +43,16 @@ policy.
 
 ## Security Architecture & Context
 
-`holoscan-finance` is a [Holoscan SDK 5](https://github.com/nvidia-holoscan) module for streaming
-market-data analytics. The Python package `holoscan_finance` (public alias `holoscan.finance`)
+`holoscan-finance` is the Holoscan Module for Financial Services Industry: a self-contained
+[Holoscan SDK 5](https://github.com/nvidia-holoscan) module for building streaming
+financial-services applications. The Python package `holoscan_finance` (public alias `holoscan.finance`)
 provides ten operators: four receive sources (`GpuMitchSourceOp`, `GpuMitchReplaySourceOp`,
 `UdpPacketSourceOp`, `DaqiriPacketSourceOp`), `MitchDecodeOp`, `QuoteBarsOp`, `RollingRiskOp`,
 `RiskCrossCheckOp`, `CallbackSinkOp` and `RiskSummaryOp`. It also provides the libraries behind
 them: the MITCH codec, CUDA decode and quote-bar kernels, the covariance engine, and the control
-plane and web dashboard. Two applications compose these operators. `equity_analytics` is a live
-web dashboard; `market_data_bench` is a headless benchmark that reads only capture files.
+plane and web dashboard. Two example applications under `examples/` compose these operators:
+`equity_analytics` is a live web dashboard; `market_data_bench` is a headless benchmark that
+reads only capture files.
 Command-line tools cover replay, data preparation, validation and benchmarks, and
 `deploy/igx_thor` holds the launchers for an IGX Thor with a ConnectX NIC.
 
@@ -91,7 +93,7 @@ released under Apache-2.0; this document is written to public-safe detail.
 
 **Service Exposure Classification:** External / Regulated (medium confidence).
 Basis: the Apache-2.0 module is distributed externally as a platform-independent wheel for
-financial-services workloads. Its dashboard application opens network listeners when run. The
+financial-services workloads. Its example dashboard application opens network listeners when run. The
 repository contains no live service, credentials or customer data, and the licensed market data
 used for benchmarks is kept out of Git.
 
@@ -341,7 +343,7 @@ In scope for a security report:
 
 - The distributed Python package under `python/holoscan_finance/`, including the native drain
   source and the CUDA kernel sources it compiles at run time.
-- The applications under `applications/` and the operator catalog under `operators/`.
+- The example applications under `examples/` and the operator catalog under `operators/`.
 - Packet parsing, input validation and resource handling in the receive sources, decoders, bars,
   analytics, dashboard and control plane.
 - The deployment launchers, benchmark scripts and Dockerfiles under `deploy/igx_thor/`, and the

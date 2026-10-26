@@ -1,6 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Streaming NYQ equity analytics on Holoscan SDK 5, exposed as ``holoscan.finance``.
+"""Holoscan Module for Financial Services Industry, exposed as ``holoscan.finance``.
+
+A self-contained Holoscan SDK 5 module for building streaming financial-services
+applications: reusable operators for market-data ingest, decoding, quote bars and rolling
+risk, the libraries behind them, and CPU-only tools. The example applications composed from
+the operators live under ``examples/`` in the repository.
 
 Importing the package imports nothing else: ``Ref``/``Knob``, the payload classes and the
 ten operator classes resolve on first access, so the CPU tools and the library modules run

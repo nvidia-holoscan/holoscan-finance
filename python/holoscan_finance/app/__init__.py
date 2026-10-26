@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Plumbing shared by the applications, so an application file is only its composition.
+"""Plumbing shared by applications built on the module, so an application file is only its composition.
 
 ``cli`` (flags and their checks), ``context`` (the control plane and telemetry objects of a
 run), ``placement`` (authored lanes and their CPU placement), ``plan`` (rules checked on

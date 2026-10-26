@@ -250,7 +250,7 @@ def test_queue_policy_ints_are_calibrated() -> None:
 
 def run_app(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(REPO / "applications/equity_analytics/equity_analytics.py"), *argv],
+        [sys.executable, str(REPO / "examples/equity_analytics/equity_analytics.py"), *argv],
         capture_output=True,
         text=True,
         timeout=120,
