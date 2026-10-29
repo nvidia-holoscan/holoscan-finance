@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Shared configuration for the NYQ equity demo launch and teardown scripts.
+# Shared configuration for the synthetic equity demo launch and teardown scripts.
 set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$DEPLOY_DIR/../.." && pwd)"
@@ -13,6 +13,7 @@ MST_IMAGE="${MST_IMAGE:-holoscan-finance:mst}"
 APP_NAME="${APP_NAME:-fin-equities-receiver}"
 FEED_NAME="${FEED_NAME:-fin-equities-feed}"
 OWNER_LABEL="com.nvidia.holoscan-finance.demo"
+# Keep this identifier so teardown can restore settings from previously launched containers.
 OWNER_VALUE="${OWNER_VALUE:-nyq-equities}"
 NIC_PCIE="${NIC_PCIE:-0004:03:00.0}"
 NIC_NAME="${NIC_NAME:-enP4p3s0f0np0}"
@@ -29,7 +30,7 @@ WEB_PORT="${WEB_PORT:-8080}"
 CONTROL_HOST="$WEB_HOST"
 if [[ "$CONTROL_HOST" == 0.0.0.0 ]]; then CONTROL_HOST=127.0.0.1; fi
 UDP_PORT="${UDP_PORT:-26400}"
-TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/nyq/tape}"
+TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/synth/tape}"
 GPU_UUID="${GPU_UUID:-}"
 # daqiri-host: DAQIRI into pinned host memory, Python MITCH decode.
 # gpudirect: DAQIRI GPUDirect into GPU memory, CUDA gather + MITCH decode + quote bars.
@@ -40,7 +41,7 @@ CPU_THREADS="${CPU_THREADS:-0}"
 SPEED="${SPEED:-10}"
 RATE="${RATE:-50000}"
 READY_TIMEOUT="${READY_TIMEOUT:-90}"
-# Optional full-day button: tcpreplay a captured day (gpu_ingest_bench/capture.sh) at line rate.
+# Optional full-day button: tcpreplay a synthetic capture at the requested packet rate.
 FULLDAY_PCAP="${FULLDAY_PCAP:-}"
 FULLDAY_BASE_PORT="${FULLDAY_BASE_PORT:-}"
 FULLDAY_PACKETS="${FULLDAY_PACKETS:-}"
@@ -61,8 +62,8 @@ irq_ctl() {
         "$RECEIVER_IMAGE" /irq_isolate.py "$@"
 }
 # NVIDIA GPUs that runtime-suspend when idle (Thor's iGPU). While one is suspended, the
-# first new CUDA memory allocation in the receiver wakes it (~0.13 s, holding the receiver's
-# interpreter lock), so INGEST=gpudirect keeps them powered while the receiver runs.
+# first new CUDA memory allocation in the receiver wakes it while holding the receiver's
+# interpreter lock, so INGEST=gpudirect keeps them powered while the receiver runs.
 gpu_pm_auto() {
     local d
     for d in /sys/bus/pci/devices/*; do

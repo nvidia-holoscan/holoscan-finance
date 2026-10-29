@@ -12,7 +12,7 @@ plane, and the performance invariants the layout protects. The operator referenc
 | Example applications | `examples/<app>/<app>.py`: `compose()`, `rules()` and a short `main()` | `holoscan`, `holoscan_finance` |
 | Shared app plumbing | `holoscan_finance.app` (CLI, CPU sets and lanes, contexts, runner, plan rules), `holoscan_finance.dashboard` | `holoscan` only inside functions; FastAPI in the server |
 | Operators | `holoscan_finance.operators`: ten thin adapters (ports, `Param`s, contract, lifecycle) | `holoscan` |
-| Library | `marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`, `tools` | NumPy; CuPy, SciPy, DuckDB and the rest only inside functions |
+| Library | `marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`, `tools` | NumPy; CuPy, SciPy and the rest only inside functions |
 
 Each operator wraps a library *processor* that holds the logic and is tested without
 Holoscan: `GpuIngest` (both GPU sources), `UdpReceiver`, `DaqiriHostReceiver`,
@@ -94,7 +94,7 @@ flowchart LR
 
 The `crosscheck` and `topics` lanes are the same as above. On host front ends the analytics
 run in spawned worker processes (`gpu_window`, `cpu_window`): Python decode keeps the GIL
-busy, and running SciPy or the GPU engine in the same process measurably slows both. The
+busy, so separate processes let SciPy and the GPU engine run independently of that work. The
 worker keeps the window it analyzed last, so risk sends it only each window's new bars.
 A spawned worker re-imports the application's top-level imports (Holoscan, FastAPI) once,
 when its pool starts in the operator's `start()`; the example applications keep all work under

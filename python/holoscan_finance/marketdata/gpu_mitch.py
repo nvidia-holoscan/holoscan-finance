@@ -11,7 +11,7 @@ accepted packets, in wire order, into compact structure-of-arrays columns.
 Status per packet: 0 = decoded, 1 = rejected by ``inspect_unit`` (the receiver's
 framing check), 2 = rejected by ``parse_unit``/``decode_packet``. Every rejection
 rule of the host decoder is reproduced; ``gpu_validate`` checks field-for-field
-equality over a full recorded trading day.
+equality over generated replay captures and mutated packets.
 
 ``gather_frame`` (via :func:`receive_frames`, one launch per burst) copies UDP payloads
 out of the raw Ethernet frames DAQIRI DMA'd into GPU memory, applying

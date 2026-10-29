@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
     "name": "MitchDecodeOp",
-    "description": "Python reference MITCH (MIT303 11.9) decoder: host packet batches in, NYQ observation batches out, under the current feed directory.",
+    "description": "Python reference MITCH (MIT303 11.9) decoder: host packet batches in, equity observation batches out, under the current feed directory.",
     "authors": [
       {
         "name": "Bruce Hashemian",

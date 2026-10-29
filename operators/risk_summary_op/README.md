@@ -1,8 +1,7 @@
 # RiskSummaryOp
 
 A compact JSON summary of every risk update, for other processes over a holomq topic. Used
-only with `equity_analytics --topics`; off by default and absent from every measured
-configuration.
+only with `equity_analytics --topics`; off by default.
 
 ```text
 risk (RiskUpdate) → {"g","t","n","vol","corr","ms","bars","r2r"} → summary (String, ≤ max_bytes) → holomq://finance.risk

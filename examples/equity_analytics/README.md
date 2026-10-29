@@ -1,14 +1,51 @@
 # equity_analytics
 
-An example application of the Holoscan Module for Financial Services Industry: a live NYQ
+An example application of the Holoscan Module for Financial Services Industry: a live
 equity dashboard on Holoscan SDK 5. The MITCH feed flows into five-second quote bars, then
 rolling volatility, covariance and correlation on the GPU, then a web page. In the default
 `compare` mode, a CPU worker recomputes every validated window alongside, so
 each published GPU result has a matched CPU result.
 
 The example is one plain composition of the module's operators
-([`equity_analytics.py`](equity_analytics.py), with no operator classes of its own). Only
-the front end changes between ingest modes; every operator after it is shared:
+([`equity_analytics.py`](equity_analytics.py), with no operator classes of its own). Its
+graph by lane, with the policy and depth of every edge; a run has one `source`, the GPU
+row or the host row, chosen by `--ingest`:
+
+```mermaid
+flowchart TB
+    subgraph lane_ingest["lane ingest"]
+        gsrc["source · GPU front ends<br/>GpuMitchReplaySourceOp (replay) or GpuMitchSourceOp (gpudirect)<br/>GPU gather + MITCH decode fused"]
+        hsrc["source · host front ends<br/>UdpPacketSourceOp (udp) or DaqiriPacketSourceOp (daqiri-host)"]
+        decode["decode · MitchDecodeOp<br/>host front ends only"]
+        bars["bars · QuoteBarsOp<br/>gpu with GPU front ends, cpu with host front ends"]
+        gsrc -->|"events · lossless(4)"| bars
+        hsrc -->|"packets · lossless(16)"| decode
+        decode -->|"events · lossless(16)"| bars
+    end
+    subgraph lane_analytics["lane analytics"]
+        risk["risk · RollingRiskOp<br/>gpu inline with GPU front ends, spawned process with host front ends"]
+        publish["publish · CallbackSinkOp<br/>ResultsStore.on_risk"]
+        risk -->|"risk · lossless(8)"| publish
+    end
+    bars -->|"window · LATEST (DROP_OLDEST, depth 1)<br/>bars never wait for risk"| risk
+    subgraph lane_crosscheck["lane crosscheck · compare mode only"]
+        crosscheck["crosscheck · RiskCrossCheckOp<br/>CPU twin of every validated GPU window"]
+        publish_comparison["publish_comparison · CallbackSinkOp<br/>ResultsStore.on_comparison, which releases the gate"]
+        crosscheck -->|"comparison · lossless(2)"| publish_comparison
+    end
+    risk -->|"validate · lossless(2)"| crosscheck
+    subgraph lane_topics["lane topics · --topics only"]
+        risk_summary["risk_summary · RiskSummaryOp"]
+    end
+    risk -->|"risk · LATEST"| risk_summary
+    risk_summary -->|"summary · LATEST"| topic[("holomq://finance.risk<br/>export_topic")]
+    publish -.-> dashboard["ResultsStore → web dashboard and control plane (FastAPI)"]
+    publish_comparison -.-> dashboard
+    classDef outside stroke-dasharray: 5 3
+    class topic,dashboard outside
+```
+
+Only the front end changes between ingest modes; every operator after it is shared:
 
 | `--ingest` | Front end (lane `ingest`) | Bars | Risk (lane `analytics`) |
 | --- | --- | --- | --- |
@@ -16,15 +53,6 @@ the front end changes between ingest modes; every operator after it is shared:
 | `gpudirect` | `GpuMitchSourceOp`: DAQIRI GPUDirect into GPU memory, GPU gather + MITCH decode | `QuoteBarsOp(gpu)` | `RollingRiskOp(gpu, inline)` |
 | `udp` | `UdpPacketSourceOp` (kernel socket) → `MitchDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
 | `daqiri-host` | `DaqiriPacketSourceOp` (DAQIRI into pinned host memory) → `MitchDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
-
-```text
-lane        edges into the lane's operators
-ingest      source ─lossless(4)─► bars                                  GPU front ends (decode fused)
-            source ─lossless(16)─► decode ─lossless(16)─► bars          host front ends
-analytics   bars ─LATEST─► risk ─lossless(8)─► publish                  bars never wait for risk
-crosscheck  risk.validate ─lossless(2)─► crosscheck ─lossless(2)─► publish_comparison   compare only
-topics      risk ─LATEST─► risk_summary ─LATEST─► holomq://finance.risk                  --topics only
-```
 
 GPU front ends always run GPU analytics (`compare` or `gpu`), so market data never reaches
 the CPU.
@@ -36,7 +64,7 @@ With the Holoscan CLI (`holoscan run equity_analytics <mode>`), on any GPU host:
 | Mode | What it does |
 | --- | --- |
 | `replay` (default) | writes a synthetic day with `holoscan_finance.tools.synth`, replays it from GPU memory at 2,000 packets/s in a loop (each pass is a new generation), dashboard on port 8080 |
-| `replay_pcap` | replays a recorded day, `nyq/day.pcap` and its prepared tape `nyq/tape` in the data directory, at 200,000 packets/s |
+| `replay_pcap` | generates a full synthetic day under `synth-day/` and replays it once at 200,000 packets/s |
 | `udp` | kernel UDP ingest with the CPU cross-check; start `python3 -m holoscan_finance.tools.replay_sender` separately |
 | `udp_cpu` | kernel UDP ingest with CPU analytics only |
 | `smoke` | CI: a small synthetic day, unpaced and headless; exits non-zero if the run fails, no window is analyzed or a comparison disagrees |
@@ -58,9 +86,9 @@ For a headless, finite run directly from the repository root inside the Holoscan
 image (`scripts/dev5.sh '<command>'`):
 
 ```bash
-python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 50000 --seconds 1800 --reuse
+python3 -m holoscan_finance.tools.synth --out data/synth-small --symbols 500 --packets 50000 --seconds 1800 --reuse
 python3 examples/equity_analytics/equity_analytics.py --ingest replay \
-    --pcap data/synth/day.pcap --tape data/synth/tape --replay-pps 0 \
+    --pcap data/synth-small/day.pcap --tape data/synth-small/tape --replay-pps 0 \
     --port 0 --exit-when-drained --report out/eq.json
 ```
 
@@ -125,10 +153,9 @@ from holoscan.finance import Ref
 
 ## Data
 
-Every mode runs on deterministic synthetic data (`python3 -m holoscan_finance.tools.synth`):
-a tape in the prepared format plus its MITCH capture. A recorded day of licensed LSEG NYQ
-trades and quotes is not in Git; prepare its tape with
-`python3 -m holoscan_finance.tools.prepare_tape` and send it over UDP with
-`python3 -m holoscan_finance.tools.replay_sender`, or replay a capture of it with
-`--ingest replay`. Methodology: [docs/METHODOLOGY.md](../../docs/METHODOLOGY.md); results
-and setup: [README](../../README.md).
+The replay modes generate deterministic synthetic data automatically. For UDP modes,
+generate a tape with `python3 -m holoscan_finance.tools.synth` and send it with
+`python3 -m holoscan_finance.tools.replay_sender`; see the
+[synthetic UDP instructions](../../README.md#synthetic-udp-replay).
+Methodology: [docs/METHODOLOGY.md](../../docs/METHODOLOGY.md);
+validation: [docs/VALIDATION.md](../../docs/VALIDATION.md).

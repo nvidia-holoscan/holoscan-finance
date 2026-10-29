@@ -53,7 +53,7 @@ def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:
 def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAPI:
     """The dashboard's FastAPI app over ``model`` and the control objects of ``ctx``.
     ``lifespan`` (used by ``serve``) owns the graph session."""
-    app = FastAPI(title="NYQ equity price, volatility and correlation", lifespan=lifespan)
+    app = FastAPI(title="Equity price, volatility and correlation", lifespan=lifespan)
     # Handlers carry no return annotation: one would make FastAPI validate every snapshot
     # against a response model instead of plain JSON encoding.
 

@@ -2,35 +2,35 @@
 
 ## Data
 
-The source is LSEG/Refinitiv NYQ equity trade/quote Parquet for April 1, 2025
-(**historical LSEG/Refinitiv equity data — NYQ dataset**). LSEG defines NYQ as
-consolidated instruments primarily listed on NYSE; NYS denotes the NYSE venue. See
-[LSEG's NYQ/NYS definitions](https://community.developers.lseg.com/discussion/103024/difference-between-idn-exchange-id-nys-and-nyq).
-The NYQ label does not certify this extract's quote coverage or NBBO semantics, and
-the prepared tape does not keep the contributor field.
+`python -m holoscan_finance.tools.synth` generates deterministic equity observations,
+a replay tape and an Ethernet/IPv4/UDP pcap. A fixed seed controls per-symbol price levels,
+spreads, volatility and random walks with a common market factor. The stream includes
+quotes, trades and condition markers, with rare invalid quotes and halts to exercise
+rejection and recovery. Symbols use generated names in a manifest directory.
 
-Preparation (`python -m holoscan_finance.tools.prepare_tape`) keeps Quote, Trade and
-Mkt. Condition records from the regular 09:30–16:00 New York session (IANA timezone),
-sorted by source timestamp, internal sequence, instrument ID and kind. Missing numeric fields stay NaN;
-values stay float64; instrument names go to a directory.
+The tape stores time-ordered observations, with prices and quantities in float64 fields. `--seconds` sets the
+span after 09:30 New York; `--symbols`, `--packets` and `--max-events-per-packet` set the
+universe and volume. A final status marker closes the last bar. `synth.json` records the
+seed, generation arguments, file sizes and exact expected capture counts. See
+[synthetic inputs](VALIDATION.md#synthetic-inputs) for commands.
 
 ## Wire format: MITCH replay
 
 Sender and receivers use the binary layouts and unit framing of
 [MIT303 issue 11.9](https://docs.londonstockexchange.com/sites/default/files/documents/mit303issue119.pdf).
 The UDP payload starts with the MITCH unit header; there is no other envelope or
-hidden timing field. This is historical NYQ data re-encoded for replay, not exchange
-packets: LSE retired its MITCH service in 2019.
+hidden timing field. The generator encodes synthetic observations in these layouts for
+replay; the packets do not represent an exchange feed.
 
-| NYQ input | MITCH message | Replay interpretation |
+| Synthetic input | MITCH message | Replay interpretation |
 | --- | --- | --- |
 | Market timestamp | Time (`T`) plus message nanosecond offset | Source date and New York midnight come from the HTTP manifest. A Time message starts every unit and repeats when the second changes. |
 | Bid/ask prices and displayed sizes | Top of Book (`q`) | Both sides travel together; no individual orders are invented. |
-| Trade price and volume | Trade (`P`) | Observed trade with a generated replay trade ID. |
+| Trade price and volume | Trade (`P`) | Synthetic trade with a generated replay trade ID. |
 | Recognized halt / other condition | Symbol Status (`H`) | Halt (`H`) or regular-session (`T`) marker. |
-| RIC | Instrument ID | One-based replay directory ID; full RICs stay in the HTTP directory. |
+| Symbol name | Instrument ID | One-based replay directory ID; full names stay in the HTTP directory. |
 
-The `q` and `P` **layouts** are reused for consolidated quotes and trades; no LSE
+The `q` and `P` **layouts** are reused for synthetic quotes and trades; no LSE
 auction state, order book or trade-correction service is reconstructed. Instrument
 IDs, trade IDs and market-data group `A` are local replay identifiers.
 
@@ -55,8 +55,8 @@ packets invalidate the affected marks, and malformed messages are rejected and c
 ## Quote rules and returns
 
 A quote is usable when bid and ask are finite and positive, ask ≥ bid, both sizes are
-positive, the spread is at most 100 basis points of the midpoint, and `HALT_REASN` is
-zero. Invalid updates invalidate the mark. Trades are displayed separately and never
+positive, the spread is at most 100 basis points of the midpoint, and the halt flag is
+clear. Invalid updates invalidate the mark. Trades are displayed separately and never
 enter the return estimator; observed volume is not an official exchange total.
 
 At each five-second event-time boundary the bar uses the last valid midpoint strictly
@@ -101,8 +101,8 @@ Both backends run one algorithm in float64 (`marketdata/covariance.py`):
   The relative error of `C` then stays below about 1e5 × 1e-16 × (updates), about 1e-9.
   The decision reads only the window, the exact squares and `C`, so both backends take it
   on the same windows (only an exact tie at the threshold, between two roundings of `C`,
-  could differ). In every comparison of [VALIDATION.md](VALIDATION.md) steps 7 and 11 on
-  the recorded day, both backends chose the same method for every window.
+  could differ). The [synthetic validation](VALIDATION.md#full-chain-with-compare) checks
+  that both backends choose the same method on each compared window.
 - **No N_e × N_e matrix.** Volatilities come from the diagonal, and the heatmap and the
   probes from 24 × 24 and 32 × 32 blocks of `C`. The mean correlation is one
   matrix-vector product, `((d·Cd − (d·t)²/n)/(n−1) − N_e)/(N_e(N_e−1))` with `d = 1/σ` on
@@ -213,11 +213,14 @@ MITCH carries no sender wall-clock time, so sender-to-receiver latency is unavai
 The separate-runs CPU/GPU speedup comes from two separate streaming runs, one with CPU
 analytics only and one with GPU analytics only, on the same host front end, so that both
 stamp arrivals the same way. Without the NIC, both runs use the `udp` front end and
-`replay_sender` over localhost in one container ([VALIDATION.md, step 11](VALIDATION.md#11-separate-cpu-only-and-gpu-only-runs-nic-free-timing-pass)).
+`replay_sender` over localhost in one container ([validation procedure](VALIDATION.md#separate-cpu-and-gpu-runs)).
 On Thor with the NIC, they use the launcher's default host-memory ingest
 (`INGEST=daqiri-host`; `fin-equities-receiver` is the launchers' default `APP_NAME`):
 
 ```bash
+PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD/python" python3 -m holoscan_finance.tools.synth \
+    --out data/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse
+export TAPE_DIR="$PWD/data/synth-day/tape"
 for backend in cpu gpu; do
     bash deploy/igx_thor/igx_down.sh
     ANALYTICS_BACKEND="$backend" bash deploy/igx_thor/igx_run.sh
@@ -229,14 +232,14 @@ done
 bash deploy/igx_thor/igx_down.sh
 ANALYTICS_BACKEND=compare bash deploy/igx_thor/igx_run.sh
 
-PYTHONPATH=python python3 -m holoscan_finance.tools.compare_runs \
+PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD/python" python3 -m holoscan_finance.tools.compare_runs \
     --cpu /tmp/cpu-only.json --gpu /tmp/gpu-only.json \
     --all-shared --output /tmp/separate-streaming.json
 ```
 
 `measure` seeks to 14:00 UTC, requests 75,000 observations/s, waits for a full window
-and an agreeing CPU comparison, records 120 s and restores the previous replay
-settings. It keeps every window whose triggering packet arrived in the interval and
+(and an agreeing CPU comparison in `compare` mode), records 120 s and restores the
+previous replay settings. It keeps every window whose triggering packet arrived in the interval and
 computes p50/p99 with NumPy's default interpolation. Sequence gaps, a generation
 change, failed agreement, missing comparisons or more than three million packets
 invalidate the capture.

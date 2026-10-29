@@ -239,7 +239,7 @@ def test_manifest_idempotence_and_422s():
     r = client.post("/manifest", json=manifest(6, 50001))
     assert r.status_code == 422 and "port must be new" in r.json()["detail"]
     r = client.post("/manifest", json={**manifest(7, 50004), "symbols": []})
-    assert r.status_code == 422 and r.json()["detail"] == "invalid NYQ directory or generation"
+    assert r.status_code == 422 and r.json()["detail"] == "invalid replay directory or generation"
     assert client.post("/manifest", json=[1, 2]).status_code == 422  # not an object
     assert client.get("/snapshot").json()["generation"] == 5
 

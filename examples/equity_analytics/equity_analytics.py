@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""NYQ MITCH -> quote bars -> rolling risk -> web dashboard, composed from holoscan.finance operators.
+"""equity MITCH -> quote bars -> rolling risk -> web dashboard, composed from holoscan.finance operators.
 
 The front end (kernel socket, DAQIRI host memory, DAQIRI GPUDirect, or NIC-free GPU replay) is
 chosen in compose(); everything downstream is shared. `holoscan run equity_analytics <mode>`.

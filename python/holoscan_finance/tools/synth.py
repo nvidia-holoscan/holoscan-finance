@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Write a deterministic synthetic NYQ day: a tape, its wire capture and a summary.
+"""Write a deterministic synthetic equity day: a tape, its wire capture and a summary.
 
     python -m holoscan_finance.tools.synth --out DIR [--symbols 500] [--packets 20000]
         [--seconds 600] [--seed 7] [--sender-port 40000] [--drop-every 0]
@@ -9,8 +9,8 @@
 ``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the replay
 sender's packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
 counts and expected totals (``capture``: what a lossless receiver of the pcap counts).
-``--reuse`` keeps an existing directory made with identical arguments. CPU-only, so every
-test and the NIC-free validation run without licensed data.
+``--reuse`` keeps an existing directory made with identical arguments. Generation is
+CPU-only; the outputs support tests and NIC-free validation.
 """
 
 from __future__ import annotations

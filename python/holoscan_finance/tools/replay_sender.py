@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Memory-mapped NYQ trade/quote replay over UDP with pause, speed and seek.
+"""Memory-mapped equity trade/quote replay over UDP with pause, speed and seek.
 
     python -m holoscan_finance.tools.replay_sender --data TAPE [--host 127.0.0.1] [--port 26400]
         [--control-url http://127.0.0.1:8080] [--loops 0] [--ready-timeout 180]
@@ -71,7 +71,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m holoscan_finance.tools.replay_sender", description=__doc__.splitlines()[0]
     )
-    p.add_argument("--data", required=True, help="tape directory (tools.prepare_tape or synth)")
+    p.add_argument("--data", required=True, help="synthetic tape directory (tools.synth)")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=26400)
     p.add_argument("--control-url", default="http://127.0.0.1:8080")
@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.ready_timeout > 0:
         wait_ready(a.control_url, a.ready_timeout)
     print(
-        f"MITCH NYQ replay: {len(rows):,} observations / {len(manifest['symbols']):,} RICs -> {target}",
+        f"MITCH equity replay: {len(rows):,} observations / {len(manifest['symbols']):,} instruments -> {target}",
         flush=True,
     )
     while a.loops == 0 or loops < a.loops:

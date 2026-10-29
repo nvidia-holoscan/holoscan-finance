@@ -10,15 +10,35 @@ reports throughput, loss, replay lag and placement, applies gates to them, and w
 independent host decode of the capture.
 
 The example is one plain composition of the module's operators
-([`market_data_bench.py`](market_data_bench.py), with no operator classes of its own):
+([`market_data_bench.py`](market_data_bench.py), with no operator classes of its own). Its
+graph by lane, with the policy and depth of every edge; the `windows` sink and the
+`reference` lane exist only with `--check`, the `analytics` lane only with `--risk gpu`:
 
-```text
-lane ingest:     source ─lossless(4)─► bars ─lossless(64)─► windows        (windows: --check)
-                   │                    │ LATEST (newest window only)       (--risk gpu)
-                   │                    ▼
-lane analytics:    │                   risk ─lossless(8)─► publish
-                   │ fan-out, lossless(8)                                     (--check)
-lane reference:    └──────────────────► ref_bars ─lossless(64)─► ref_windows
+```mermaid
+flowchart TB
+    subgraph lane_ingest["lane ingest"]
+        source["source · GpuMitchReplaySourceOp<br/>pcap frames in GPU memory, DAQIRI burst rule, paced at --pps, optional NIC buffer model"]
+        bars["bars · QuoteBarsOp(backend=gpu)"]
+        windows["windows · CallbackSinkOp<br/>every GPU window, in order, to the checker"]
+        source -->|"events · lossless(4)"| bars
+        bars -->|"window · lossless(64) · --check only"| windows
+    end
+    subgraph lane_reference["lane reference · --check only"]
+        ref_bars["ref_bars · QuoteBarsOp(backend=cpu)<br/>the CPU twin, fed the very same decoded batches"]
+        ref_windows["ref_windows · CallbackSinkOp<br/>every CPU window to the checker"]
+        ref_bars -->|"window · lossless(64)"| ref_windows
+    end
+    source -->|"events · lossless(8) · fan-out, --check only<br/>the source holds a batch until both bars accept it"| ref_bars
+    subgraph lane_analytics["lane analytics · --risk gpu only"]
+        risk["risk · RollingRiskOp(gpu, inline)<br/>the analytics load of the full chain"]
+        publish["publish · CallbackSinkOp"]
+        risk -->|"risk · lossless(8)"| publish
+    end
+    bars -->|"window · LATEST (DROP_OLDEST, depth 1)<br/>newest window only"| risk
+    windows -.-> checker["checker · after the run: GPU windows paired with CPU twins by (generation, completed_bars), every GPU bar against a host decode of the pcap (HostReference)"]
+    ref_windows -.-> checker
+    classDef outside stroke-dasharray: 5 3
+    class checker outside
 ```
 
 | Operator | Class | Role |
@@ -51,16 +71,16 @@ With the Holoscan CLI (`holoscan run market_data_bench <mode>`), on any GPU host
 | `paced` | a full synthetic day (2,886 symbols, 2.88M packets) at 200,000 packets/s with the NIC buffer model and GPU risk: lossless, real time, replay lag p99 ≤ 5 ms |
 | `throughput` | the full synthetic day unpaced: at least 13.2M MITCH messages/s (twice the 200k packets/s line rate) |
 | `drops` | a capture with every 997th packet missing, `--check`: the gaps and the bars after them match the CPU backend and the host decode |
-| `pcap` | a recorded day, `<data>/nyq/day.pcap` and its prepared tape `<data>/nyq/tape`, at 200,000 packets/s |
+| `pcap` | generates a full synthetic day under `synth-day/` and replays it at 200,000 packets/s: lossless and real time |
 | `plan` | compiles the `--check --risk gpu` composition, checks its rules and writes `market_data_bench.plan.json` |
 
 Or directly, from the repository root inside the Holoscan 5.0 image
 (`scripts/dev5.sh '<command>'`):
 
 ```bash
-python3 -m holoscan_finance.tools.synth --out data/synth --symbols 500 --packets 50000 --seconds 1800 --reuse
+python3 -m holoscan_finance.tools.synth --out data/synth-small --symbols 500 --packets 50000 --seconds 1800 --reuse
 python3 examples/market_data_bench/market_data_bench.py \
-    --pcap data/synth/day.pcap --tape data/synth/tape --pps 0 --check --require-lossless --report out/check.json
+    --pcap data/synth-small/day.pcap --tape data/synth-small/tape --pps 0 --check --require-lossless --report out/check.json
 ```
 
 | Flags | Meaning |
@@ -110,7 +130,7 @@ requested gate holds:
 
 The replay drain is a Python thread, so these runs validate function, bit identity,
 throughput headroom and paced losslessness, not resilience to GIL stalls: that claim stays
-with the native drain on the NIC. Results and the exact commands are in
+with the native drain on the NIC. Validation commands and reporting guidance are in
 [`docs/VALIDATION.md`](../../docs/VALIDATION.md).
 
 Python code imports the canonical package, `holoscan_finance`; with the module installed,

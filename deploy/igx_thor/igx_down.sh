@@ -52,4 +52,4 @@ if [[ "$(label fwupd-timer)" == active ]]; then
         echo "warning: could not restart fwupd-refresh.timer" >&2
 fi
 docker rm "$APP_NAME"
-echo "NYQ equity demo stopped."
+echo "Synthetic equity demo stopped."

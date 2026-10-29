@@ -25,7 +25,7 @@ import numpy as np
 from ..nyq.mapping import PROTOCOL
 from ..settings import GPU_INGEST_MODES
 
-TRANSPORT = "MITCH (MIT303 11.9) / UDP · NYQ replay mapping"
+TRANSPORT = "MITCH (MIT303 11.9) / UDP · equity replay mapping"
 MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
 PAYLOAD_PATHS = {
     "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU MITCH decode",

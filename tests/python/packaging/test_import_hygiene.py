@@ -9,7 +9,7 @@ only in the Thor receiver image, so it is held to the same rule. Each library mo
 imported in a fresh interpreter with ``sys.modules`` entries for ``holoscan``, ``cupy`` and
 ``daqiri`` set to None, so any module-level import of them fails. Only the operator modules
 (``operators/<op>.py``, ``_common``, ``edges``) and ``tools/topic_tail`` may import the SDK
-at module level; a module whose optional third-party dependency (FastAPI, duckdb, ...) is
+at module level; a module whose optional third-party dependency (FastAPI, SciPy, ...) is
 missing here is skipped.
 """
 

@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""NYQ observations mapped to MIT303 11.9 T/q/P/H messages for replay.
+"""equity observations mapped to MIT303 11.9 T/q/P/H messages for replay.
 
 The q/P layouts are reused for consolidated quotes/trades; their original LSE
 auction/hidden-trade semantics are not asserted. See docs/METHODOLOGY.md.
-Dates, RIC directory and sender-session identity come from the HTTP manifest.
+Dates, instrument directory and sender-session identity come from the HTTP manifest.
 There are no custom trailers or timestamps hidden in exchange identifier fields.
 ``decode_packet`` is the host oracle the GPU decoder matches bit for bit.
 """
@@ -136,7 +136,7 @@ def decode_packet(data, recv_ns, *, generation, midnight_ns, universe):
         elif kind == ord("P"):
             _, _, ns, volume, symbol, price, _, cross, subbook, flags = mitch.TRADE.unpack(message)
             if bytes(message[14:16]) != b"\0\0" or cross or subbook or flags:
-                raise ValueError("unsupported MITCH trade semantics for NYQ replay")
+                raise ValueError("unsupported MITCH trade semantics for equity replay")
             rows[count]["kind"] = TRADE
             rows[count]["price"], rows[count]["volume"] = mitch.price_from_wire(price), volume
         else:
@@ -152,7 +152,7 @@ def decode_packet(data, recv_ns, *, generation, midnight_ns, universe):
                 or end != b"        "
                 or book != 1
             ):
-                raise ValueError("unsupported MITCH status semantics for NYQ replay")
+                raise ValueError("unsupported MITCH status semantics for equity replay")
             rows[count]["kind"] = CONDITION
             rows[count]["flags"] = HALTED if status == b"H" else 0
         timestamp = midnight_ns + seconds * 10**9 + ns

@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Deterministic synthetic NYQ data: replay units, fuzzed units, tapes and pcap captures.
+"""Deterministic synthetic equity data: replay units, fuzzed units, tapes and pcap captures.
 
 ``synthetic_stream`` and ``fuzz`` generate random but valid units covering every observation
 kind (one-sided, negative and halted quotes, trades, conditions, several Time seconds per
 packet) and mutations aimed at each rejection rule. ``synthetic_tape`` writes a tape in the
 ``open_tape`` format and ``synthetic_capture`` packetizes a tape as ``tools.replay_sender``
-sends it, into a pcap; with them every test and the NIC-free validation run without the
-licensed data. NumPy only.
+sends it, into a pcap. These generated inputs support tests and NIC-free validation.
+NumPy only.
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ def synthetic_tape(
         "start_ns": start_ns,
         "end_ns": start_ns + span,
         "record_bytes": EVENT_DTYPE.itemsize,
-        # As tape.prepare: [UTC second of day, observations] per minute.
+        # [UTC second of day, observations] per minute.
         "profile": [
             [int(start_ns // 10**9 % 86400 + i * 60), int(c)] for i, c in enumerate(profile)
         ],

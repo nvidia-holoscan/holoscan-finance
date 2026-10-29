@@ -57,7 +57,7 @@ def add_plan_flags(p: argparse.ArgumentParser) -> None:
 
 def equity_analytics_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="NYQ MITCH -> quote bars -> rolling risk -> web dashboard on Holoscan 5."
+        description="equity MITCH -> quote bars -> rolling risk -> web dashboard on Holoscan 5."
     )
 
     g = p.add_argument_group("dashboard")

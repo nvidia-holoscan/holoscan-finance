@@ -71,9 +71,9 @@
         }
       },
       "pcap": {
-        "description": "A recorded day (data/nyq/day.pcap and its tape) at 200k packets/s: lossless and real time",
+        "description": "A full synthetic day at 200k packets/s: lossless and real time",
         "run": {
-          "command": "python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --pps 200000 --nic-bufs 114688 --require-lossless --require-realtime",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --require-lossless --require-realtime\"",
           "workdir": "holohub_bin"
         }
       },

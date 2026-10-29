@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Launch the NYQ receiver with DAQIRI/ConnectX RX (and optionally the sender,
+# Launch the synthetic equity receiver with DAQIRI/ConnectX RX (and optionally the sender,
 # PHY loopback and the full-day replay controller). See README.md beside this file.
 # shellcheck source=deploy/igx_thor/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -96,7 +96,7 @@ if [[ "$DRY_RUN" == 0 ]]; then
         fi
     done
     if [[ "$START_FEED" == 1 ]]; then
-        [[ -f "$TAPE_DIR/manifest.json" && -f "$TAPE_DIR/events.bin" ]] || fail "prepare NYQ data first; expected manifest.json and events.bin in $TAPE_DIR"
+        [[ -f "$TAPE_DIR/manifest.json" && -f "$TAPE_DIR/events.bin" ]] || fail "generate synthetic data first; expected manifest.json and events.bin in $TAPE_DIR (see deploy/igx_thor/README.md)"
     fi
     if [[ "$LOOPBACK" == 1 ]]; then
         docker image inspect "$MST_IMAGE" >/dev/null || fail "MST_IMAGE is required for PHY loopback"
@@ -152,5 +152,5 @@ if [[ "$LOOPBACK" == 1 ]]; then
 fi
 if [[ "$START_FEED" == 1 ]]; then run "${FEED[@]}"; fi
 if [[ -n "$FULLDAY_PCAP" ]]; then run "${REPLAY[@]}"; fi
-printf 'NYQ equity demo: http://127.0.0.1:%s/ (%s RX, UDP destination port %s)\n' "$WEB_PORT" "$MODE" "$UDP_PORT"
+printf 'Synthetic equity demo: http://127.0.0.1:%s/ (%s RX, UDP destination port %s)\n' "$WEB_PORT" "$MODE" "$UDP_PORT"
 printf 'Stop: APP_NAME=%q bash %q/igx_down.sh\n' "$APP_NAME" "$DEPLOY_DIR"

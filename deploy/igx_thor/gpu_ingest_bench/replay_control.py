@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Replay controller for the dashboard's full-day button: tcpreplay a captured day at a given rate.
+"""Replay controller for the dashboard's full-day button: tcpreplay synthetic data at a given rate.
 
 The dashboard POSTs /replay/fullday to the ingest app, which pauses its paced sender and
 forwards ``{"pps": N}`` here. Each start registers a new replay generation (the receiver only
 accepts a fresh UDP source port per generation), then tcpreplays the capture
-rewritten to that port. Rewriting the full capture takes ~10 s, so one rewritten copy
-is prepared ahead in the background -- after each replay finishes, never during one
+rewritten to that port. One rewritten copy is prepared ahead in the background --
+after each replay finishes, never during one
 (rewriting competes with the receiver for CPU and memory bandwidth).
 
 Runs privileged with host networking (tcpreplay writes raw frames on the NIC):
 
-    python3 replay_control.py --pcap data/nyq/day.pcap --base-port <PORT> --packets <PACKETS> \\
+    python3 replay_control.py --pcap data/synth/day.pcap --base-port <PORT> --packets <PACKETS> \\
         --nic enP4p3s0f0np0 --tcpreplay-dir ~/tools/root/usr/bin --app http://127.0.0.1:8080 \\
-        --tape data/nyq/tape --work <WORK_DIR>
+        --tape data/synth/tape --work <WORK_DIR>
 """
 
 from __future__ import annotations

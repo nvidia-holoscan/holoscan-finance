@@ -58,7 +58,7 @@ def _number(value: object) -> bool:
 def validate_manifest(payload: dict) -> FeedDirectory:
     """Every manifest check plus the market day; ValueError on any failure."""
     if not isinstance(payload, dict):
-        raise ValueError("invalid NYQ directory or generation")
+        raise ValueError("invalid replay directory or generation")
     symbols = payload.get("symbols")
     generation = payload.get("generation")
     if (
@@ -85,7 +85,7 @@ def validate_manifest(payload: dict) -> FeedDirectory:
             for p in payload["profile"]
         )
     ):
-        raise ValueError("invalid NYQ directory or generation")
+        raise ValueError("invalid replay directory or generation")
     midnight_ns = day_start_ns(payload["date"])  # ValueError for an invalid date
     # A private deep copy: the caller (an HTTP body, a replay loop's base manifest) may reuse
     # or mutate its dict after publication.

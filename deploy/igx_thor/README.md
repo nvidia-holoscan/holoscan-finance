@@ -15,10 +15,9 @@ INGEST=gpudirect:   MITCH / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect,
 To run the same GPU chain without a NIC, use the `replay` mode of `equity_analytics`
 (pcap frames staged in GPU memory; see the [main README](../../README.md)).
 
-Design and method: [GPUDirect ingest](../../docs/GPU_INGEST.md). Of the NIC runs of this
-code, only a [short check](../../docs/VALIDATION.md#short-nic-check) with these launchers is
-recorded (PHY loopback, the paced Python sender); NIC-free results are in
-[docs/VALIDATION.md](../../docs/VALIDATION.md).
+Design and method: [GPUDirect ingest](../../docs/GPU_INGEST.md). Follow the
+[synthetic validation guide](../../docs/VALIDATION.md) for correctness checks and record
+fresh hardware measurements for any NIC throughput claim.
 
 ## Prepare the platform
 
@@ -57,8 +56,16 @@ bind-mounted `/dev/hugepages`, not the host's IPC namespace, and a root Holoscan
 with `--ipc=host` leaves a root-owned shared-memory file in the host's `/dev/shm` that
 breaks later non-root Holoscan runs.
 
-The receiver needs no tape; the sender needs the prepared `manifest.json` and
-`events.bin` (see the [main README](../../README.md#the-licensed-day)).
+The receiver needs no tape; generate the sender's `manifest.json` and `events.bin`
+from the repository root (see [synthetic UDP replay](../../README.md#synthetic-udp-replay)):
+
+```bash
+PYTHONPATH=python python3 -m holoscan_finance.tools.synth --out data/synth \
+    --symbols 1000 --packets 400000 --seconds 23400 --seed 7 --reuse
+```
+
+This writes `data/synth/tape`, `data/synth/day.pcap` and `data/synth/synth.json`, using
+the same generation settings as the default equity replay demo.
 
 ## One-host PHY loopback
 
@@ -69,14 +76,14 @@ build `MST_IMAGE`; use any image with NVIDIA MFT (`mstlink`, `mstreg`), `iproute
 `tcpdump` and `nsenter`, tagged `holoscan-finance:mst` or named by `MST_IMAGE`.
 
 ```bash
-export NIC_PCIE=0004:03:00.0 NIC_NAME=enP4p3s0f0np0   # TAPE_DIR: the repo's data/nyq/tape
+export NIC_PCIE=0004:03:00.0 NIC_NAME=enP4p3s0f0np0   # TAPE_DIR: the repo's data/synth/tape
 LOOPBACK=1 bash deploy/igx_thor/igx_run.sh --dry-run
 LOOPBACK=1 bash deploy/igx_thor/igx_run.sh
 bash deploy/igx_thor/igx_down.sh   # stop
 ```
 
 Launch order: preflight, receiver, HTTP readiness, PHY loopback, sender. Existing
-containers are never replaced or adopted (ownership label `nyq-equities`); a failed
+containers are never replaced or adopted; an ownership label identifies this demo. A failed
 start removes only what it created. Teardown restores the NIC's addresses, PHY
 loopback, link state and NetworkManager management from the receiver's labels; a
 failed cleanup keeps the labels so it can be retried. Pass `APP_NAME` again if you
@@ -88,7 +95,7 @@ customized it.
 NIC_PCIE=0004:03:00.0 NIC_MASTER_CORE=3 NIC_RX_CORE=9 \
     WEB_HOST=0.0.0.0 bash deploy/igx_thor/igx_run.sh
 # on the sender:
-PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender --data data/nyq/tape \
+PYTHONPATH=python python3 -m holoscan_finance.tools.replay_sender --data data/synth/tape \
     --host RECEIVER_CONNECTX_IP --port 26400 \
     --control-url http://RECEIVER_MANAGEMENT_IP:8080
 ```
@@ -111,14 +118,14 @@ network.
 | `LOOPBACK_CIDR`, `LOOPBACK_PEER` | `192.168.100.1/24`, `192.168.100.2` | Test network |
 | `FEED_HOST` | loopback peer if enabled | Local sender destination |
 | `WEB_HOST`, `WEB_PORT`, `UDP_PORT` | `127.0.0.1`, `8080`, `26400` | HTTP bind and UDP flow match |
-| `TAPE_DIR` | repo `data/nyq/tape` | Prepared licensed tape ([data layout](../../docs/VALIDATION.md#1-data)) |
+| `TAPE_DIR` | repo `data/synth/tape` | Generated synthetic tape ([data layout](../../docs/VALIDATION.md)) |
 | `CPU_THREADS` | `0` | CPU BLAS threads (0 = tune automatically) |
 | `ANALYTICS_BACKEND` | `compare` | `compare` runs both workers; `cpu` or `gpu` runs one, for separate measurements (`INGEST=gpudirect` accepts `compare` or `gpu`) |
 | `SPEED`, `RATE` | `10`, `50000` | Replay multiplier; `SPEED=0` selects fixed observations/s |
 | `READY_TIMEOUT` | `90` | Receiver readiness timeout, seconds |
 | `APP_NAME`, `FEED_NAME` | `fin-equities-receiver`, `fin-equities-feed` | Container names |
 | `DAQIRI_DV_FLOW_EN`, `DAQIRI_RX_FLOW_GROUP` | `1`, `0` | Steering-patch overrides (see above) |
-| `FULLDAY_PCAP` | unset | Captured day ([capture.sh](gpu_ingest_bench/capture.sh)); enables the full-day button (`INGEST=gpudirect`) |
+| `FULLDAY_PCAP` | unset | Generated synthetic pcap, such as `data/synth/day.pcap`; enables the full-day button (`INGEST=gpudirect`) |
 | `FULLDAY_BASE_PORT`, `FULLDAY_PACKETS` | unset | The capture's sender port and packet count |
 | `TCPREPLAY_DIR`, `TCPREPLAY_LIBS` | unset | `tcpreplay`/`tcprewrite` binaries and libraries for the replay controller |
 | `FULLDAY_WORK` | `replay_control/` beside the capture | Rewritten per-run copies of the capture |
@@ -135,15 +142,17 @@ GPU memory (2 GiB, ~5 s at 200,000 packets/s) and returns it to the NIC without 
 Python interpreter lock; the receiver also moves its other threads off the DAQIRI cores.
 `--nic-config PATH` takes a custom YAML that keeps that port and queue.
 
-## Full-day button
+## Synthetic capture replay
 
 With `FULLDAY_PCAP` set and `INGEST=gpudirect`, the launcher also starts a privileged replay
-controller and the dashboard shows a "Full trading day at line rate" panel. The button
-pauses the paced sender, announces a fresh generation and `tcpreplay`s the captured
-day out of the test port (200,000 packets/s by default). The panel times first to last
+controller and the dashboard shows a capture replay panel. The button
+pauses the paced sender, announces a fresh generation and `tcpreplay`s the synthetic
+capture out of the test port (200,000 packets/s by default). The panel times first to last
 arrival and reports packets, sequence gaps, ring drops, events, bars and the multiple
-of real time; "Resume replay" returns to the paced feed. `tcpreplay` runs off the
+of the synthetic event-time span; "Resume replay" returns to the paced feed. `tcpreplay` runs off the
 DAQIRI cores, and `compare` mode skips CPU validation while a burst is in flight.
+The capture covers the span chosen with `synth --seconds`; the generated example above
+covers a 6.5-hour synthetic session and is suitable for functional checks.
 
 `fullday.stalls` in `/snapshot` records the longest gaps between NIC bursts, the
 slowest drain and decode passes (per step), the native drain's longest gap between NIC
@@ -161,14 +170,13 @@ previous values are kept in the receiver's labels; a reboot also restores them):
   interrupts can land on the RX core and delay it long enough to lose part of a burst.
 - With `INGEST=gpudirect`, NVIDIA GPUs that runtime-suspend when idle (Thor's integrated
   GPU) are kept powered. While suspended, the receiver's first new CUDA allocation
-  wakes it, which blocks the receiver's CUDA calls for about 130 ms (measured without
-  the NIC; see [docs/VALIDATION.md](../../docs/VALIDATION.md)), and the button idles
-  the GPU for the ~3.4 s `tcpreplay` preload.
+  wakes it and can delay the receiver's CUDA calls. The replay button can leave the
+  GPU idle while `tcpreplay` preloads the capture.
 - With `FULLDAY_PCAP`, `fwupd-refresh.timer` (an hourly firmware-metadata refresh) is
   stopped, as a precaution against a refresh during a burst.
 
-The full-day NIC series and the fault-injection runs are not recorded for this code; they
-run only with approval (method: [GPUDirect ingest](../../docs/GPU_INGEST.md)).
+NIC sweeps and fault-injection runs require approval
+(method: [GPUDirect ingest](../../docs/GPU_INGEST.md)).
 
 ## Check it
 
@@ -184,21 +192,28 @@ DAQIRI counters over the same interval for any throughput claim.
 
 ## Example: full GPUDirect demo on one Thor
 
-A complete launch with PHY loopback, the full-day button and the receiver image. Pick the GPU by
+A complete launch with PHY loopback, synthetic capture replay and the receiver image. Pick the GPU by
 UUID (`nvidia-smi -L`), since CUDA device index 0 can be the integrated GPU:
 
 ```bash
 export RECEIVER_IMAGE=holoscan-finance:hsdk5-daqiri INGEST=gpudirect LOOPBACK=1 \
     GPU_UUID=GPU-<uuid> \
-    TAPE_DIR=$PWD/data/nyq/tape APP_NAME=fin-gpu-demo FEED_NAME=fin-gpu-feed \
-    FULLDAY_PCAP=$PWD/data/nyq/day.pcap FULLDAY_BASE_PORT=<PORT> FULLDAY_PACKETS=<PACKETS> \
+    TAPE_DIR=$PWD/data/synth/tape APP_NAME=fin-gpu-demo FEED_NAME=fin-gpu-feed \
+    FULLDAY_PCAP=$PWD/data/synth/day.pcap FULLDAY_BASE_PORT=40000 FULLDAY_PACKETS=400001 \
     TCPREPLAY_DIR=~/tools/root/usr/bin TCPREPLAY_LIBS=~/tools/root/usr/lib/aarch64-linux-gnu
 bash deploy/igx_thor/igx_run.sh
 ```
 
-`data/nyq/day.pcap` is one captured replay generation
-([gpu_ingest_bench](gpu_ingest_bench/README.md)); `bench_replay inspect data/nyq/day.pcap`
-prints its sender port and packet count.
+For the generation command above, `data/synth/day.pcap` contains 400,000 data packets
+and a final marker packet from source port 40000. If you change the generator arguments,
+use the capture's actual sender port and packet count:
+
+```bash
+PYTHONPATH=python python3 -m holoscan_finance.tools.bench_replay inspect data/synth/day.pcap
+```
+
+For sustained rate measurements, generate a larger fixture and follow
+[gpu_ingest_bench](gpu_ingest_bench/README.md).
 
 The dashboard binds to `127.0.0.1`. From another machine, tunnel to it:
 `ssh -N -L 8080:127.0.0.1:8080 <user>@<thor-host>`, then open <http://localhost:8080/>.

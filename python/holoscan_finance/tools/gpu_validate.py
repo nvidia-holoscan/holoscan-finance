@@ -11,7 +11,7 @@ mutates real packets to exercise every rejection rule. ``--bars`` replays the da
 through host ``QuoteBars`` and ``GpuQuoteBars`` with identical batching instead;
 ``--decoder cpu`` validates the numba decoder (needs numba>=0.68).
 
-    python -m holoscan_finance.tools.gpu_validate --pcap data/nyq/day.pcap --tape data/nyq/tape
+    python -m holoscan_finance.tools.gpu_validate --pcap data/synth/day.pcap --tape data/synth/tape
 
 The oracle pieces are library code: ``validation.compare`` (host decode, comparison,
 ULPs), ``nyq.synthetic`` (``fuzz``) and ``marketdata.sequence`` (the host sequence rules).

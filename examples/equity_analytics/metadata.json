@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:application:v1",
   "application": {
     "name": "equity_analytics",
-    "description": "Example application of the holoscan-finance module: NYQ MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
+    "description": "Example application of the holoscan-finance module: synthetic MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -49,9 +49,9 @@
         }
       },
       "replay_pcap": {
-        "description": "A recorded NYQ day (nyq/day.pcap and its prepared tape nyq/tape in the data directory) replayed from GPU memory at 200,000 packets/s",
+        "description": "A full synthetic day replayed from GPU memory at 200,000 packets/s",
         "run": {
-          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/nyq/day.pcap --tape <holohub_data_dir>/nyq/tape --replay-pps 200000 --analytics-backend compare",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --replay-pps 200000 --analytics-backend compare\"",
           "workdir": "holohub_bin"
         }
       },

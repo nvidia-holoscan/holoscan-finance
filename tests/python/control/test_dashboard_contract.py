@@ -104,7 +104,7 @@ ENGINE = {
 }  # fmt: skip
 
 # ---- pinned values -----------------------------------------------------------------------
-TRANSPORT = "MITCH (MIT303 11.9) / UDP · NYQ replay mapping"
+TRANSPORT = "MITCH (MIT303 11.9) / UDP · equity replay mapping"
 WIRE_PROTOCOL = "mit303-11.9-nyq-replay-v1"
 MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
 PAYLOAD_PATH = {

@@ -21,7 +21,7 @@ full the drain holds the burst, so overflow shows up as NIC drops and sequence g
 as silently discarded packets. Decode is fused into the source: ring rows stay leased until
 decode has synchronized, so the lease has exactly one consumer. It is sized for 200,000
 packets/s (6.6M MITCH messages/s); see [GPUDirect ingest](../../docs/GPU_INGEST.md), and for
-NIC-free results [VALIDATION.md](../../docs/VALIDATION.md).
+synthetic NIC-free validation [VALIDATION.md](../../docs/VALIDATION.md).
 
 Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with
 `holoscan_finance.marketdata.gpu_decoder.GpuMitchDecoder`.

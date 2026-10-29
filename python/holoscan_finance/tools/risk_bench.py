@@ -43,7 +43,7 @@ it is not.
 
 Returns are synthetic N(0, 1e-3), every symbol eligible, or with ``--returns`` the columns
 of a bars ``.npz`` (``returns``, bars x symbols, and ``times``) or of a prepared tape
-directory (``tools.prepare_tape``; the day's bars at the default bar settings, built with
+directory (``tools.synth``; the day's bars at the default bar settings, built with
 host ``QuoteBars``; ``--save-returns`` keeps them as such an ``.npz``), from mid-session,
 shuffled, and time-shifted copies above its width. ``--gap-ms`` sleeps between windows
 (the live cadence at 75,000 obs/s is about 270 ms); ``--compete-us`` adds a Python thread
@@ -53,7 +53,7 @@ result (``agreement``).
 
     python -m holoscan_finance.tools.risk_bench --sizes 50,200,2886 --backends gpu,cpu \\
         --returns bars.npz --check --out risk_bench.json
-    python -m holoscan_finance.tools.risk_bench --returns data/nyq/tape --save-returns bars.npz \\
+    python -m holoscan_finance.tools.risk_bench --returns data/synth/tape --save-returns bars.npz \\
         --sizes 50 --phases 4 --backends gpu,gpu-host,cpu
     python -m holoscan_finance.tools.risk_bench --kinds 300 --backends gpu,gpu-host,cpu,compare \\
         --returns bars.npz --check --out kinds.json --table kinds.md

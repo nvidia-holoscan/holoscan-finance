@@ -146,7 +146,7 @@ def test_local_sender_uses_prepared_quote_preserving_tape_and_quotes_path():
     commands = dry_run(
         START_FEED="1",
         FEED_HOST="10.0.0.2",
-        TAPE_DIR="/licensed tape/day one",
+        TAPE_DIR="/synthetic tape/day one",
         UDP_PORT="27500",
         SPEED="0",
         RATE="12000",
@@ -154,7 +154,7 @@ def test_local_sender_uses_prepared_quote_preserving_tape_and_quotes_path():
     sender = commands[-1]
     assert option(sender, "-m") == "holoscan_finance.tools.replay_sender"
     assert "--runtime=nvidia" not in sender  # the CPU-only tools never import the SDK
-    assert "type=bind,src=/licensed tape/day one,dst=/data/tape,readonly" in sender
+    assert "type=bind,src=/synthetic tape/day one,dst=/data/tape,readonly" in sender
     assert option(sender, "--data") == "/data/tape"
     assert option(sender, "--port") == "27500"
     assert option(sender, "--loops") == "0"

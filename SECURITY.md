@@ -53,7 +53,7 @@ them: the MITCH codec, CUDA decode and quote-bar kernels, the covariance engine,
 plane and web dashboard. Two example applications under `examples/` compose these operators:
 `equity_analytics` is a live web dashboard; `market_data_bench` is a headless benchmark that
 reads only capture files.
-Command-line tools cover replay, data preparation, validation and benchmarks, and
+Command-line tools cover replay, synthetic data generation, validation and benchmarks, and
 `deploy/igx_thor` holds the launchers for an IGX Thor with a ConnectX NIC.
 
 The code is Python, with three kinds of generated machine code:
@@ -94,8 +94,8 @@ released under Apache-2.0; this document is written to public-safe detail.
 **Service Exposure Classification:** External / Regulated (medium confidence).
 Basis: the Apache-2.0 module is distributed externally as a platform-independent wheel for
 financial-services workloads. Its example dashboard application opens network listeners when run. The
-repository contains no live service, credentials or customer data, and the licensed market data
-used for benchmarks is kept out of Git.
+repository contains no live service, credentials or customer data. The examples and validation
+workflows use generated synthetic data.
 
 Key boundaries and interfaces:
 
@@ -129,8 +129,8 @@ Key boundaries and interfaces:
   authenticated or authorized. There is no Host-header allowlist.
 - **Files.** Prepared tapes (`manifest.json` and `events.bin`) are checked for format, record
   size and file size and are then memory-mapped. Packet captures are read whole into host memory,
-  and the replay source uploads them whole into GPU memory. `holoscan_finance.tools.prepare_tape`
-  reads the licensed Parquet source with DuckDB.
+  and the replay source uploads them whole into GPU memory. `holoscan_finance.tools.synth`
+  generates the demo tapes and captures locally.
 - **Run-time code generation.** On the GPUDirect path, the native drain is built into
   `HOLOSCAN_FINANCE_NATIVE_CACHE`, else `$CUPY_CACHE_DIR/native`, else
   `~/.cache/holoscan-finance/native`. An existing build in that directory is loaded with no
@@ -157,7 +157,7 @@ Key boundaries and interfaces:
   - The launchers never replace existing containers, and teardown stops only containers with the
     project's owner label.
   - The replay container mounts the capture directory, `TCPREPLAY_DIR`, `TCPREPLAY_LIBS` and
-    `FULLDAY_WORK`, and writes rewritten copies of the licensed capture into `FULLDAY_WORK`.
+    `FULLDAY_WORK`, and writes rewritten copies of the synthetic capture into `FULLDAY_WORK`.
   - The benchmark scripts `gpu_ingest_bench/sweep.sh` and `capture.sh` act on the host directly:
     they apply loopback and, in `udp` mode, host sysctls (restored on exit), or run `tcpdump`
     through `nsenter`, without the launcher's checks.
@@ -266,13 +266,13 @@ auxiliary build, deployment and tooling paths:
    triggers. Its Dockerfile, requirements and tests come from the checked-out commit, so either
    change would execute contributor code on persistent, NVIDIA-managed hardware.
 
-9. **Disclosure of licensed market data.** The benchmark data (an NYQ trading day from
-   LSEG/Refinitiv) is licensed and must not be redistributed. `.gitignore` keeps `data/`,
-   `*.parquet`, `*.pcap` and `events.bin` out of Git, and `.dockerignore` keeps `data` out of the
-   image build contexts. The data's confidentiality otherwise relies on file permissions where it
-   is stored, including the rewritten capture copies in `FULLDAY_WORK`. The dashboard's
-   `/snapshot` serves prices and analytics derived from it to any client that can reach the port,
-   and run reports and logs contain counts and timings.
+9. **Exposure of input data and derived results.** The examples use generated synthetic data.
+   `.gitignore` keeps generated inputs and run artifacts out of Git, and `.dockerignore` keeps
+   `data` out of the image build contexts. Access to input files, including rewritten capture
+   copies in `FULLDAY_WORK`, otherwise relies on filesystem permissions. The dashboard's
+   `/snapshot` serves prices and analytics to any client that can reach the port, and run
+   reports and logs contain counts and timings. Restrict these files and endpoints to their
+   intended users when adapting the module to other inputs.
 
 10. **Shared-memory topics.** With `--topics`, risk summaries are published over HoloMQ
     (iceoryx2) shared memory. Any process that shares the IPC namespace and its `/dev/shm` can
@@ -302,7 +302,7 @@ The following are assumed to be handled by other layers; the module does not enf
   Params and the objects passed to operators are validated for type and range, not for
   authorization. There is no sandbox around operator code or parameters.
 - **Data provenance and filesystem permissions are enforced by the deployer.** Tapes, captures,
-  Parquet sources, the native and CuPy caches, `.cache/pyuser5`, and the repository checkout
+  the native and CuPy caches, `.cache/pyuser5`, and the repository checkout
   mounted into the containers are assumed to be writable only by trusted principals.
 - **Message confidentiality and integrity are out of scope in transit.** The UDP feed, the HTTP
   control plane and HoloMQ topics are unencrypted and unauthenticated. A deployment beyond one
@@ -322,7 +322,7 @@ The following are assumed to be handled by other layers; the module does not enf
   modify the installed package, the checkout, the data files or the caches used by a running
   receiver; no untrusted local process can bind the receive port (the kernel-socket receiver sets
   `SO_REUSEADDR`); and the privileged launchers run only for trusted operators.
-- **This module is not a production risk control.** As stated in the README, it is a historical
+- **This module is not a production risk control.** As stated in the README, it is a synthetic
   replay demonstration with live computation. Consumers are assumed to independently validate
   calculations, data sources and controls, and not to rely on it as a regulatory, accounting, or
   risk-management safeguard.
@@ -355,14 +355,14 @@ Out of scope here (report to the owning project instead):
 - Vulnerabilities in the Holoscan SDK, DAQIRI, CUDA, GPU drivers, or container base images. Use
   the same NVIDIA reporting channels above and name the affected product.
 - Vulnerabilities in DPDK, rdma-core, or third-party Python packages and developer tooling, such
-  as CuPy, FastAPI, uvicorn, DuckDB, numba or the Holoscan CLI.
+  as CuPy, FastAPI, uvicorn, numba or the Holoscan CLI.
 - The financial correctness or suitability of the reference calculations, which is a functional
   matter documented in the README's scope and limitations.
 
 ## Dependency Security
 
 The wheel declares one runtime dependency, NumPy, and optional extras: `gpu` (CuPy), `analytics`
-(SciPy, threadpoolctl), `dashboard` (FastAPI, uvicorn, AnyIO), `data` (DuckDB, PyArrow), `bench`
+(SciPy, threadpoolctl), `dashboard` (FastAPI, uvicorn, AnyIO), `bench`
 (numba) and `test` (pytest, pytest-timeout, httpx). These carry minimum versions only in
 `pyproject.toml`. The Holoscan SDK is never a pip dependency: it comes from the SDK container
 image or its Debian packages. DAQIRI's Python binding comes from the DAQIRI installation, and
