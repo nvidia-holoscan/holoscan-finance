@@ -111,7 +111,7 @@ auxiliary build and tooling paths:
 
 3. **Supply-chain compromise of the developer and build bootstrap:** the `./holohub` wrapper still
    defaults to a version-ranged `holoscan-cli` install (including `--pre`) so developers can pick
-   up CLI RCs; the `Dockerfile` pins `holoscan-cli==4.5.0`, `pytest-timeout==2.4.0`, `build==1.6.0`,
+   up CLI RCs; the `Dockerfile` pins `holoscan-cli==5.0.0`, `pytest-timeout==2.4.0`, `build==1.6.0`,
    and `scikit-build-core==1.0.3`, and accepts a digest via `--build-arg BASE_IMAGE=...@sha256:...`.
    The published default still names the Holoscan SDK image by tag because NGC digest resolution
    requires registry authentication. A substituted tag, extra index, or unpinned override would

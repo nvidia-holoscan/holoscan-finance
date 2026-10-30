@@ -28,6 +28,7 @@ portfolio-limit evaluation under the `holoscan.finance` namespace.
 | --- | --- |
 | Holoscan SDK | 4.3.0 or later |
 | Python | 3.10 through 3.13 |
+| Holoscan CLI (`./holohub`) | `holoscan-cli` 5.0.0 or later, on Python 3.11 through 3.14 |
 | CMake | 3.24 or later |
 | Platform | `x86_64` or `aarch64` |
 

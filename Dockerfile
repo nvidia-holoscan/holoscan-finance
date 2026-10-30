@@ -26,7 +26,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Install holoscan-cli developer tools. Override with --build-arg; default is
 # a pinned release (no --pre) from NVIDIA PyPI.
-ARG HOLOSCAN_CLI_INSTALL_ARGS="--extra-index-url https://pypi.nvidia.com holoscan-cli==4.5.0"
+ARG HOLOSCAN_CLI_INSTALL_ARGS="--extra-index-url https://pypi.nvidia.com holoscan-cli==5.0.0"
 RUN if ! python3 -m holoscan_cli --help 2>/dev/null | grep -qw build; then \
         python3 -c "import os, shlex, subprocess, sys; \
             subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + \

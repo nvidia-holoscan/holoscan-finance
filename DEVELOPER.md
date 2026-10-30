@@ -58,7 +58,7 @@ holoscan-finance/
 ├── holohub                              # Repository-local holoscan-cli wrapper
 ├── Dockerfile                           # Holoscan SDK development image
 ├── CMakeLists.txt                       # Root project and build options
-├── metadata.json                        # urn:holohub:module:v2 descriptor
+├── metadata.json                        # urn:holoscan:module:v2 descriptor
 ├── pyproject.toml                       # Wheel metadata and Python tooling
 ├── applications/
 │   ├── CMakeLists.txt
@@ -207,7 +207,9 @@ Launch the development environment with:
 ```
 
 The first wrapper invocation can install `holoscan-cli` and therefore requires package
-index access. Override `HOLOSCAN_CLI_INSTALL_ARGS` to pin another package specification,
+index access. It installs `holoscan-cli` 5.0.0 or later, which requires Python 3.11 through
+3.14; set `HOLOSCAN_CLI_PYTHON_BIN` to a supported interpreter if the default `python3` is
+Python 3.10. Override `HOLOSCAN_CLI_INSTALL_ARGS` to pin another package specification,
 or set `HOLOSCAN_CLI_SOURCE` to a local CLI checkout.
 
 ## Build workflow

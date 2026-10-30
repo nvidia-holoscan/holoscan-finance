@@ -1,5 +1,5 @@
 {
-  "$schema": "urn:holohub:module:v2",
+  "$schema": "urn:holoscan:module:v2",
   "module": {
     "name": "holoscan-finance",
     "version": "0.1.0",
@@ -37,7 +37,7 @@
     "dockerfile": "Dockerfile",
     "binary_packages": {
       "debian": "holoscan-finance",
-      "pypi": "holoscan-finance",
+      "wheel": "holoscan-finance",
       "install_commands": ["pip install holoscan-finance"]
     },
     "documentation": {
