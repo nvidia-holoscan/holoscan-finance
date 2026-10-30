@@ -62,9 +62,13 @@ def cpu_sets(args: argparse.Namespace) -> CpuSets:
     """The CPU sets the flags ask for, without changing the process: in DAQIRI modes the NIC
     lcores are reserved. An ``--ingest-cpus`` outside the CPUs left is a usage error."""
     in_daqiri_mode = getattr(args, "ingest", None) in DAQIRI_INGEST_MODES
+    reserved = (args.nic_master_core, args.nic_rx_core) if in_daqiri_mode else ()
+    drain_core = getattr(args, "nic_drain_core", -1)
+    if getattr(args, "ingest", None) == "gpudirect" and drain_core >= 0:
+        reserved += (drain_core,)  # the pinned native drain's core
     try:
         return CpuSets.compute(
-            reserved=(args.nic_master_core, args.nic_rx_core) if in_daqiri_mode else (),
+            reserved=reserved,
             ingest=parse_cpu_list(args.ingest_cpus) if args.ingest_cpus else None,
             busy_poll=args.ingest_busy_poll,
         )

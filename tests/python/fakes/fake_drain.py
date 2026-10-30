@@ -69,7 +69,9 @@ class FakeNativeDrain:
         max_burst: int = 65536,
         min_payload: int = 8,
         max_records: int = 65536,
+        cpu: int = -1,
     ) -> None:
+        self.cpu = cpu
         self.port, self.queue, self.device = port, queue, device
         self.capacity, self.stride, self.min_payload = capacity, stride, min_payload
         self._addresses = dict(

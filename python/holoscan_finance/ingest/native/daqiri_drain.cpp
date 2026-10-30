@@ -13,10 +13,17 @@
 // runtime-suspended Thor iGPU for 0.1-0.6 s) and waits on the stream by polling. When
 // the ring is full the thread holds the burst until Python releases space, so overflow
 // shows up as NIC drops (sequence gaps), never as silently discarded packets.
+//
+// Pinned to its own core, the thread polls without sleeping. On a PREEMPT_RT kernel a
+// sleep of a non-real-time thread is ended by that core's timer softirq thread
+// (ktimers/N), which other timer work can hold up for hundreds of ms; unpinned, it
+// sleeps between empty polls so it does not take a shared core.
+// HOLOSCAN_FINANCE_DRAIN_SPIN=0 makes a pinned drain sleep too (A/B, troubleshooting).
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -26,6 +33,7 @@
 
 #include <cuda.h>
 #include <pthread.h>
+#include <sched.h>
 #include <time.h>
 
 #include "daqiri/common.h"
@@ -35,6 +43,11 @@
 namespace py = pybind11;
 
 namespace {
+
+bool env_off(const char* name) {
+  const char* v = std::getenv(name);
+  return v != nullptr && std::strcmp(v, "0") == 0;
+}
 
 constexpr int kFields = 9;  // start, n, recv_ns, t0, t_frames, t_launch, t_sync, t_free, wait_ns
 constexpr int kHeaderCols = 7;
@@ -57,14 +70,15 @@ class Drain {
   Drain(int port, int queue, uintptr_t gather_fn, int device, uintptr_t slots,
         uintptr_t header_dev, uintptr_t header_host, int64_t capacity, int stride,
         uintptr_t packed_dev, uintptr_t packed_host, int64_t max_burst, int min_payload,
-        int64_t max_records)
+        int64_t max_records, int cpu)
       : port_(port), queue_(queue), fn_(reinterpret_cast<CUfunction>(gather_fn)), device_(device),
         slots_(slots), header_dev_(header_dev),
         header_host_(reinterpret_cast<int64_t*>(header_host)), capacity_(capacity),
         stride_(stride), packed_dev_(packed_dev),
         packed_host_(reinterpret_cast<uint64_t*>(packed_host)), max_burst_(max_burst),
         min_payload_(min_payload), records_(static_cast<size_t>(max_records) * kFields),
-        max_records_(max_records) {
+        max_records_(max_records), cpu_(cpu),
+        spin_(cpu >= 0 && !env_off("HOLOSCAN_FINANCE_DRAIN_SPIN")) {
     if (capacity <= 0 || max_burst <= 0 || max_burst > capacity || max_records <= 0) {
       throw std::invalid_argument("bad ring sizes");
     }
@@ -118,6 +132,8 @@ class Drain {
   py::dict stats() const {
     py::dict d;
     d["running"] = running_.load();
+    d["cpu"] = cpu_now_.load();  // core the thread last ran on
+    d["spin"] = spin_;
     d["bursts"] = bursts_.load();
     d["packets"] = packets_.load();
     d["ring_peak"] = peak_.load();
@@ -150,6 +166,16 @@ class Drain {
 
   void run() {
     pthread_setname_np(pthread_self(), "hf-drain");  // visible in /proc/<pid>/task/*/comm
+    if (cpu_ >= 0) {
+      // A core of its own (interrupts banned there by the launcher): on a PREEMPT_RT
+      // kernel, IRQ, timer and softirq threads otherwise preempt the drain for 100+ ms.
+      cpu_set_t set;
+      CPU_ZERO(&set);
+      CPU_SET(cpu_, &set);
+      const int r = pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+      if (r != 0) fail("pinning the drain to core " + std::to_string(cpu_) + " failed: " +
+                       std::strerror(r));
+    }
     CUcontext ctx = nullptr;
     CUstream stream = nullptr;
     CUdevice dev;
@@ -162,6 +188,18 @@ class Drain {
     if (stream) cuStreamDestroy(stream);
     if (ctx) cuDevicePrimaryCtxRelease(dev);
     running_.store(false);
+  }
+
+  void idle(int us) const {
+    if (!spin_) {
+      std::this_thread::sleep_for(std::chrono::microseconds(us));
+      return;
+    }
+#if defined(__aarch64__)
+    asm volatile("yield");
+#elif defined(__x86_64__)
+    __builtin_ia32_pause();
+#endif
   }
 
   void loop(CUstream stream) {
@@ -185,10 +223,11 @@ class Drain {
           fail("get_rx_burst returned status " + std::to_string(static_cast<int>(st)));
           return;
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        idle(100);
         continue;
       }
       const int64_t t0 = clock_ns(CLOCK_MONOTONIC);
+      cpu_now_.store(sched_getcpu(), std::memory_order_relaxed);
       const int64_t recv_ns = clock_ns(CLOCK_REALTIME);
       last_rx_ns_.store(t0, std::memory_order_relaxed);
       const int64_t n = daqiri::get_num_packets(burst);
@@ -216,7 +255,7 @@ class Drain {
           return;
         }
         waited = true;
-        std::this_thread::sleep_for(std::chrono::microseconds(50));
+        idle(50);
       }
       if (waited) {
         wait_ns = clock_ns(CLOCK_MONOTONIC) - w0;
@@ -279,6 +318,9 @@ class Drain {
   const int min_payload_;
   std::vector<int64_t> records_;  // ring of max_records_ x kFields, allocated once
   const int64_t max_records_;
+  const int cpu_;  // core to pin the thread to, or -1
+  const bool spin_;  // poll without sleeping (pinned only)
+  std::atomic<int> cpu_now_{-1};
 
   std::thread thread_;
   std::atomic<bool> stop_{false}, running_{false};
@@ -299,11 +341,12 @@ PYBIND11_MODULE(_daqiri_drain, m) {
   py::module_::import("daqiri");  // DAQIRI must be initialized by its own module
   py::class_<Drain>(m, "Drain")
       .def(py::init<int, int, uintptr_t, int, uintptr_t, uintptr_t, uintptr_t, int64_t, int,
-                    uintptr_t, uintptr_t, int64_t, int, int64_t>(),
+                    uintptr_t, uintptr_t, int64_t, int, int64_t, int>(),
            py::arg("port"), py::arg("queue"), py::arg("gather_fn"), py::arg("device"),
            py::arg("slots"), py::arg("header_dev"), py::arg("header_host"), py::arg("capacity"),
            py::arg("stride"), py::arg("packed_dev"), py::arg("packed_host"),
-           py::arg("max_burst"), py::arg("min_payload"), py::arg("max_records"))
+           py::arg("max_burst"), py::arg("min_payload"), py::arg("max_records"),
+           py::arg("cpu") = -1)
       .def("start", &Drain::start)
       .def("stop", &Drain::stop)
       .def("take", &Drain::take)

@@ -389,3 +389,22 @@ def test_exit_codes_are_stable() -> None:
         ("PLAN_RULES", 4),
         ("EXPECTATION", 5),
     ]
+
+
+@pytest.mark.parametrize(
+    ("ingest", "drain_core", "reserved"),
+    [("gpudirect", 2, {0, 1, 2}), ("gpudirect", -1, {0, 1}), ("daqiri-host", 2, {0, 1})],
+)
+def test_a_pinned_drain_core_is_reserved_with_gpudirect_only(ingest, drain_core, reserved):
+    mask = sorted(os.sched_getaffinity(0))
+    if len(mask) < 4:
+        pytest.skip("needs 4 CPUs")
+    args = SimpleNamespace(
+        ingest=ingest,
+        ingest_cpus=None,
+        ingest_busy_poll=False,
+        nic_master_core=mask[0],
+        nic_rx_core=mask[1],
+        nic_drain_core=mask[drain_core] if drain_core >= 0 else -1,
+    )
+    assert runner.cpu_sets(args).reserved == {mask[i] for i in reserved}

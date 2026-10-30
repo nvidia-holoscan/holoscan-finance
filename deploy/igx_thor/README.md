@@ -111,6 +111,7 @@ network.
 | `RECEIVER_IMAGE`, `MST_IMAGE` | `holoscan-finance:hsdk5-daqiri`, `holoscan-finance:mst` | Runtime image ([Dockerfile](Dockerfile)) and PHY tools (see above) |
 | `NIC_PCIE`, `NIC_NAME` | `0004:03:00.0`, `enP4p3s0f0np0` | Receiver function and test interface |
 | `NIC_MASTER_CORE`, `NIC_RX_CORE` | `3`, `9` | Distinct DAQIRI cores |
+| `NIC_DRAIN_CORE` | `10` | `INGEST=gpudirect`: the native drain's own core, kept free of other threads and interrupts; the drain busy-polls it (`HOLOSCAN_FINANCE_DRAIN_SPIN=0`: sleeps). `-1`: unpinned |
 | `GPU_UUID` | unset | Select one GPU; on Thor device index 0 can be the integrated GPU (the receiver also gets `CUDA_DEVICE_ORDER=PCI_BUS_ID`) |
 | `INGEST` | `daqiri-host` | `daqiri-host`: host memory, Python decode. `gpudirect`: GPUDirect, CUDA gather/decode/bars |
 | `KERNEL_CACHE_DIR` | `~/.cache/holoscan-finance/cupy` | CUDA kernels and the native drain for `INGEST=gpudirect` (first start compiles ~15 s) |

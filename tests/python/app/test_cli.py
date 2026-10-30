@@ -176,6 +176,9 @@ def test_nic_params_add_num_bufs_for_gpudirect_and_widen_init_to_every_cpu() -> 
     params = cli.nic_params(args, cpus, gpudirect=True)
     assert params["num_bufs"] == 8192 and params["daqiri_config"] == "nic.yaml"
     assert params["init_cpus"] == [0, 1, 2, 3]  # daqiri_init runs on the full mask
+    assert params["drain_core"] == -1  # unpinned unless asked
+    args.nic_drain_core = 10
+    assert cli.nic_params(args, cpus, gpudirect=True)["drain_core"] == 10
 
 
 def test_bar_settings_come_from_the_bar_flags() -> None:
