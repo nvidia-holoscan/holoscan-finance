@@ -58,6 +58,11 @@ class _GpuMitchSourceBase(hs.Operator):
     helper_cpus = hs.Param(
         [], description="mask the drain thread starts under; [] = the process (main thread) mask"
     )
+    gpu_pool_reserve = hs.Param(
+        1 << 30,
+        range=(0, 1 << 40),
+        description="bytes CuPy's memory pool reserves in start(); 0 = grow on demand",
+    )
     directory = hs.Param(
         Ref(), description="Ref(Knob[FeedDirectory]); empty: every packet is stale"
     )
@@ -118,6 +123,11 @@ class _GpuMitchSourceBase(hs.Operator):
         stats.lane_cpus = lane_cpus()
         self._pending = PendingEmits()
         cp.cuda.Device(self.gpu_device).use()  # persists on the lane thread
+        if self.gpu_pool_reserve:
+            # A pool growth mid-stream is a cudaMalloc, which holds the CUDA lock the drain's
+            # gather launch needs (pauses of 20-210 ms on Thor); batch sizes vary, so without
+            # a reserve the pool keeps growing now and then. Freed at once; the pool keeps it.
+            cp.cuda.alloc(self.gpu_pool_reserve)
         if self.warmup:
             warm_decode_kernels(self.gpu_device)
         return stats
@@ -173,6 +183,12 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
     )
     daqiri_log_level = hs.Param("warn", allowed=LOG_LEVELS)
     native_drain = hs.Param(True, description="False: the Python drain (A/B switch)")
+    drain_core = hs.Param(
+        -1,
+        range=(-1, 1023),
+        description="pin the native drain to this core and keep other threads off it; pinned, "
+        "it busy-polls (HOLOSCAN_FINANCE_DRAIN_SPIN=0: sleeps); -1 = unpinned",
+    )
     isolate_cores = hs.Param(True, description="move this process's threads off the lcores")
     init_cpus = hs.Param(
         [], description="mask to widen to around daqiri_init; the lane mask is always restored"
@@ -206,7 +222,7 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
             if status != daq.Status.SUCCESS:
                 raise RuntimeError(f"daqiri_init failed: {status}")
             if self.isolate_cores and not self.daqiri_config:
-                keep_off_cores({self.master_core, self.rx_core})
+                keep_off_cores({self.master_core, self.rx_core} | self._drain_cores())
             port_id = daq.get_port_id(self.interface_name)
             if port_id < 0:
                 raise RuntimeError(f"DAQIRI interface {self.interface_name!r} not found")
@@ -222,6 +238,7 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
                         stride=gpu_mitch.SLOT_BYTES,
                         min_payload=gpu_mitch.UNIT_HEADER,
                         max_records=65536,
+                        cpu=self.drain_core,
                     )
                     ingest.attach_drain(drain, ring)  # pull() reads its records
                 else:  # pushes accounted bursts into the ingest from its own thread
@@ -254,6 +271,9 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
             self.port,
             stats.frame_fetch,
         )
+
+    def _drain_cores(self) -> set[int]:
+        return {self.drain_core} if self.drain_core >= 0 else set()
 
     def stop(self) -> None:
         super().stop()  # the drain is joined before DAQIRI shuts down

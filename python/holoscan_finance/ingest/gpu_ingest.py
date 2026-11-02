@@ -135,7 +135,7 @@ class GpuIngest:
             st = drain.stats()
             stats.drain_host_ns = st["host_ns"]
             stats.stalls["native"] = {k: st[k] for k in _NATIVE_STALL_KEYS} | {
-                k: v for k, v in st.items() if k.startswith("poll_gaps_")
+                k: v for k, v in st.items() if k.startswith("poll_gaps_") or k in ("cpu", "spin")
             }
             if "replay" in st:
                 stats.replay = st["replay"]

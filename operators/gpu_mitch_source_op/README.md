@@ -58,6 +58,7 @@ Shared with `GpuMitchReplaySourceOp`:
 | `keep_alive` | bool | `True` | `False`: end of input sets `stats.eof` once everything was emitted |
 | `warmup` | bool | `True` | compile and run the gather and decode kernels in `start()` |
 | `helper_cpus` | list | `[]` | mask the drain thread starts under; `[]` = the process mask, never the lane mask |
+| `gpu_pool_reserve` | int | `1 << 30` | bytes CuPy's memory pool reserves in `start()`. A pool growth mid-stream is a `cudaMalloc`, which holds the CUDA lock the native drain's gather launch needs; `0` = grow on demand |
 | `directory` | `Ref` | `Ref()` | `Ref(Knob[FeedDirectory])`; empty: every packet is stale |
 | `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`; private if empty |
 | `tap` | `Ref` | `Ref()` | `Ref(CaptureTap)`; no capture recording if empty |
@@ -75,7 +76,8 @@ Shared with `GpuMitchReplaySourceOp`:
 | `rx_batch_size`, `rx_timeout_us` | int | `4096`, `20000` | DAQIRI burst size and partial-burst timeout: few, large bursts |
 | `daqiri_log_level` | str | `"warn"` | `trace`, `debug`, `info`, `warn`, `error`, `critical` or `off` |
 | `native_drain` | bool | `True` | `False` (or `HOLOSCAN_FINANCE_NATIVE_DRAIN=0`): the Python drain, the A/B switch |
-| `isolate_cores` | bool | `True` | after `daqiri_init`, move this process's threads off the two lcores |
+| `isolate_cores` | bool | `True` | after `daqiri_init`, move this process's threads off the two lcores (and `drain_core`) |
+| `drain_core` | int | `-1` | pin the native drain to this core. Pinned, it busy-polls and uses the whole core (`HOLOSCAN_FINANCE_DRAIN_SPIN=0`: sleeps between empty polls). Keep interrupts off it too: on a PREEMPT_RT kernel, IRQ and timer threads otherwise preempt the drain, and a sleeping drain is woken by the core's timer thread, which can be held up for hundreds of ms. `-1` = unpinned |
 | `init_cpus` | list | `[]` | mask to widen to around `daqiri_init` (the apps pass every CPU) |
 
 CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.

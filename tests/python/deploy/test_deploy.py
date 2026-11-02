@@ -88,8 +88,15 @@ def test_gpudirect_receiver_gets_the_mode_and_a_persistent_kernel_cache(tmp_path
     receiver = receiver_of(commands)
     assert option(receiver, "--ingest") == "gpudirect"
     assert f"type=bind,src={cache},dst=/kernel-cache" in receiver
+    assert option(receiver, "--nic-drain-core") == "10"
     assert "CUPY_CACHE_DIR=/kernel-cache" in receiver
     assert "hf.ingest=gpudirect" in receiver
+
+
+@pytest.mark.parametrize(("ingest", "core"), [("daqiri-host", "10"), ("gpudirect", "-1")])
+def test_the_drain_core_is_passed_only_to_a_pinned_gpudirect_drain(ingest, core):
+    receiver = receiver_of(dry_run(INGEST=ingest, NIC_DRAIN_CORE=core))
+    assert "--nic-drain-core" not in receiver
 
 
 @pytest.mark.parametrize("ingest", ["daqiri-host", "gpudirect"])

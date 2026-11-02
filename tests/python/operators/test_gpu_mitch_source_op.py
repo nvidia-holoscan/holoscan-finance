@@ -178,6 +178,13 @@ def test_native_drain_path_decodes_accounts_and_releases_in_order(nic):
     assert len(fake.freed) == 6
 
 
+def test_drain_core_reaches_the_native_drain(nic):
+    nic(bursts(1, 40))
+    run_source({"drain_core": 5, "isolate_cores": False}, 40)  # no sweep of the test process
+    (drain,) = FakeNativeDrain.instances
+    assert drain.cpu == 5
+
+
 def test_warm_up_runs_in_start(nic, monkeypatch):
     nic(bursts(1, 4))
     warmed = []

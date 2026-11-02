@@ -40,17 +40,26 @@ ACCEL=(--runtime=nvidia -e NVIDIA_DISABLE_REQUIRE=1 -e NVIDIA_VISIBLE_DEVICES=al
     -e "DAQIRI_RX_FLOW_GROUP=${DAQIRI_RX_FLOW_GROUP:-0}" -e CUDA_DEVICE_ORDER=PCI_BUS_ID)
 if [[ -n "$GPU_UUID" ]]; then ACCEL+=(-e "CUDA_VISIBLE_DEVICES=$GPU_UUID"); fi
 # Passed through when set: HOLOSCAN_FINANCE_NATIVE_DRAIN=0 selects the Python drain (A/B);
-# HOLOSCAN_FINANCE_FAULTS=1 enables POST /debug/hold_gil (fault injection, tests only).
-for var in HOLOSCAN_FINANCE_NATIVE_DRAIN HOLOSCAN_FINANCE_FAULTS; do
+# HOLOSCAN_FINANCE_FAULTS=1 enables POST /debug/hold_gil (fault injection, tests only);
+# HOLOSCAN_FINANCE_DRAIN_SPIN=0 makes a pinned drain sleep between empty polls (A/B).
+for var in HOLOSCAN_FINANCE_NATIVE_DRAIN HOLOSCAN_FINANCE_FAULTS HOLOSCAN_FINANCE_DRAIN_SPIN; do
     if [[ -n "${!var:-}" ]]; then ACCEL+=(-e "$var=${!var}"); fi
 done
+# Cores kept free of other threads and interrupts: the DAQIRI lcores, and with GPUDirect the
+# native drain's core (on the PREEMPT_RT kernel, IRQ and timer threads otherwise preempt it).
+RESERVED_CORES="$NIC_MASTER_CORE,$NIC_RX_CORE"
+DRAIN_ARGS=()
+if [[ "$MODE" == gpudirect && "$NIC_DRAIN_CORE" -ge 0 ]]; then
+    RESERVED_CORES+=",$NIC_DRAIN_CORE"
+    DRAIN_ARGS=(--nic-drain-core "$NIC_DRAIN_CORE")
+fi
 if [[ "$MODE" == gpudirect ]]; then
     ACCEL+=(--mount "type=bind,src=$KERNEL_CACHE_DIR,dst=/kernel-cache" -e CUPY_CACHE_DIR=/kernel-cache)
 fi
 APP_ARGS=(examples/equity_analytics/equity_analytics.py --ingest "$MODE"
     --host "$WEB_HOST" --port "$WEB_PORT" --udp-port "$UDP_PORT"
     --nic-pcie "$NIC_PCIE" --nic-master-core "$NIC_MASTER_CORE" --nic-rx-core "$NIC_RX_CORE"
-    --cpu-threads "$CPU_THREADS" --analytics-backend "${ANALYTICS_BACKEND:-compare}")
+    "${DRAIN_ARGS[@]}" --cpu-threads "$CPU_THREADS" --analytics-backend "${ANALYTICS_BACKEND:-compare}")
 if [[ -n "$FULLDAY_PCAP" ]]; then APP_ARGS+=(--replay-control "http://127.0.0.1:$REPLAY_PORT"); fi
 LABELS=(--label "$OWNER_LABEL=$OWNER_VALUE" --label "hf.loopback=$LOOPBACK"
     --label "hf.pcie=$NIC_PCIE" --label "hf.nic=$NIC_NAME" --label "hf.cidr=$LOOPBACK_CIDR"
@@ -74,7 +83,7 @@ REPLAY+=("$RECEIVER_IMAGE" bash deploy/igx_thor/run_python.sh deploy/igx_thor/gp
     --pcap "$FULLDAY_PCAP" --base-port "$FULLDAY_BASE_PORT" --nic "$NIC_NAME"
     --tcpreplay-dir "$TCPREPLAY_DIR" --tcpreplay-libs "$TCPREPLAY_LIBS" --work "$FULLDAY_WORK"
     --app "http://$CONTROL_HOST:$WEB_PORT" --tape /data/tape --port "$REPLAY_PORT"
-    --avoid-cores "$NIC_MASTER_CORE,$NIC_RX_CORE"
+    --avoid-cores "$RESERVED_CORES"
     ${FULLDAY_PACKETS:+--packets "$FULLDAY_PACKETS"})
 CHECK=(docker run --rm "${COMMON[@]}" "${ACCEL[@]}" "$RECEIVER_IMAGE"
     bash deploy/igx_thor/run_python.sh deploy/igx_thor/preflight.py check --pcie "$NIC_PCIE"
@@ -146,7 +155,7 @@ if [[ "$LOOPBACK" == 1 ]]; then
     IRQ_BANNED="${IRQ_BANNED:-NULL}"  # dry run: show the ban command
     if [[ "$IRQ_BANNED" != none ]]; then
         ban=$({ [[ "$IRQ_BANNED" == NULL ]] || tr , '\n' <<< "$IRQ_BANNED"
-                printf '%s\n' "$NIC_MASTER_CORE" "$NIC_RX_CORE"; } | sort -nu | paste -sd,)
+                tr , '\n' <<< "$RESERVED_CORES"; } | sort -nu | paste -sd,)
         run irq_ctl set "$ban"
     fi
 fi

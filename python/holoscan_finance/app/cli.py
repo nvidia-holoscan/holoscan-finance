@@ -92,6 +92,13 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     g.add_argument("--nic-master-core", type=int, default=3)
     g.add_argument("--nic-rx-core", type=int, default=9)
     g.add_argument(
+        "--nic-drain-core",
+        type=int,
+        default=-1,
+        help="(gpudirect) a core of its own for the native drain, which busy-polls there; "
+        "-1: unpinned",
+    )
+    g.add_argument(
         "--nic-num-bufs",
         type=int,
         default=IngestDefaults().gpu_num_bufs,
@@ -252,4 +259,5 @@ def nic_params(args: argparse.Namespace, cpus: CpuSets, *, gpudirect: bool) -> d
     )
     if gpudirect:
         params["num_bufs"] = args.nic_num_bufs
+        params["drain_core"] = args.nic_drain_core
     return params

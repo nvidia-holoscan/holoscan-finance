@@ -172,7 +172,9 @@ and sequence gaps.
 | NIC buffers | 114,688 in GPU memory (`--nic-num-bufs`) | about 0.57 s at 200,000 packets/s; the RTX PRO 6000's 256 MiB BAR1 window bounds the count |
 | Device ring | 1,048,576 slots of 2 KiB (`--ring-size`) | about 5 s at 200,000 packets/s: a consumer stall is absorbed while the native drain keeps recycling NIC buffers |
 | DAQIRI cores | lcores 3 and 9, banned from IRQ placement while the receiver runs | irqbalance can place the local `tcpreplay` sender's transmit-completion interrupts on the DAQIRI RX core, which costs received packets |
-| Other threads | lanes, drains and helpers placed off the DAQIRI cores; `isolate_cores` sweeps the rest after `daqiri_init` | nothing competes with the DPDK lcores |
+| Native drain | its own core (`--nic-drain-core`, `NIC_DRAIN_CORE=10` in the Thor launcher), interrupts banned there, busy-polling | on the PREEMPT_RT kernel, IRQ and timer threads preempted an unpinned drain, and its idle sleeps waited on the core's timer thread |
+| Other threads | lanes and helpers placed off the DAQIRI and drain cores; `isolate_cores` sweeps the rest after `daqiri_init` | nothing competes with the DPDK lcores or the drain |
+| CuPy memory pool | 1 GiB reserved in `start()` (`gpu_pool_reserve`) | a pool growth mid-stream is a `cudaMalloc` that holds the CUDA lock the drain's gather launch needs |
 | Thor iGPU | kept powered by the launcher while the receiver runs (`INGEST=gpudirect`) | the iGPU can runtime-suspend when idle, and a new CUDA allocation can wait for its resume; document its state during timing ([validation environment](VALIDATION.md#environment-and-timing-discipline)) |
 
 ### Native drain
