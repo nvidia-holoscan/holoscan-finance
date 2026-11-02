@@ -12,8 +12,9 @@ seek or loop is a new generation from a fresh UDP source port, registered with `
 /manifest`` before its first packet, so the receiver can tell old packets from new ones. The
 pacing
 (``/feedrate``) is polled every 200 ms; the final Status marker of a pass closes the last
-regular-session bar. The Python sender tops out at a few thousand packets/s;
-``bench_replay`` covers higher rates. CPU only.
+regular-session bar. Packets are packed in blocks of 1,024 ahead of sending
+(``pack_units``), so one Python thread sustains tens of thousands of packets/s; the pace is
+set by the receiver's controls. ``bench_replay`` covers line-rate replay. CPU only.
 """
 
 from __future__ import annotations
@@ -28,8 +29,41 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 from ..marketdata.records import CONDITION, EVENT_DTYPE
-from ..nyq.mapping import MAX_PACKET_EVENTS, PROTOCOL, TIMEZONE, day_start_ns, pack_events
+from ..nyq.mapping import (
+    MAX_PACKET_EVENTS,
+    PROTOCOL,
+    TIMEZONE,
+    day_start_ns,
+    pack_events,
+    pack_units,
+)
 from ..nyq.tape import open_tape
+
+_BLOCK_UNITS = 1024  # packets packed ahead per pack_units call (a few ms of work)
+
+
+class _PackedBlock:
+    """The next ``_BLOCK_UNITS`` packets from a tape position, packed at once: per packet
+    ``pack_events`` cost about 0.4 ms, which capped the sender near 2,500 packets/s."""
+
+    def __init__(self, rows, idx: int, sequence: int, midnight_ns: int) -> None:
+        stop = min(idx + _BLOCK_UNITS * MAX_PACKET_EVENTS, len(rows))
+        self.data, self.offsets, self.lengths, self.counts = pack_units(
+            rows[idx:stop], sequence, midnight_ns
+        )
+        self.idx, self.sequence, self.next = idx, sequence, 0
+
+    def take(self, idx: int, sequence: int) -> tuple[bytes, int] | None:
+        """The packet of the rows from ``idx`` carrying ``sequence``, or None when the block
+        does not hold it (a seek, a loop, or the block is used up)."""
+        k = self.next
+        if k >= len(self.offsets) or idx != self.idx or sequence != self.sequence:
+            return None
+        start, count = int(self.offsets[k]), int(self.counts[k])
+        self.next = k + 1
+        self.idx += MAX_PACKET_EVENTS
+        self.sequence += count
+        return self.data[start : start + int(self.lengths[k])].tobytes(), count
 
 
 def request(base: str, path: str, payload: dict | None = None) -> dict:
@@ -97,6 +131,17 @@ def main(argv: list[str] | None = None) -> int:
     generation = sequence = 0
     last_poll = anchor_wall = anchor_ts = 0
     previous_pacing = None
+    block: _PackedBlock | None = None
+
+    def next_packet() -> tuple[bytes, int]:
+        """The packet of ``rows[idx:]`` at ``sequence``, from the packed block (repacked from
+        here when the block does not hold it: the start, a seek, a loop)."""
+        nonlocal block
+        got = block.take(idx, sequence) if block is not None else None
+        if got is None:
+            block = _PackedBlock(rows, idx, sequence, midnight_ns)
+            got = block.take(idx, sequence)
+        return got
 
     def reset(position):
         nonlocal idx, generation, sequence, anchor_ts, anchor_wall, sock
@@ -188,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         if delay > 0:
             time.sleep(min(0.01, delay))
             continue
-        packet, wire_count = pack_events(rows[idx:end], sequence, midnight_ns)
+        packet, wire_count = next_packet()
         sock.sendto(packet, target)
         count = end - idx
         sequence += wire_count

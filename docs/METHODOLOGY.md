@@ -198,9 +198,14 @@ MITCH carries no sender wall-clock time, so sender-to-receiver latency is unavai
   ratio is not the separate-runs benchmark below.
 - **Packet arrival to result:** from the arrival stamp of the packet that closes the newest
   bar to publication (GPU) or worker completion (CPU). Results are published on the risk
-  lane as soon as the analysis returns. The stamp is the host's wall clock, not a NIC
-  hardware timestamp, and the figure excludes browser refresh. Where it is taken depends on
-  the front end, so compare runs of the same front end only:
+  lane as soon as the analysis returns. The figure includes the time the window waited in
+  the risk slot for the minimum interval since the previous analysis: with bursts every
+  20 ms and the default 50 ms interval, the window analyzed is the newest one when the
+  interval elapses, which arrived up to one burst earlier (in the NIC-free `paced` bench
+  about 10 ms of a 16 ms median, against 1-2 ms each for decode, bars and the analysis).
+  Lower `--interval` to time the pipeline alone. The stamp is the host's wall clock, not a
+  NIC hardware timestamp, and the figure excludes browser refresh. Where it is taken
+  depends on the front end, so compare runs of the same front end only:
   - `udp`: per datagram, in the receiver thread right after `recvfrom` returns;
   - `daqiri-host` and `gpudirect`: per DAQIRI burst, when the receiver or the drain takes
     it, after the partial-burst timeout (5 ms and 20 ms);

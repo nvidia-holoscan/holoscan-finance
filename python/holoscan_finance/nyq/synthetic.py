@@ -19,17 +19,25 @@ from pathlib import Path
 
 import numpy as np
 
-from ..marketdata.framing import udp_frame, write_pcap
+from ..marketdata.framing import (
+    FRAME_PREFIX,
+    RECORD_HLEN,
+    pcap_header,
+    pcap_record,
+    pcap_records,
+    udp_frame,
+)
 from ..marketdata.records import CONDITION, EVENT_DTYPE, HALTED, QUOTE, TRADE
 from .manifest import MANIFEST_FORMAT
 from .mapping import MAX_PACKET_EVENTS as MAX_EVENTS
-from .mapping import day_start_ns, pack_events
+from .mapping import day_start_ns, pack_events, pack_units
 from .tape import open_tape
 
 logger = logging.getLogger(__name__)
 
 _SESSION_START_S = 34200  # 09:30 New York
 _CHUNK = 1 << 20  # observations generated per step: bounded memory for full-day tapes
+_CAPTURE_UNITS = 1 << 16  # units packed and framed per step
 _PROGRESS_PACKETS = 1 << 18
 # Tape kinds (quotes, trades, conditions) and anomaly rates: synthetic_stream's kinds, rare
 # enough that about 4 in 5 symbols keep every mark of a 60-bar window (risk eligibility).
@@ -279,32 +287,40 @@ def synthetic_capture(
         raise ValueError("drop_every must be >= 0")
     manifest, rows = open_tape(tape_dir)
     midnight_ns = day_start_ns(manifest["date"])
-    starts = range(0, len(rows), max_events_per_packet)
-    sent = np.ones(len(starts), bool)
+    n_units = -(-len(rows) // max_events_per_packet)
+    sent = np.ones(n_units, bool)
     if drop_every:
         sent[drop_every - 1 :: drop_every] = False
-    last = np.minimum(np.asarray(starts) + max_events_per_packet, len(rows)) - 1
-    stamps = np.r_[rows["timestamp_ns"][last[sent]].astype(np.int64), manifest["end_ns"]]
-    # Filled in while write_pcap consumes frames(): complete once the pcap is written.
     counts = dict.fromkeys(
         ("packets", "events", "messages", "dropped_packets", "dropped_events", "dropped_messages"),
         0,
     )
-
-    def frames():
-        sequence = start_seq
-        for k, lo in enumerate(starts):
-            chunk = rows[lo : lo + max_events_per_packet]
-            unit, count = pack_events(chunk, sequence, midnight_ns)
-            sequence += count  # a dropped unit still consumes its sequence numbers
-            prefix = "" if sent[k] else "dropped_"
-            counts[prefix + "packets"] += 1
-            counts[prefix + "events"] += len(chunk)
-            counts[prefix + "messages"] += count
-            if sent[k]:
-                yield udp_frame(unit, src_port=sender_port, dst_port=dst_port)
-            if k and k % _PROGRESS_PACKETS == 0:
-                logger.info("synthetic capture: %d of %d units", k, len(starts))
+    framing = _FrameWriter(sender_port, dst_port)
+    sequence = start_seq
+    with open(pcap_path, "wb") as f:
+        f.write(pcap_header())
+        # Packed and framed in blocks: a full day is 2.9M units, so a unit at a time in
+        # Python took minutes; pack_units writes the same bytes as pack_events.
+        for first in range(0, n_units, _CAPTURE_UNITS):
+            stop = min(first + _CAPTURE_UNITS, n_units)
+            lo, hi = first * max_events_per_packet, min(stop * max_events_per_packet, len(rows))
+            chunk = np.asarray(rows[lo:hi])
+            data, offsets, lengths, messages = pack_units(
+                chunk, sequence, midnight_ns, max_events_per_packet
+            )
+            kept = sent[first:stop]
+            events = np.diff(np.r_[np.arange(0, hi - lo, max_events_per_packet), hi - lo])
+            for prefix, mask in (("", kept), ("dropped_", ~kept)):
+                counts[prefix + "packets"] += int(mask.sum())
+                counts[prefix + "events"] += int(events[mask].sum())
+                counts[prefix + "messages"] += int(messages[mask].sum())
+            sequence += int(messages.sum())  # a dropped unit still consumes its sequence numbers
+            # Record time: the event time of each unit's last observation.
+            last = np.minimum(np.arange(first + 1, stop + 1) * max_events_per_packet, len(rows)) - 1
+            stamps = rows["timestamp_ns"][last[kept]].astype(np.int64)
+            f.write(framing.records(data, offsets[kept], lengths[kept], stamps))
+            if stop % _PROGRESS_PACKETS == 0 and stop < n_units:
+                logger.info("synthetic capture: %d of %d units", stop, n_units)
         # Event-time watermark closes the final regular-session bar.
         marker = np.zeros(1, dtype=EVENT_DTYPE)
         marker["timestamp_ns"] = manifest["end_ns"]
@@ -314,9 +330,52 @@ def synthetic_capture(
         counts["events"] += 1
         counts["messages"] += count
         counts.update(first_sequence=start_seq, next_sequence=sequence + count)
-        yield udp_frame(unit, src_port=sender_port, dst_port=dst_port)
-
-    write_pcap(pcap_path, frames(), ts_ns=stamps)
+        frame = udp_frame(unit, src_port=sender_port, dst_port=dst_port)
+        f.write(pcap_record(manifest["end_ns"], len(frame)) + frame)
     counts.update(sender_port=sender_port, dst_port=dst_port)
     logger.info("synthetic capture: %d packets to %s", counts["packets"], pcap_path)
     return counts
+
+
+class _FrameWriter:
+    """UDP frames and pcap records of packed units, built in bulk: the 42-byte Ethernet, IPv4
+    and UDP prefix depends on the payload length alone, so one ``udp_frame`` per distinct
+    length gives every frame its headers, checksum included."""
+
+    def __init__(self, src_port: int, dst_port: int) -> None:
+        self._ports = dict(src_port=src_port, dst_port=dst_port)
+        self._prefix: dict[int, np.ndarray] = {}
+
+    def records(
+        self, data: np.ndarray, offsets: np.ndarray, lengths: np.ndarray, stamps: np.ndarray
+    ) -> bytes:
+        """The pcap records of the units at ``offsets``/``lengths`` of ``data`` (in order),
+        each stamped from ``stamps``."""
+        k = len(offsets)
+        if not k:
+            return b""
+        prefix = np.empty((k, FRAME_PREFIX), np.uint8)
+        for length in np.unique(lengths):
+            table = self._prefix.get(int(length))
+            if table is None:
+                frame = udp_frame(bytes(int(length)), **self._ports)
+                table = self._prefix[int(length)] = np.frombuffer(frame[:FRAME_PREFIX], np.uint8)
+            prefix[lengths == length] = table
+        heads = np.empty((k, RECORD_HLEN + FRAME_PREFIX), np.uint8)
+        heads[:, :RECORD_HLEN] = pcap_records(stamps, FRAME_PREFIX + lengths)
+        heads[:, RECORD_HLEN:] = prefix
+        out_lengths = heads.shape[1] + lengths
+        out_offsets = np.r_[0, np.cumsum(out_lengths[:-1])]
+        out = np.empty(int(out_offsets[-1] + out_lengths[-1]), np.uint8)
+        is_head = np.zeros(len(out), bool)
+        is_head[(out_offsets[:, None] + np.arange(heads.shape[1])).ravel()] = True
+        out[is_head] = heads.ravel()
+        # The units' bytes in order: all of ``data`` when every unit is kept, else a gather.
+        if int(lengths.sum()) == len(data):
+            out[~is_head] = data
+        else:
+            marks = np.zeros(len(data) + 1, np.int8)
+            marks[offsets] += 1  # distinct indices per statement: each start and end once
+            marks[offsets + lengths] -= 1
+            out[~is_head] = data[np.cumsum(marks[:-1]) > 0]
+        return out.tobytes()

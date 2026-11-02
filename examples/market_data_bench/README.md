@@ -90,7 +90,7 @@ python3 examples/market_data_bench/market_data_bench.py \
 | `--burst-packets` (4096), `--rx-timeout-us` (20000), `--nic-bufs` (0) | DAQIRI's burst rule; the NIC buffer model (0: the drain holds instead of dropping) |
 | `--batch-messages`, `--ring-size`, `--gpu-device` | the GPUDirect defaults (`IngestDefaults`: 131,072-message batches, a 1,048,576-slot ring; device 0) |
 | `--bar-seconds` ... `--max-spread-bps` | the bar settings, as in `equity_analytics` |
-| `--check`, `--risk {none,gpu}`, `--interval` | verification; the risk lane and its minimum interval |
+| `--check`, `--risk {none,gpu}`, `--interval` (0.05) | verification; the risk lane and its minimum interval. The risk latency in the report includes the wait for the interval (up to one 20 ms burst with the default); `--interval 0.005` analyzes every burst's newest window and times the pipeline alone |
 | `--ingest-cpus`, `--ingest-busy-poll` | placement of the ingest lane |
 | `--report PATH`, `--timeout-s` (1800) | the report file; fail if not drained by then |
 | `--plan-only`, `--plan-json PATH` | compile and check only |

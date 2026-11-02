@@ -39,6 +39,9 @@ _PCAP_MAGIC = {
 _PCAP_HEADER = struct.Struct("<IHHiIII")  # written as little-endian nanosecond pcap
 _PCAP_HLEN = _PCAP_HEADER.size
 _RECORD = struct.Struct("<IIII")  # ts_sec, ts_frac, incl_len, orig_len
+_RECORD_DTYPE = np.dtype([("sec", "<u4"), ("frac", "<u4"), ("incl", "<u4"), ("orig", "<u4")])
+RECORD_HLEN = _RECORD.size
+FRAME_PREFIX = _ETH_HLEN + 20 + _UDP_HLEN  # headers of a udp_frame without IP options
 
 
 def strip_udp_datagram(
@@ -217,6 +220,25 @@ class PcapFrames:
         return int(values[np.argmax(counts)])
 
 
+def pcap_header() -> bytes:
+    """The file header of a little-endian nanosecond pcap of Ethernet frames."""
+    return _PCAP_HEADER.pack(0xA1B23C4D, 2, 4, 0, 0, 65535, _LINKTYPE_ETHERNET)
+
+
+def pcap_record(ts_ns: int, length: int) -> bytes:
+    """The record header of one whole frame of ``length`` bytes captured at ``ts_ns``."""
+    sec, ns = divmod(int(ts_ns), 1_000_000_000)
+    return _RECORD.pack(sec, ns, length, length)
+
+
+def pcap_records(ts_ns: np.ndarray, lengths: np.ndarray) -> np.ndarray:
+    """``pcap_record`` over arrays: a ``(len(ts_ns), 16)`` uint8 array of record headers."""
+    records = np.zeros(len(ts_ns), _RECORD_DTYPE)
+    records["sec"], records["frac"] = np.divmod(np.asarray(ts_ns, np.int64), 1_000_000_000)
+    records["incl"] = records["orig"] = lengths
+    return records.view(np.uint8).reshape(len(ts_ns), RECORD_HLEN)
+
+
 def write_pcap(
     path: str | Path, frames: Iterable[bytes], *, ts_ns: Iterable[int] | None = None
 ) -> int:
@@ -225,10 +247,9 @@ def write_pcap(
     pairs = zip(frames, repeat(0)) if ts_ns is None else zip(frames, ts_ns, strict=True)
     count = 0
     with open(path, "wb", buffering=1 << 20) as f:
-        f.write(_PCAP_HEADER.pack(0xA1B23C4D, 2, 4, 0, 0, 65535, _LINKTYPE_ETHERNET))
+        f.write(pcap_header())
         for frame, ts in pairs:
-            sec, ns = divmod(int(ts), 1_000_000_000)
-            f.write(_RECORD.pack(sec, ns, len(frame), len(frame)))
+            f.write(pcap_record(ts, len(frame)))
             f.write(frame)
             count += 1
     return count
