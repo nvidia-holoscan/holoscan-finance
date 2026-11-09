@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+The equity replay's wire format: FIX Simple Binary Encoding 1.0
+(https://www.fixtrading.org/standards/sbe/), little-endian. One UDP datagram is exactly one
+MarketDataIncrementalRefresh message: the 8-octet message header, the root block (the sequence
+number of the first entry, padded to 12 octets) and the NoMDEntries repeating group of fixed
+48-octet entries, one per observation. Root blockLength 12 and entry blockLength 48 keep every
+entry on an 8-octet boundary (header 8 + root 12 + group dimensions 4 = 24), so the GPU and the
+host decoders read every field with one aligned little-endian load. The codecs (sbe_codec.py,
+gpu_sbe.py, tools/cpu_sbe.py) take their layout from this file; sbe-tool validates it.
+-->
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="holoscan_finance.sbe"
+                   id="18502"
+                   version="0"
+                   semanticVersion="FIX.5.0SP2"
+                   byteOrder="littleEndian"
+                   description="Equity replay market data: quotes, trades and trading status, one message per datagram">
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+        <composite name="PriceNULL4" description="Price with four implied decimals; the mantissa is null when the price is absent" semanticType="Price">
+            <type name="mantissa" primitiveType="int64" presence="optional" nullValue="-9223372036854775808"/>
+            <type name="exponent" primitiveType="int8" presence="constant">-4</type>
+        </composite>
+        <type name="QtyNULL" primitiveType="uint32" presence="optional" nullValue="4294967295" semanticType="Qty" description="Whole shares; null when absent"/>
+        <type name="UTCTimestampNanos" primitiveType="uint64" semanticType="UTCTimestamp" description="Nanoseconds since the Unix epoch"/>
+        <type name="SeqNum" primitiveType="uint64" semanticType="SeqNum"/>
+        <type name="SecurityID" primitiveType="uint16" description="Zero-based index into the replay's instrument directory"/>
+        <type name="uint8NULL" primitiveType="uint8" presence="optional" nullValue="255"/>
+        <enum name="EntryType" encodingType="uint8" description="What one entry observes">
+            <validValue name="Quote" description="Top of book: BidPx, OfferPx, BidSize, OfferSize">1</validValue>
+            <validValue name="Trade" description="LastPx, LastQty">2</validValue>
+            <validValue name="TradingStatus" description="SecurityTradingStatus only">3</validValue>
+        </enum>
+        <enum name="SecurityTradingStatus" encodingType="uint8NULL" description="FIX tag 326 values used by the replay">
+            <validValue name="TradingHalt">2</validValue>
+            <validValue name="ReadyToTrade">17</validValue>
+        </enum>
+    </types>
+    <sbe:message name="MarketDataIncrementalRefresh" id="1" blockLength="12" semanticType="X"
+                 description="The observations of one replay packet, in event-time order">
+        <field name="SeqNum" id="5001" type="SeqNum" description="Sequence number of the first entry; every entry consumes one"/>
+        <group name="NoMDEntries" id="268" dimensionType="groupSizeEncoding" blockLength="48">
+            <field name="TransactTime" id="60" type="UTCTimestampNanos" description="Event time; within the market day, non-decreasing across the message"/>
+            <field name="BidPx" id="132" type="PriceNULL4"/>
+            <field name="OfferPx" id="133" type="PriceNULL4"/>
+            <field name="LastPx" id="31" type="PriceNULL4"/>
+            <field name="BidSize" id="134" type="QtyNULL"/>
+            <field name="OfferSize" id="135" type="QtyNULL"/>
+            <field name="LastQty" id="32" type="QtyNULL"/>
+            <field name="SecurityID" id="48" type="SecurityID"/>
+            <field name="EntryType" id="5002" type="EntryType"/>
+            <field name="SecurityTradingStatus" id="326" type="SecurityTradingStatus" presence="optional" description="TradingHalt marks a halted quote or a halt; ReadyToTrade a resume"/>
+        </group>
+    </sbe:message>
+</sbe:messageSchema>

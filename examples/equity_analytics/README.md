@@ -1,7 +1,7 @@
 # equity_analytics
 
 An example application of the Holoscan Module for Financial Services Industry: a live
-equity dashboard on Holoscan SDK 5. The MITCH feed flows into five-second quote bars, then
+equity dashboard on Holoscan SDK 5. The SBE feed flows into five-second quote bars, then
 rolling volatility, covariance and correlation on the GPU, then a web page. In the default
 `compare` mode, a CPU worker recomputes every validated window alongside, so
 each published GPU result has a matched CPU result.
@@ -14,9 +14,9 @@ row or the host row, chosen by `--ingest`:
 ```mermaid
 flowchart TB
     subgraph lane_ingest["lane ingest"]
-        gsrc["source · GPU front ends<br/>GpuMitchReplaySourceOp (replay) or GpuMitchSourceOp (gpudirect)<br/>GPU gather + MITCH decode fused"]
+        gsrc["source · GPU front ends<br/>GpuSbeReplaySourceOp (replay) or GpuSbeSourceOp (gpudirect)<br/>GPU gather + SBE decode fused"]
         hsrc["source · host front ends<br/>UdpPacketSourceOp (udp) or DaqiriPacketSourceOp (daqiri-host)"]
-        decode["decode · MitchDecodeOp<br/>host front ends only"]
+        decode["decode · SbeDecodeOp<br/>host front ends only"]
         bars["bars · QuoteBarsOp<br/>gpu with GPU front ends, cpu with host front ends"]
         gsrc -->|"events · lossless(4)"| bars
         hsrc -->|"packets · lossless(16)"| decode
@@ -49,10 +49,10 @@ Only the front end changes between ingest modes; every operator after it is shar
 
 | `--ingest` | Front end (lane `ingest`) | Bars | Risk (lane `analytics`) |
 | --- | --- | --- | --- |
-| `replay` | `GpuMitchReplaySourceOp`: pcap frames in GPU memory, GPU gather + MITCH decode, no NIC | `QuoteBarsOp(gpu)` | `RollingRiskOp(gpu, inline)` |
-| `gpudirect` | `GpuMitchSourceOp`: DAQIRI GPUDirect into GPU memory, GPU gather + MITCH decode | `QuoteBarsOp(gpu)` | `RollingRiskOp(gpu, inline)` |
-| `udp` | `UdpPacketSourceOp` (kernel socket) → `MitchDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
-| `daqiri-host` | `DaqiriPacketSourceOp` (DAQIRI into pinned host memory) → `MitchDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
+| `replay` | `GpuSbeReplaySourceOp`: pcap frames in GPU memory, GPU gather + SBE decode, no NIC | `QuoteBarsOp(gpu)` | `RollingRiskOp(gpu, inline)` |
+| `gpudirect` | `GpuSbeSourceOp`: DAQIRI GPUDirect into GPU memory, GPU gather + SBE decode | `QuoteBarsOp(gpu)` | `RollingRiskOp(gpu, inline)` |
+| `udp` | `UdpPacketSourceOp` (kernel socket) → `SbeDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
+| `daqiri-host` | `DaqiriPacketSourceOp` (DAQIRI into pinned host memory) → `SbeDecodeOp` | `QuoteBarsOp(cpu)` | `RollingRiskOp(process)` |
 
 GPU front ends always run GPU analytics (`compare` or `gpu`), so market data never reaches
 the CPU.

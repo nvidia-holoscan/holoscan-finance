@@ -87,7 +87,7 @@ class RecordingBarsStats(BarsStats):
 
 
 def host_messages(generation: int, per_message: int = 10) -> list[list]:
-    """``MitchDecodeOp``-shaped input: one ``ReplayBatch`` per packet, ``per_message`` packets
+    """``SbeDecodeOp``-shaped input: one ``ReplayBatch`` per packet, ``per_message`` packets
     per message."""
     batches = []
     for k, p in enumerate(PAYLOADS):
@@ -264,7 +264,7 @@ def test_invalid_bar_settings_are_rejected_at_authoring():
 
 
 def _to_slots(cp, payloads: list[bytes]):
-    from holoscan_finance.marketdata.gpu_mitch import SLOT_BYTES
+    from holoscan_finance.marketdata.gpu_sbe import SLOT_BYTES
 
     host = np.zeros((len(payloads), SLOT_BYTES), np.uint8)
     for i, p in enumerate(payloads):
@@ -275,7 +275,7 @@ def _to_slots(cp, payloads: list[bytes]):
 def gpu_batches(cp, generation: int = 1) -> list:
     """The synthetic stream decoded on the GPU in 97-packet batches."""
     from holoscan_finance.marketdata.gpu_bars import GpuReplayBatch
-    from holoscan_finance.marketdata.gpu_mitch import decode_packets
+    from holoscan_finance.marketdata.gpu_sbe import decode_packets
 
     batches = []
     for lo in range(0, len(PAYLOADS), 97):

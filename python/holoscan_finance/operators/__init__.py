@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The ten Holoscan 5 operators, each a thin adapter around a library processor.
 
-Sources: ``GpuMitchSourceOp``, ``GpuMitchReplaySourceOp``, ``UdpPacketSourceOp``,
-``DaqiriPacketSourceOp``. Processing: ``MitchDecodeOp``, ``QuoteBarsOp``, ``RollingRiskOp``,
+Sources: ``GpuSbeSourceOp``, ``GpuSbeReplaySourceOp``, ``UdpPacketSourceOp``,
+``DaqiriPacketSourceOp``. Processing: ``SbeDecodeOp``, ``QuoteBarsOp``, ``RollingRiskOp``,
 ``RiskCrossCheckOp``. Sink: ``CallbackSinkOp``. holomq: ``RiskSummaryOp``. Their catalog
 entries are ``operators/<snake>_op/`` at the repository root. The classes load on first
 access, so importing this package imports no Holoscan; ``edges`` holds the edge presets.
@@ -15,11 +15,11 @@ from importlib import import_module
 from typing import Any
 
 _MODULES = {
-    "GpuMitchSourceOp": ".gpu_mitch_source",
-    "GpuMitchReplaySourceOp": ".gpu_mitch_source",
+    "GpuSbeSourceOp": ".gpu_sbe_source",
+    "GpuSbeReplaySourceOp": ".gpu_sbe_source",
     "UdpPacketSourceOp": ".packet_sources",
     "DaqiriPacketSourceOp": ".packet_sources",
-    "MitchDecodeOp": ".mitch_decode",
+    "SbeDecodeOp": ".sbe_decode",
     "QuoteBarsOp": ".quote_bars",
     "RollingRiskOp": ".rolling_risk",
     "RiskCrossCheckOp": ".risk_cross_check",

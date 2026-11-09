@@ -46,10 +46,10 @@ policy.
 `holoscan-finance` is the Holoscan Module for Financial Services Industry: a self-contained
 [Holoscan SDK 5](https://github.com/nvidia-holoscan) module for building streaming
 financial-services applications. The Python package `holoscan_finance` (public alias `holoscan.finance`)
-provides ten operators: four receive sources (`GpuMitchSourceOp`, `GpuMitchReplaySourceOp`,
-`UdpPacketSourceOp`, `DaqiriPacketSourceOp`), `MitchDecodeOp`, `QuoteBarsOp`, `RollingRiskOp`,
+provides ten operators: four receive sources (`GpuSbeSourceOp`, `GpuSbeReplaySourceOp`,
+`UdpPacketSourceOp`, `DaqiriPacketSourceOp`), `SbeDecodeOp`, `QuoteBarsOp`, `RollingRiskOp`,
 `RiskCrossCheckOp`, `CallbackSinkOp` and `RiskSummaryOp`. It also provides the libraries behind
-them: the MITCH codec, CUDA decode and quote-bar kernels, the covariance engine, and the control
+them: the SBE codec and schema, CUDA encode/decode and quote-bar kernels, the covariance engine, and the control
 plane and web dashboard. Two example applications under `examples/` compose these operators:
 `equity_analytics` is a live web dashboard; `market_data_bench` is a headless benchmark that
 reads only capture files.
@@ -105,11 +105,11 @@ Key boundaries and interfaces:
     lengths. The kernel-socket path relies on the operating system's IP stack, which reassembles
     fragments, so datagrams up to 64 KiB reach the decoder. No path checks IP or UDP checksums or
     the destination address, and DAQIRI steers on the UDP destination port only.
-  - *Decoding.* MITCH unit framing, message lengths and fields are checked by the Python decoder
-    and the `mitch_decode` kernel. Both apply the same rejection rules and are tested bit-for-bit
+  - *Decoding.* The SBE message header, block lengths, entry count, sequence and every entry's fields
+    are checked by the Python decoder and the `sbe_decode` kernel. Both apply the same rejection rules and are tested bit-for-bit
     against each other, including with mutated packets. On the GPU paths, payloads are copied
     into fixed 2,048-byte device slots, and larger payloads are rejected.
-  - *Rejections.* Rejected packets are not decoded. MITCH rejections are counted on every path,
+  - *Rejections.* Rejected packets are not decoded. SBE rejections are counted on every path,
     and non-UDP frames on the GPU paths. On the DAQIRI host path, frames that fail the IPv4/UDP
     check are dropped without a counter.
   - *Sessions.* Packets whose UDP source port differs from the current manifest's sender port are
@@ -171,7 +171,7 @@ Key boundaries and interfaces:
 The following scenarios represent the primary security concerns for this project, including its
 auxiliary build, deployment and tooling paths:
 
-1. **Market-data injection driving incorrect analytics.** MITCH over UDP carries no
+1. **Market-data injection driving incorrect analytics.** SBE over UDP carries no
    authentication or integrity protection. The sender-port filter and per-session sequence checks
    detect loss and stale generations; they are not authentication. A party that can deliver
    datagrams to the receive port, or frames to the NIC queue, with the expected source port and

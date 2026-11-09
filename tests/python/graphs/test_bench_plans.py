@@ -23,7 +23,7 @@ from holoscan_finance.app import bench
 from holoscan_finance.app.bench import BenchContext
 from holoscan_finance.app.plan import Edge, PlanView, check_plan, plan_summary
 from holoscan_finance.app.runner import ExitCode
-from holoscan_finance.operators import GpuMitchReplaySourceOp
+from holoscan_finance.operators import GpuSbeReplaySourceOp
 from holoscan_finance.payloads import BarCounters
 
 pytestmark = pytest.mark.sdk
@@ -32,7 +32,7 @@ APP = load_app("market_data_bench")
 CPUS = sorted(os.sched_getaffinity(0))
 
 
-class RecordingSource(GpuMitchReplaySourceOp):
+class RecordingSource(GpuSbeReplaySourceOp):
     """The bench's source, recording the ``helper_cpus`` it was given at ``graph.op``."""
 
     helper_cpus_seen: list[list[int]] = []
@@ -47,7 +47,7 @@ def compile_bench(monkeypatch, *flags: str):
     cpus = cpu_sets(args)
     ctx = BenchContext.from_args(args, cpus)
     RecordingSource.helper_cpus_seen.clear()
-    monkeypatch.setattr(APP, "GpuMitchReplaySourceOp", RecordingSource)
+    monkeypatch.setattr(APP, "GpuSbeReplaySourceOp", RecordingSource)
     g, lanes = APP.compose(args, ctx)
     plan = hs.compile(g, lanes.compile_options())
     assert plan.ok, plan.summary()

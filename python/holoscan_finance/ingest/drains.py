@@ -4,7 +4,8 @@
 and the Python fallback.
 
 A drain gathers each burst's UDP payloads into consecutive rows of a preallocated device
-ring (never wrapping a burst), copies the 7-column receive header to pinned host memory and
+ring (never wrapping a burst), copies the ``HEADER_COLS``-column receive header to pinned host
+memory and
 publishes one record per burst; the GPU source releases ring space once decode has
 synchronized. ``daqiri_drain.cpp`` implements this protocol without the GIL;
 ``DeviceReplayDrain`` implements it over pcap frames resident in device memory, with the
@@ -25,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
-from ..marketdata.gpu_mitch import SLOT_BYTES, UNIT_HEADER, receive_frames
+from ..marketdata.gpu_sbe import HEADER_COLS, PACKET_HEADER, SLOT_BYTES, receive_frames
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -83,8 +84,8 @@ class DeviceRing:
     """Device slots and receive headers, pinned host headers and the frame-address buffers."""
 
     slots: Any  # cupy (capacity, SLOT_BYTES) uint8
-    header_dev: Any  # cupy (capacity, 7) int64
-    header_host: np.ndarray  # pinned (capacity, 7) int64
+    header_dev: Any  # cupy (capacity, HEADER_COLS) int64
+    header_host: np.ndarray  # pinned (capacity, HEADER_COLS) int64
     packed_dev: Any  # cupy (2 * max_burst,) uint64: frame addresses, then lengths
     packed_host: np.ndarray  # pinned, the same
     capacity: int
@@ -100,8 +101,8 @@ class DeviceRing:
         with cp.cuda.Device(gpu_device):
             ring = cls(
                 slots=cp.empty((capacity, SLOT_BYTES), cp.uint8),
-                header_dev=cp.empty((capacity, 7), cp.int64),
-                header_host=cupyx.empty_pinned((capacity, 7), np.int64),
+                header_dev=cp.empty((capacity, HEADER_COLS), cp.int64),
+                header_host=cupyx.empty_pinned((capacity, HEADER_COLS), np.int64),
                 packed_dev=cp.empty(2 * max_burst, cp.uint64),
                 packed_host=cupyx.empty_pinned(2 * max_burst, np.uint64),
                 capacity=capacity,
@@ -217,7 +218,7 @@ class DeviceReplayDrain:
         start_delay_ms: int = 0,
         on_loop: Callable[[int], int | None] | None = None,
         settled: Callable[[], bool] | None = None,
-        min_payload: int = UNIT_HEADER,
+        min_payload: int = PACKET_HEADER,
         max_records: int = 65536,
         gpu_device: int = 0,
     ) -> None:
@@ -497,7 +498,7 @@ class DeviceReplayDrain:
 
 
 class PythonGpuDrain:
-    """The Python drain (thread ``gpu-mitch-drain``): per-packet ``get_packet_ptr`` and
+    """The Python drain (thread ``gpu-sbe-drain``): per-packet ``get_packet_ptr`` and
     ``get_packet_length`` calls, the gather into a slot buffer per burst on its own stream,
     and the accounting from this thread. The fallback when the native helper cannot be
     built and the switch for drain comparisons; unlike the native drain it needs the GIL for
@@ -524,7 +525,7 @@ class PythonGpuDrain:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="gpu-mitch-drain", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="gpu-sbe-drain", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -540,7 +541,7 @@ class PythonGpuDrain:
         try:
             self._drain()
         except Exception as exc:
-            error = f"GPU MITCH RX failed: {exc}"
+            error = f"GPU SBE RX failed: {exc}"
             logger.exception(error)
         finally:
             self._ingest.end_input(error)
@@ -584,7 +585,7 @@ class PythonGpuDrain:
                     slots = cp.empty((n, SLOT_BYTES), cp.uint8)
                     marks.append(time.perf_counter_ns())
                     header_d = receive_frames(
-                        cp.asarray(packed), n, slots, min_payload=UNIT_HEADER, stream=stream
+                        cp.asarray(packed), n, slots, min_payload=PACKET_HEADER, stream=stream
                     )
                     marks.append(time.perf_counter_ns())
                     header = cp.asnumpy(header_d, stream=stream).T

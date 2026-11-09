@@ -1,14 +1,15 @@
-# GpuMitchSourceOp
+# GpuSbeSourceOp
 
-GPUDirect receive for MITCH market data. The NIC writes frames straight into GPU memory and
+GPUDirect receive for FIX SBE market data. The NIC writes frames straight into GPU memory and
 CUDA kernels unpack and decode them, so no packet payload ever reaches the CPU:
 
 ```text
 ConnectX → DAQIRI RX buffers in GPU memory (dma-buf)
          → native drain thread hf-drain (no Python lock): gather_frame copies the UDP payloads
-           into a device slot ring and checks MITCH framing; the burst returns to the NIC
-         → compute(): receive accounting on a 7-column header per packet, staging,
-           GPU MITCH decode, legacy-stream sync, ring release → events (list[GpuReplayBatch])
+           into a device slot ring and checks the SBE framing; the burst returns to the NIC
+         → compute(): receive accounting on a 6-column header per packet, staging,
+           GPU SBE decode driven by the device header (one launch), legacy-stream sync,
+           ring release → events (list[GpuReplayBatch])
 ```
 
 The drain ([daqiri_drain.cpp](../../python/holoscan_finance/ingest/native/daqiri_drain.cpp))
@@ -20,11 +21,11 @@ from being recycled: the ring absorbs the stall and `compute()` catches up. When
 full the drain holds the burst, so overflow shows up as NIC drops and sequence gaps, never
 as silently discarded packets. Decode is fused into the source: ring rows stay leased until
 decode has synchronized, so the lease has exactly one consumer. It is sized for 200,000
-packets/s (6.6M MITCH messages/s); see [GPUDirect ingest](../../docs/GPU_INGEST.md), and for
+packets/s (6M SBE entries/s); see [GPUDirect ingest](../../docs/GPU_INGEST.md), and for
 synthetic NIC-free validation [VALIDATION.md](../../docs/VALIDATION.md).
 
 Processor: `holoscan_finance.ingest.gpu_ingest.GpuIngest` with
-`holoscan_finance.marketdata.gpu_decoder.GpuMitchDecoder`.
+`holoscan_finance.marketdata.gpu_decoder.GpuSbeDecoder`.
 
 ## Requirements
 
@@ -46,11 +47,11 @@ Contract: `OnClock(poll_period_us)`; no idle sleep, the clock paces the source.
 
 ## Params
 
-Shared with `GpuMitchReplaySourceOp`:
+Shared with `GpuSbeReplaySourceOp`:
 
 | Param | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `batch_size` | int | `131072` | max MITCH messages staged per batch |
+| `batch_size` | int | `131072` | max SBE entries (observations) staged per batch |
 | `ring_size` | int | `1048576` | device slots, 2 KiB each; covers a stall of `ring_size` / packet rate |
 | `poll_period_us` | int | `500` | below 100 needs a busy-polled lane |
 | `gpu_device` | int | `0` | CUDA device of the ring and kernels |
@@ -63,7 +64,7 @@ Shared with `GpuMitchReplaySourceOp`:
 | `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`; private if empty |
 | `tap` | `Ref` | `Ref()` | `Ref(CaptureTap)`; no capture recording if empty |
 
-`GpuMitchSourceOp` only:
+`GpuSbeSourceOp` only:
 
 | Param | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -101,7 +102,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
   port are stale. Ring rows are released only after the legacy stream synchronized.
 - **Backpressure.** A full downstream edge is held and retried at the next activation
   (`PendingEmits`); a compute with a backlog emits nothing new.
-- **Fallback.** Without the native helper the Python drain `gpu-mitch-drain` does the same
+- **Fallback.** Without the native helper the Python drain `gpu-sbe-drain` does the same
   with one binding call per packet and the GIL per burst (`frame_fetch = "per-packet
   binding"`).
 
@@ -109,7 +110,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
 
 - Out: `lossless(4)` into `QuoteBarsOp(backend="gpu")`, in the same lane.
 - Lane: the entry of `ingest`; the drain and DPDK threads run outside the graph.
-- Threads: `hf-drain` (C++, never takes the GIL) or `gpu-mitch-drain` (Python); the DPDK
+- Threads: `hf-drain` (C++, never takes the GIL) or `gpu-sbe-drain` (Python); the DPDK
   lcores pinned by DPDK; the DAQIRI stats thread (moved off the lcores by the sweep).
 - Streams: the drains gather on their own non-blocking stream and synchronize each burst;
   decode runs on the legacy stream.
@@ -130,11 +131,11 @@ count over 10, 50 and 100 ms), plus `feed_buckets()`, `ring_fill()`, `ring_peak(
 ## Example
 
 ```python
-from holoscan_finance.operators import GpuMitchSourceOp, QuoteBarsOp
+from holoscan_finance.operators import GpuSbeSourceOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
-source = g.op(GpuMitchSourceOp, "source", port=26400, pcie_address="0004:03:00.0",
+source = g.op(GpuSbeSourceOp, "source", port=26400, pcie_address="0004:03:00.0",
               init_cpus=sorted(cpus.all), helper_cpus=sorted(cpus.helper),
               directory=Ref(knob), stats=Ref(ingest_stats))
 # nothing consumes bar windows here: emit_windows=False leaves `window` undeclared

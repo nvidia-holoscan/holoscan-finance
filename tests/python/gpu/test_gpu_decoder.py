@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuMitchDecoder`` keeps its contract: stale sender ports never reach pass 2, accepted
+"""``GpuSbeDecoder`` keeps its contract: stale sender ports never reach pass 2, accepted
 packets become one device batch whose per-packet metadata and columns equal the host decode,
 and malformed packets are counted. Also the decode warm-up."""
 
@@ -13,8 +13,8 @@ import pytest
 from test_gpu_decode import MIDNIGHT, UNIVERSE, host_decode, to_slots
 
 from holoscan_finance.marketdata import warmup
-from holoscan_finance.marketdata.gpu_decoder import DecodeCounts, GpuMitchDecoder
-from holoscan_finance.marketdata.gpu_mitch import FIELDS
+from holoscan_finance.marketdata.gpu_decoder import DecodeCounts, GpuSbeDecoder
+from holoscan_finance.marketdata.gpu_sbe import FIELDS, inspect_packets
 from holoscan_finance.marketdata.records import EVENT_DTYPE, ReplayBatch
 from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE
@@ -45,18 +45,27 @@ def directory(generation=9):
     )
 
 
-def decode(payloads, ports, decoder=None):
+def staged(payloads, ports):
+    """Device slots and the receive header rows the sources stage: ``inspect_packets`` has
+    no frame to take the source port from, so the test fills that column in."""
     slots, lens = to_slots(payloads)
+    header = inspect_packets(slots, lens)
+    header[:, 1] = cp.asarray(np.asarray(ports, np.int64))
+    return slots, header
+
+
+def decode(payloads, ports, decoder=None):
+    slots, header = staged(payloads, ports)
     recv = np.arange(len(payloads), dtype=np.int64) * 1000 + 7
-    out = (decoder or GpuMitchDecoder()).decode(slots, lens, np.asarray(ports), recv, directory())
+    out = (decoder or GpuSbeDecoder()).decode(slots, header, np.asarray(ports), recv, directory())
     return out, recv
 
 
 def test_without_a_directory_or_with_other_ports_everything_is_stale():
     payloads = synthetic_stream(np.random.default_rng(1), 5, UNIVERSE, MIDNIGHT)
-    slots, lens = to_slots(payloads)
     ports, recv = np.full(5, PORT), np.arange(5, dtype=np.int64)
-    assert GpuMitchDecoder().decode(slots, lens, ports, recv, None) == ([], DecodeCounts(0, 5, 0))
+    slots, header = staged(payloads, ports)
+    assert GpuSbeDecoder().decode(slots, header, ports, recv, None) == ([], DecodeCounts(0, 5, 0))
     (batches, counts), _ = decode(payloads, np.full(5, PORT + 1))
     assert batches == [] and counts == DecodeCounts(0, 5, 0)
 

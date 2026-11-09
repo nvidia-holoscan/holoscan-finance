@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """The host ingest lane loses nothing: 50,000 packets through a test ``PacketBatch`` source
--> ``MitchDecodeOp`` -> ``QuoteBarsOp(cpu)`` on ``lossless(16)`` edges in one lane. Every
+-> ``SbeDecodeOp`` -> ``QuoteBarsOp(cpu)`` on ``lossless(16)`` edges in one lane. Every
 message is decoded and every observation reaches the bars, with no backpressure error, and
 the finite run ends by the drained rule (the ``DrainedCondition`` terms for this chain)."""
 
@@ -14,9 +14,10 @@ import numpy as np
 import pytest
 
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE, TRADE
+from holoscan_finance.marketdata.sbe_codec import packet_count
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
-from holoscan_finance.operators import MitchDecodeOp, QuoteBarsOp
+from holoscan_finance.operators import QuoteBarsOp, SbeDecodeOp
 from holoscan_finance.operators._common import PendingEmits
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.payloads import PacketBatch
@@ -96,8 +97,8 @@ class PacketFeed(hs.Operator):
         elif self._next < len(payloads):
             chunk = payloads[self._next : self._next + self.batch_packets]
             now = time.time_ns()
-            items = tuple((p, now, p[2], ("127.0.0.1", PORT)) for p in chunk)
-            batch = PacketBatch(items, sum(p[2] for p in chunk), self._index)
+            items = tuple((p, now, packet_count(p), ("127.0.0.1", PORT)) for p in chunk)
+            batch = PacketBatch(items, sum(packet_count(p) for p in chunk), self._index)
             self._next, self._index = self._next + len(chunk), self._index + 1
             self._pending.add(self.packets, batch, on_sent=st.count_packet_batch)
             self._pending.flush()
@@ -107,11 +108,11 @@ class PacketFeed(hs.Operator):
 
 def test_every_message_reaches_the_bars_and_the_run_drains():
     payloads = replay_units(PACKETS)
-    messages = sum(p[2] for p in payloads)  # unit header count: every MITCH message incl. Time
+    messages = sum(packet_count(p) for p in payloads)  # header count: every SBE entry
     ingest, bars_stats, knob = IngestStats(), BarsStats(), directory()
     g = hs.Graph("host_chain", default_clock=hs.RealtimeClock)
     source = g.op(PacketFeed, "source", payloads=Ref(payloads), stats=Ref(ingest))
-    decode = g.op(MitchDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest))
+    decode = g.op(SbeDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest))
     bars = g.op(
         QuoteBarsOp,
         "bars",

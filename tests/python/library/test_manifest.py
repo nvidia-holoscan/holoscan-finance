@@ -71,7 +71,7 @@ def test_the_directory_owns_a_deep_copy():
     "changes",
     [
         dict(format="nyq-equity-replay-v0"),
-        dict(wire_protocol="mit303-11.8"),
+        dict(wire_protocol="itch-5.0-moldudp64-nyq-replay-v1"),
         dict(market_timezone="UTC"),
         dict(sender_port="50001"),
         dict(sender_port=True),

@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:application:v1",
   "application": {
     "name": "equity_analytics",
-    "description": "Example application of the holoscan-finance module: synthetic MITCH feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
+    "description": "Example application of the holoscan-finance module: synthetic FIX SBE market-data feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -27,11 +27,11 @@
     "ranking": 2,
     "requirements": {
       "operators": [
-        "gpu_mitch_source_op",
-        "gpu_mitch_replay_source_op",
+        "gpu_sbe_source_op",
+        "gpu_sbe_replay_source_op",
         "udp_packet_source_op",
         "daqiri_packet_source_op",
-        "mitch_decode_op",
+        "sbe_decode_op",
         "quote_bars_op",
         "rolling_risk_op",
         "risk_cross_check_op",
@@ -51,7 +51,7 @@
       "replay_pcap": {
         "description": "A full synthetic day replayed from GPU memory at 200,000 packets/s",
         "run": {
-          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --replay-pps 200000 --analytics-backend compare\"",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --replay-pps 200000 --analytics-backend compare\"",
           "workdir": "holohub_bin"
         }
       },

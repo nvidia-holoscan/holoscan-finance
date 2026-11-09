@@ -10,11 +10,11 @@ module alias `holoscan.finance.operators`); edge presets live in
 
 | Operator | Folder | What it does |
 | --- | --- | --- |
-| `GpuMitchSourceOp` | [gpu_mitch_source_op](gpu_mitch_source_op/README.md) | DAQIRI GPUDirect into GPU memory; native drain, GPU gather and MITCH decode |
-| `GpuMitchReplaySourceOp` | [gpu_mitch_replay_source_op](gpu_mitch_replay_source_op/README.md) | NIC-free: pcap frames in GPU memory through the same gather, ring and decode |
+| `GpuSbeSourceOp` | [gpu_sbe_source_op](gpu_sbe_source_op/README.md) | DAQIRI GPUDirect into GPU memory; native drain, GPU gather and SBE decode |
+| `GpuSbeReplaySourceOp` | [gpu_sbe_replay_source_op](gpu_sbe_replay_source_op/README.md) | NIC-free: pcap frames in GPU memory through the same gather, ring and decode |
 | `UdpPacketSourceOp` | [udp_packet_source_op](udp_packet_source_op/README.md) | Kernel UDP socket (host baseline) |
 | `DaqiriPacketSourceOp` | [daqiri_packet_source_op](daqiri_packet_source_op/README.md) | DAQIRI into pinned host memory (host baseline) |
-| `MitchDecodeOp` | [mitch_decode_op](mitch_decode_op/README.md) | Python reference MITCH decode of host packet batches |
+| `SbeDecodeOp` | [sbe_decode_op](sbe_decode_op/README.md) | Python reference SBE decode of host packet batches |
 | `QuoteBarsOp` | [quote_bars_op](quote_bars_op/README.md) | Event-time quote bars on the GPU or with NumPy; rolling windows of returns |
 | `RollingRiskOp` | [rolling_risk_op](rolling_risk_op/README.md) | Volatility, covariance and correlation of the newest window at a bounded rate |
 | `RiskCrossCheckOp` | [risk_cross_check_op](risk_cross_check_op/README.md) | CPU recomputation and agreement check of validated GPU windows |
@@ -30,9 +30,9 @@ authored lanes (runtime threads); the `market_data_bench --check` reference adds
 `reference` lane with a second `QuoteBarsOp(cpu)` fed by the same GPU source:
 
 ```text
-[ingest]     GpuMitchSourceOp | GpuMitchReplaySourceOp ──events──▶ QuoteBarsOp(gpu) ──┐
-             UdpPacketSourceOp | DaqiriPacketSourceOp ──packets──▶ MitchDecodeOp       │
-                                        MitchDecodeOp ──events───▶ QuoteBarsOp(cpu) ──┤
+[ingest]     GpuSbeSourceOp | GpuSbeReplaySourceOp ──events──▶ QuoteBarsOp(gpu) ──┐
+             UdpPacketSourceOp | DaqiriPacketSourceOp ──packets──▶ SbeDecodeOp       │
+                                        SbeDecodeOp ──events───▶ QuoteBarsOp(cpu) ──┤
                                                                      window (LATEST)  │
 [analytics]  RollingRiskOp ◀──────────────────────────────────────────────────────────┘
                ├──risk──▶ CallbackSinkOp (ResultsStore.on_risk)
@@ -56,8 +56,8 @@ emitting device data, so no payload carries a CUDA event.
 
 | Payload | From → to | Notes |
 | --- | --- | --- |
-| `PacketBatch` | host sources `.packets` → `MitchDecodeOp.packets` | `(datagram, recv_wall_ns, wire_count, peer)` per packet; host memory |
-| `list[ReplayBatch]` | `MitchDecodeOp.events` → `QuoteBarsOp(cpu).events` | one batch per accepted packet |
+| `PacketBatch` | host sources `.packets` → `SbeDecodeOp.packets` | `(datagram, recv_wall_ns, wire_count, peer)` per packet; host memory |
+| `list[ReplayBatch]` | `SbeDecodeOp.events` → `QuoteBarsOp(cpu).events` | one batch per accepted packet |
 | `list[GpuReplayBatch]` | GPU sources `.events` → `QuoteBarsOp.events` | always one element; columns in GPU memory, complete before emit |
 | `BarWindow` | `QuoteBarsOp.window` → `RollingRiskOp.window`, `CallbackSinkOp` | per-bar return vectors never mutated after their bar closed; `rows` is stacked by the consumer, so a skipped window costs no GPU work |
 | `RiskUpdate` | `RollingRiskOp.risk` / `.validate` → `CallbackSinkOp`, `RiskCrossCheckOp`, `RiskSummaryOp` | host results; `rows_host` on validated windows |

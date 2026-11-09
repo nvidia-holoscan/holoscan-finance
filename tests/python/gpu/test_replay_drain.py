@@ -27,7 +27,7 @@ from holoscan_finance.ingest.drains import (
     DeviceReplayDrain,
     DeviceRing,
 )
-from holoscan_finance.marketdata import gpu_mitch
+from holoscan_finance.marketdata import gpu_sbe
 from holoscan_finance.marketdata.framing import PcapFrames, udp_frame, write_pcap
 from holoscan_finance.nyq.mapping import day_start_ns
 from holoscan_finance.nyq.synthetic import synthetic_stream
@@ -55,7 +55,7 @@ def make_drain(tmp_path, units, *, capacity=64, burst=16, pps=0, loops=1, **kw):
     drain = DeviceReplayDrain(
         device_frames(tmp_path, units),
         ring,
-        gather_fn=kw.pop("gather_fn", None) or gpu_mitch._kernels().get_function("gather_frame"),
+        gather_fn=kw.pop("gather_fn", None) or gpu_sbe._kernels().get_function("gather_frame"),
         pps=pps,
         loops=loops,
         burst_packets=burst,
@@ -295,7 +295,7 @@ def replayed_ports(frames: PcapFrames, sender_port: int | None, loops: int) -> l
     drain = DeviceReplayDrain(
         DeviceFrames.upload(frames, 0, sender_port=sender_port),
         ring,
-        gather_fn=gpu_mitch._kernels().get_function("gather_frame"),
+        gather_fn=gpu_sbe._kernels().get_function("gather_frame"),
         pps=0,
         loops=loops,
         burst_packets=16,

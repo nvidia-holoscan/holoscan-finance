@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Field-for-field validation of the GPU MITCH decoder against ``nyq.mapping.decode_packet``.
+"""Field-for-field validation of the GPU SBE decoder against ``nyq.mapping.decode_packet``.
 
-Reads a pcap of the MITCH replay (as captured on the wire), decodes every packet
+Reads a pcap of the SBE replay (as captured on the wire), decodes every packet
 with the host decoder (multiprocessing) and with the GPU kernels, and requires
-bit-identical results: per-packet accept/reject stage, observation counts, MITCH
-message counts, sequence numbers and every observation field (floats compared as
+bit-identical results: per-packet accept/reject stage, observation counts, entry
+counts, sequence numbers and every observation field (floats compared as
 raw bit patterns, so NaN placement and signed zeros must match too). A fuzz pass
 mutates real packets to exercise every rejection rule. ``--bars`` replays the day
 through host ``QuoteBars`` and ``GpuQuoteBars`` with identical batching instead;
@@ -28,7 +28,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..marketdata.framing import PcapFrames
-from ..marketdata.gpu_mitch import SLOT_BYTES
+from ..marketdata.gpu_sbe import SLOT_BYTES
+from ..marketdata.sbe_codec import packet_count
 from ..marketdata.sequence import SequenceTracker
 from ..nyq.mapping import day_start_ns, decode_packet
 from ..nyq.synthetic import fuzz
@@ -56,7 +57,7 @@ def run(args: argparse.Namespace) -> int:
     """Decode validation: the whole capture in ``--chunk`` packets, then the fuzz pass."""
     import cupy as cp
 
-    from ..marketdata.gpu_mitch import decode_packets
+    from ..marketdata.gpu_sbe import decode_packets
 
     manifest, _ = open_tape(args.tape)
     midnight_ns = day_start_ns(manifest["date"])
@@ -81,7 +82,7 @@ def run(args: argparse.Namespace) -> int:
         host = host_decode(part, midnight_ns, universe, args.workers)
         host_s += time.perf_counter() - t
         if args.decoder == "cpu":
-            from .cpu_mitch import decode_packets as cpu_decode
+            from .cpu_sbe import decode_packets as cpu_decode
 
             slots, lens = (x.get() for x in to_slots(part))
             t = time.perf_counter()
@@ -117,7 +118,7 @@ def run(args: argparse.Namespace) -> int:
     host = host_decode(fz, midnight_ns, universe, args.workers)
     slots, lens = to_slots(fz)
     if args.decoder == "cpu":
-        from .cpu_mitch import decode_packets as cpu_decode
+        from .cpu_sbe import decode_packets as cpu_decode
 
         gpu = cpu_decode(
             slots.get(), lens.get().astype(np.int64), midnight_ns=midnight_ns, universe=universe
@@ -146,7 +147,7 @@ def run_bars(args: argparse.Namespace) -> int:
 
     from ..marketdata.bars import QuoteBars
     from ..marketdata.gpu_bars import GpuQuoteBars, GpuReplayBatch, apply_sequence
-    from ..marketdata.gpu_mitch import decode_packets
+    from ..marketdata.gpu_sbe import decode_packets
 
     manifest, _ = open_tape(args.tape)
     midnight_ns = day_start_ns(manifest["date"])
@@ -180,7 +181,7 @@ def run_bars(args: argparse.Namespace) -> int:
         # Stage packets the way the source's compute() does: until >= group_msgs messages.
         j, staged = i, 0
         while j < n and staged < group_msgs:
-            staged += payloads[j][2] if len(payloads[j]) > 2 else 0
+            staged += packet_count(payloads[j])
             j += 1
         part = payloads[i:j]
         recv = np.arange(i, j, dtype=np.int64) * 1000 + 1

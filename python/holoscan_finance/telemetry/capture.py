@@ -82,7 +82,7 @@ class LatencyCapture:
 
     def record_packets(self, generation, events, sequence, wire_count, recv_ns):
         """Packets of one generation in arrival order, as arrays: per-packet observation
-        counts, MITCH sequences, wire message counts and receive stamps. Exactly
+        counts, SBE sequence numbers, wire entry counts and receive stamps. Exactly
         ``record_packet`` per packet: a gap is counted against the highest sequence seen so
         far, and a packet below it is reordered."""
         recv_ns = np.asarray(recv_ns, dtype=np.int64)

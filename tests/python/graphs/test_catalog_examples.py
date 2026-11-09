@@ -29,9 +29,9 @@ pytestmark = pytest.mark.sdk
 CATALOG = REPO / "operators"
 COMPOSITIONS = (
     "daqiri_packet_source_op",
-    "gpu_mitch_replay_source_op",
-    "gpu_mitch_source_op",
-    "mitch_decode_op",
+    "gpu_sbe_replay_source_op",
+    "gpu_sbe_source_op",
+    "sbe_decode_op",
     "quote_bars_op",
     "udp_packet_source_op",
 )

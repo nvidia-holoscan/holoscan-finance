@@ -36,7 +36,7 @@ streaming measurements. The small input matches the `market_data_bench smoke` pr
 python3 -m holoscan_finance.tools.synth \
     --out data/synth-small --symbols 500 --packets 50000 --seconds 1800 --seed 7 --reuse
 python3 -m holoscan_finance.tools.synth \
-    --out data/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --seed 7 --reuse
+    --out data/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --seed 7 --reuse
 python3 -m holoscan_finance.tools.bench_replay inspect data/synth-small/day.pcap --port 40000
 python3 -m holoscan_finance.tools.bench_replay inspect data/synth-day/day.pcap --port 40000
 ```
@@ -44,8 +44,11 @@ python3 -m holoscan_finance.tools.bench_replay inspect data/synth-day/day.pcap -
 Each output directory contains `tape/`, `day.pcap` and `synth.json`. The summary records
 the seed, arguments, file sizes and exact counts expected by a lossless receiver. The
 `--packets` argument specifies data packets; one final status-marker packet closes the
-last bar. MITCH Time messages count as wire messages but not observations.
+last bar. An SBE entry is one observation, so entry counts equal observation counts.
 `--reuse` reuses files only when the generation arguments and recorded sizes match.
+`--encoder gpu` packs and frames the capture with the CUDA encoder (`gpu_sbe.encode_units`
+and `frame_units`); it writes the same bytes as the NumPy packer, so either encoder may
+reuse the other's output. Compare the two with `cmp` on the pcaps when changing either.
 
 Pass: generation and inspection complete, and inspected packet and message
 counts match the generated capture summary. The replay directory comes from the matching
@@ -69,6 +72,19 @@ default 240,000 mutated packets. Bar state, counters and NaN patterns must match
 reference, and finite returns must be within 1 ULP. The dropped-packet run must produce
 identical sequence-gap handling and recovery. For a larger correctness pass, use
 `data/synth-day/day.pcap` and its tape with the same commands.
+
+The wire format itself is checked against the FIX SBE reference tool: `sbe-tool`
+(`uk.co.real-logic:sbe-all`) validates
+[`sbe_schema.xml`](../python/holoscan_finance/marketdata/sbe_schema.xml) with warnings
+fatal and generates a C++ codec, from which a probe prints the layout (identifiers, block
+lengths, every field's offset, length, id and null value, the enum values) that must equal
+what `sbe_codec` derives from the XML, and which must decode the hand-transcribed golden
+packet as the codec does. The check needs `java` (17 or later), `g++` and the jar:
+
+```bash
+bash scripts/fetch_sbe_tool.sh      # pinned version and SHA-256, into .cache/sbe
+python3 -m pytest -q tests/python/library/test_sbe_tool.py   # skipped without the three
+```
 
 ## Graph bit identity
 
@@ -97,7 +113,7 @@ holoscan run market_data_bench pcap
 
 These modes generate or reuse `data/synth-day`. `paced` includes the NIC-buffer model
 and GPU risk. Its gates are zero loss, real-time completion and replay lag p99 ≤ 5 ms at
-200,000 packets/s. `throughput` runs unpaced and requires at least 13.2M MITCH messages/s.
+200,000 packets/s. `throughput` runs unpaced and requires at least 12M SBE entries/s.
 `pcap` replays the same synthetic input at 200,000 packets/s with lossless and real-time
 gates. The numeric thresholds are requirements, not reported performance.
 
@@ -132,10 +148,11 @@ python3 -m holoscan_finance.tools.decode_bench \
 ```
 
 These compare Python, compiled CPU and GPU decode on the same packets, both alone and
-with quote bars. The default limit is 200,000 packets. Select thread counts available
-inside the process's CPU affinity. Compilation is excluded; GPU timing includes the
-header copy to the host and synchronization. The CPU bars use NumPy; a compiled,
-multi-core CPU bars implementation is not measured.
+with quote bars, and the NumPy and GPU encoders on the tape's observations. The default
+limit is 200,000 packets. Select thread counts available inside the process's CPU
+affinity. Compilation is excluded; GPU timing includes the per-packet results' copy to
+the host and synchronization. The CPU bars use NumPy; a compiled, multi-core CPU bars
+implementation is not measured.
 
 Pass: commands complete after the correctness checks above. Report throughput for each
 batch size and thread count without treating a speedup as a correctness gate.

@@ -2,8 +2,8 @@
 
 An example application of the Holoscan Module for Financial Services Industry: a headless,
 finite benchmark of the production GPU market-data chain, with no NIC. It replays the
-Ethernet frames of a MITCH capture from GPU memory through the same gather kernel, device
-ring, receive accounting, GPU MITCH decode and GPU quote bars as the GPUDirect path,
+Ethernet frames of an SBE capture from GPU memory through the same gather kernel, device
+ring, receive accounting, GPU SBE decode and GPU quote bars as the GPUDirect path,
 optionally adds the GPU risk lane, and stops as soon as everything is decoded and built. It
 reports throughput, loss, replay lag and placement, applies gates to them, and with
 `--check` proves that every bar the GPU built is bit-identical to the CPU backend and to an
@@ -17,7 +17,7 @@ graph by lane, with the policy and depth of every edge; the `windows` sink and t
 ```mermaid
 flowchart TB
     subgraph lane_ingest["lane ingest"]
-        source["source · GpuMitchReplaySourceOp<br/>pcap frames in GPU memory, DAQIRI burst rule, paced at --pps, optional NIC buffer model"]
+        source["source · GpuSbeReplaySourceOp<br/>pcap frames in GPU memory, DAQIRI burst rule, paced at --pps, optional NIC buffer model"]
         bars["bars · QuoteBarsOp(backend=gpu)"]
         windows["windows · CallbackSinkOp<br/>every GPU window, in order, to the checker"]
         source -->|"events · lossless(4)"| bars
@@ -43,7 +43,7 @@ flowchart TB
 
 | Operator | Class | Role |
 | --- | --- | --- |
-| `source` | `GpuMitchReplaySourceOp` | pcap frames in GPU memory, a software NIC with DAQIRI's burst rule (4,096 packets or 20 ms), paced at `--pps`, optional NIC buffer drop model (`--nic-bufs`) |
+| `source` | `GpuSbeReplaySourceOp` | pcap frames in GPU memory, a software NIC with DAQIRI's burst rule (4,096 packets or 20 ms), paced at `--pps`, optional NIC buffer drop model (`--nic-bufs`) |
 | `bars` | `QuoteBarsOp(backend="gpu")` | event-time quote bars on the GPU, same lane as the source |
 | `windows` | `CallbackSinkOp` | every GPU window, in order, to the checker |
 | `ref_bars` | `QuoteBarsOp(backend="cpu")` | the CPU twin, fed the very same decoded batches |
@@ -68,8 +68,8 @@ With the Holoscan CLI (`holoscan run market_data_bench <mode>`), on any GPU host
 | --- | --- |
 | `smoke` (default) | a small synthetic day, unpaced, `--check --require-lossless` (CI) |
 | `check` | the same on one million synthetic packets |
-| `paced` | a full synthetic day (2,886 symbols, 2.88M packets) at 200,000 packets/s with the NIC buffer model and GPU risk: lossless, real time, replay lag p99 ≤ 5 ms |
-| `throughput` | the full synthetic day unpaced: at least 13.2M MITCH messages/s (twice the 200k packets/s line rate) |
+| `paced` | a full synthetic day (2,886 symbols, 1.82M packets of 30 observations) at 200,000 packets/s with the NIC buffer model and GPU risk: lossless, real time, replay lag p99 ≤ 5 ms |
+| `throughput` | the full synthetic day unpaced: at least 12M SBE entries/s (twice the 200k packets/s line rate) |
 | `drops` | a capture with every 997th packet missing, `--check`: the gaps and the bars after them match the CPU backend and the host decode |
 | `pcap` | generates a full synthetic day under `synth-day/` and replays it at 200,000 packets/s: lossless and real time |
 | `plan` | compiles the `--check --risk gpu` composition, checks its rules and writes `market_data_bench.plan.json` |
@@ -137,5 +137,5 @@ Python code imports the canonical package, `holoscan_finance`; with the module i
 the same operators are available as `holoscan.finance`:
 
 ```python
-from holoscan.finance.operators import GpuMitchReplaySourceOp, QuoteBarsOp
+from holoscan.finance.operators import GpuSbeReplaySourceOp, QuoteBarsOp
 ```

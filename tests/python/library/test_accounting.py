@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Receive accounting: per datagram (host receivers) and per burst (GPU path) agree.
 
-The GPU path sees only the 7-column receive header of each packet and accounts a burst at a
+The GPU path sees only the 8-column receive header of each packet and accounts a burst at a
 time, vectorized for the contiguous case; the host receivers account every datagram. The
 same stream (gaps, reordering, duplicates, session changes, framing rejects, non-UDP frames
 and ring overflow) must give identical counters on both. No GPU needed.
@@ -13,10 +13,11 @@ from __future__ import annotations
 import numpy as np
 from fakes.fake_drain import receive_header
 
-from holoscan_finance.ingest.accounting import ReceiveAccounting, mitch_packet_header
+from holoscan_finance.ingest.accounting import ReceiveAccounting, sbe_packet_header
 from holoscan_finance.ingest.gpu_ingest import GpuIngest
 from holoscan_finance.ingest.host_receivers import UdpReceiver
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
+from holoscan_finance.marketdata.sbe_codec import pack_packet, packet_count
 from holoscan_finance.nyq.mapping import day_start_ns, pack_events
 from holoscan_finance.telemetry.stats import IngestStats
 
@@ -49,7 +50,7 @@ def stream(start: int, packets: int, port: int = 40001, ip: int = 1) -> tuple[li
     for _ in range(packets):
         data = unit(seq)
         out.append((data, port, ip))
-        seq += data[2]
+        seq += packet_count(data)
     return out, seq
 
 
@@ -60,10 +61,11 @@ def peer(port: int, ip: int) -> tuple[str, int]:
 def scenario() -> list[tuple[list, int]]:
     """Bursts of ``(payload | None, port, ip)`` with their receive times."""
     a, nxt = stream(1, 30)
-    b, _ = stream(nxt + 12, 30)  # gap between bursts
+    b, nxt_b = stream(nxt + 12, 30)  # gap between bursts
+    b.append((pack_packet([], nxt_b), 40001, 1))  # a heartbeat: the next sequence, no messages
     c = b[5:8] + a[3:5] + b[20:22]  # reordered and duplicate packets inside a burst
     d, _ = stream(1, 25, port=40002)  # a new sender session restarts at 1
-    junk = [(b"\x01\x02", 40001, 1), (bytes(8), 40001, 1), (None, 0, 0)]  # rejects, non-UDP
+    junk = [(b"\x01\x02", 40001, 1), (bytes(20) + b"x", 40001, 1), (None, 0, 0)]  # rejects, non-UDP
     return [(a, 10**9), (b, 10**9 + 5), (c + junk, 2 * 10**9), (d, 3 * 10**9)]
 
 
@@ -80,7 +82,7 @@ def contiguous() -> list[tuple[list, int]]:
 
 def framed(data: bytes | None) -> bool:
     try:
-        return data is not None and bool(mitch_packet_header(data, None))
+        return data is not None and bool(sbe_packet_header(data, None))
     except ValueError:
         return False
 
@@ -94,7 +96,7 @@ def test_packet_and_burst_observation_agree():
                 if data is None:
                     continue  # strip_udp_datagram -> None: never framed
                 try:
-                    per_packet.observe_packet(*mitch_packet_header(data, peer(port, ip)), recv_ns)
+                    per_packet.observe_packet(*sbe_packet_header(data, peer(port, ip)), recv_ns)
                 except ValueError:
                     host.malformed_packets += 1
             header = receive_header(burst)

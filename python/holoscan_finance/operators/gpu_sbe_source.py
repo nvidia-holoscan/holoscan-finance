@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuMitchSourceOp`` and ``GpuMitchReplaySourceOp``: GPU MITCH sources with fused decode.
+"""``GpuSbeSourceOp`` and ``GpuSbeReplaySourceOp``: GPU SBE sources with fused decode.
 
 Port: ``events`` (out, ``list[GpuReplayBatch]``, always one batch with device-resident
 columns). Contract: ``OnClock(poll_period_us)``. Edge: ``events -> QuoteBarsOp(backend="gpu")``
 with ``lossless(4)`` in the same lane: the source is the entry of ``ingest`` and shares it
 with the bars, so no per-packet work crosses a lane. Decode is fused because ring rows stay
 leased until decode synchronizes; the lease has one consumer by construction.
-``GpuMitchSourceOp`` receives through DAQIRI GPUDirect and the GIL-free native drain
-(sized for 200k packets/s, 6.6M msgs/s); ``GpuMitchReplaySourceOp`` replays a pcap from GPU
+``GpuSbeSourceOp`` receives through DAQIRI GPUDirect and the GIL-free native drain
+(sized for 200k packets/s, 6M entries/s); ``GpuSbeReplaySourceOp`` replays a pcap from GPU
 memory through the same gather, ring, accounting and decode, with no NIC.
 Processor: ``ingest.gpu_ingest.GpuIngest``.
 """
@@ -25,9 +25,9 @@ from ..ingest.daqiri import LOG_LEVELS, build_daqiri_config, require_daqiri
 from ..ingest.drains import DeviceFrames, DeviceReplayDrain, DeviceRing, PythonGpuDrain
 from ..ingest.gpu_ingest import GpuIngest
 from ..ingest.native import load_daqiri_drain
-from ..marketdata import gpu_mitch
+from ..marketdata import gpu_sbe
 from ..marketdata.framing import PcapFrames
-from ..marketdata.gpu_decoder import GpuMitchDecoder
+from ..marketdata.gpu_decoder import GpuSbeDecoder
 from ..marketdata.warmup import warm_decode_kernels
 from ..ref import Ref
 from ..telemetry.stats import IngestStats
@@ -38,15 +38,17 @@ logger = logging.getLogger(__name__)
 
 def _gather_kernel() -> Any:
     """The ``gather_frame`` RawKernel, compiled on the calling (lane) thread, not in a drain."""
-    return gpu_mitch._kernels().get_function("gather_frame")
+    return gpu_sbe._kernels().get_function("gather_frame")
 
 
-class _GpuMitchSourceBase(hs.Operator):
+class _GpuSbeSourceBase(hs.Operator):
     """Ports, Params and the compute shared by both GPU sources."""
 
     events = hs.Output("events", hs.pyobject)
 
-    batch_size = hs.Param(131072, range=(1, 4_194_304), description="max MITCH messages per batch")
+    batch_size = hs.Param(
+        131072, range=(1, 4_194_304), description="max SBE entries (observations) per batch"
+    )
     ring_size = hs.Param(1 << 20, range=(4096, 4_194_304), description="device slots (2 KiB each)")
     poll_period_us = hs.Param(
         500, range=(20, 100_000), description="OnClock period; below 100 needs a busy-polled lane"
@@ -135,7 +137,7 @@ class _GpuMitchSourceBase(hs.Operator):
     def _new_ingest(self) -> GpuIngest:
         return GpuIngest(
             stats=self._stats,
-            decoder=GpuMitchDecoder(self.gpu_device),
+            decoder=GpuSbeDecoder(self.gpu_device),
             ring_size=self.ring_size,
             batch_size=self.batch_size,
             keep_alive=self.keep_alive,
@@ -158,12 +160,12 @@ class _GpuMitchSourceBase(hs.Operator):
         self._stats.held = len(self._pending)
 
 
-class GpuMitchSourceOp(_GpuMitchSourceBase):
+class GpuSbeSourceOp(_GpuSbeSourceBase):
     """DAQIRI GPUDirect receive: the NIC writes frames into GPU memory and the GIL-free
     native drain (``hf-drain``) gathers their UDP payloads into the device ring, so a Python
     thread that stalls holding the GIL cannot stop NIC buffers from being recycled. Without
     the native helper (``native_drain`` False, ``HOLOSCAN_FINANCE_NATIVE_DRAIN=0`` or a
-    failed build) the Python drain ``gpu-mitch-drain`` does the same work with the GIL.
+    failed build) the Python drain ``gpu-sbe-drain`` does the same work with the GIL.
     """
 
     port = hs.Param(26400, range=(1, 65535), description="UDP destination port of the flow rule")
@@ -235,8 +237,8 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
                         gather_fn=_gather_kernel().kernel.ptr,  # the CUfunction
                         device=self.gpu_device,
                         **ring.native_kwargs(),
-                        stride=gpu_mitch.SLOT_BYTES,
-                        min_payload=gpu_mitch.UNIT_HEADER,
+                        stride=gpu_sbe.SLOT_BYTES,
+                        min_payload=gpu_sbe.PACKET_HEADER,
                         max_records=65536,
                         cpu=self.drain_core,
                     )
@@ -263,7 +265,7 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
         self._daq, self._ingest, self._drain, self._ring = daq, ingest, drain, ring
         self._open(ingest, "native drain" if drain_cls is not None else "per-packet binding")
         logger.info(
-            "GPUDirect MITCH source draining %s (%s) q%d into GPU %d, udp_dst=%d (%s)",
+            "GPUDirect SBE source draining %s (%s) q%d into GPU %d, udp_dst=%d (%s)",
             self.interface_name,
             self.pcie_address,
             self.queue_id,
@@ -300,7 +302,7 @@ class GpuMitchSourceOp(_GpuMitchSourceBase):
         )
 
 
-class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
+class GpuSbeReplaySourceOp(_GpuSbeSourceBase):
     """NIC-free GPU source: the Ethernet frames of a pcap, uploaded once into GPU memory, are
     replayed by a software NIC (``DeviceReplayDrain``, thread ``hf-replay``) at ``pps`` in
     DAQIRI-sized bursts; everything after the drain is the production code. The drain is
@@ -380,4 +382,4 @@ class GpuMitchReplaySourceOp(_GpuMitchSourceBase):
         )
 
 
-__all__ = ["GpuMitchReplaySourceOp", "GpuMitchSourceOp"]
+__all__ = ["GpuSbeReplaySourceOp", "GpuSbeSourceOp"]

@@ -1,8 +1,8 @@
 {
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
-    "name": "GpuMitchReplaySourceOp",
-    "description": "NIC-free GPU MITCH source: replays the Ethernet frames of a pcap from GPU memory through a software NIC with DAQIRI's burst cadence, into the production device ring, accounting and GPU decode.",
+    "name": "GpuSbeReplaySourceOp",
+    "description": "NIC-free GPU SBE source: replays the Ethernet frames of a pcap from GPU memory through a software NIC with DAQIRI's burst cadence, into the production device ring, accounting and GPU decode.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -43,7 +43,7 @@
       "hardware": [
         {
           "name": "CUDA GPU",
-          "description": "Device ring, gather and MITCH decode run on the GPU",
+          "description": "Device ring, gather and SBE decode run on the GPU",
           "required": true
         }
       ]

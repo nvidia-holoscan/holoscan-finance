@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``HostMitchDecoder``: the host decode rules per packet batch (stale sender ports, no
-directory, malformed units) and outputs equal to ``decode_packet``."""
+"""``HostSbeDecoder``: the host decode rules per packet batch (stale sender ports, no
+directory, malformed packets) and outputs equal to ``decode_packet``."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import numpy as np
 
 from holoscan_finance.marketdata.gpu_decoder import DecodeCounts
 from holoscan_finance.marketdata.records import EVENT_DTYPE
-from holoscan_finance.nyq.host_decoder import HostMitchDecoder
+from holoscan_finance.marketdata.sbe_codec import packet_count
+from holoscan_finance.nyq.host_decoder import HostSbeDecoder
 from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
@@ -41,7 +42,7 @@ def directory(generation=5, port=PORT):
 
 
 def packets(payloads, port=PORT):
-    wire = [p[2] if len(p) > 2 else 0 for p in payloads]  # the unit header's message count
+    wire = [packet_count(p) for p in payloads]  # the packet header's message count
     return PacketBatch(
         tuple((p, 1000 + i, w, ("10.0.0.1", port)) for i, (p, w) in enumerate(zip(payloads, wire))),
         sum(wire),
@@ -50,7 +51,7 @@ def packets(payloads, port=PORT):
 
 def test_outputs_and_counts_equal_decode_packet():
     payloads = synthetic_stream(np.random.default_rng(1), 60, UNIVERSE, MIDNIGHT)
-    out, counts = HostMitchDecoder().decode(packets(payloads), directory())
+    out, counts = HostSbeDecoder().decode(packets(payloads), directory())
     expected, messages = [], 0
     for i, p in enumerate(payloads):
         batches, count = decode_packet(
@@ -73,7 +74,7 @@ def test_outputs_and_counts_equal_decode_packet():
 
 def test_without_a_directory_every_packet_is_stale():
     payloads = synthetic_stream(np.random.default_rng(2), 5, UNIVERSE, MIDNIGHT)
-    assert HostMitchDecoder().decode(packets(payloads), None) == ([], DecodeCounts(0, 5, 0))
+    assert HostSbeDecoder().decode(packets(payloads), None) == ([], DecodeCounts(0, 5, 0))
 
 
 def test_other_sender_ports_and_unknown_peers_are_stale():
@@ -82,15 +83,15 @@ def test_other_sender_ports_and_unknown_peers_are_stale():
     items = list(batch.items)
     items[1] = items[1][:3] + (("10.0.0.1", PORT + 1),)  # the previous generation's port
     items[2] = items[2][:3] + (None,)
-    out, counts = HostMitchDecoder().decode(PacketBatch(tuple(items), batch.messages), directory())
-    assert counts == DecodeCounts(payloads[0][2] + payloads[3][2], 2, 0)
+    out, counts = HostSbeDecoder().decode(PacketBatch(tuple(items), batch.messages), directory())
+    assert counts == DecodeCounts(packet_count(payloads[0]) + packet_count(payloads[3]), 2, 0)
     assert [b.recv_wall_ns for b in out] == [1000, 1003]
 
 
 def test_malformed_units_are_counted_and_skipped():
     good = synthetic_stream(np.random.default_rng(4), 200, UNIVERSE, MIDNIGHT)
     mutated = fuzz(good, 600, seed=11)
-    out, counts = HostMitchDecoder().decode(packets(mutated), directory())
+    out, counts = HostSbeDecoder().decode(packets(mutated), directory())
     accepted = 0
     for i, p in enumerate(mutated):
         try:

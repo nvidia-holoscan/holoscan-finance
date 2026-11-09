@@ -25,11 +25,11 @@ import numpy as np
 from ..nyq.mapping import PROTOCOL
 from ..settings import GPU_INGEST_MODES
 
-TRANSPORT = "MITCH (MIT303 11.9) / UDP · equity replay mapping"
-MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
+TRANSPORT = "FIX Simple Binary Encoding 1.0 / UDP · equity replay schema"
+MESSAGE_COUNT_SCOPE = "SBE entries (one per observation); replay rate is source observations/s"
 PAYLOAD_PATHS = {
-    "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU MITCH decode",
-    "replay": "pcap frames in GPU memory -> GPU gather -> GPU MITCH decode",
+    "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU SBE decode",
+    "replay": "pcap frames in GPU memory -> GPU gather -> GPU SBE decode",
 }
 PROFILE_KEYS = ("date", "events", "profile", "start_ns", "end_ns")
 OBSERVATION_KEYS = ("events", "quotes", "trades", "invalid_quotes", "late_events", "completed_bars")

@@ -1,26 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``MitchDecodeOp``: the Python reference MITCH decoder of the host front ends.
+"""``SbeDecodeOp``: the Python reference SBE decoder of the host front ends.
 
 Ports: ``packets`` (in, ``PacketBatch``) -> ``events`` (out, ``list[ReplayBatch]``, one
 batch per accepted packet). Edges: ``lossless(16)`` from the source and ``lossless(16)``
 into ``QuoteBarsOp(backend="cpu")``, all in the ``ingest`` lane (no hop per packet). The
 directory is read once per batch, immediately before decoding, so a ``POST /manifest``
 reaches the next batch; packets from another sender port are stale. Processor:
-``nyq.host_decoder.HostMitchDecoder`` (the host reference path).
+``nyq.host_decoder.HostSbeDecoder`` (the host reference path).
 """
 
 from __future__ import annotations
 
 import holoscan as hs
 
-from ..nyq.host_decoder import HostMitchDecoder
+from ..nyq.host_decoder import HostSbeDecoder
 from ..ref import Ref
 from ..telemetry.stats import IngestStats
 from ._common import ref_obj
 
 
-class MitchDecodeOp(hs.Operator):
+class SbeDecodeOp(hs.Operator):
     """Decode every ``PacketBatch`` under the current feed directory.
 
     Writes only ``messages``, ``stale_packets``, ``decode_malformed``, ``event_batches`` and
@@ -43,7 +43,7 @@ class MitchDecodeOp(hs.Operator):
         return hs.Contract().trigger(hs.OnEach(self.packets))
 
     def start(self) -> None:
-        self._decoder = HostMitchDecoder()
+        self._decoder = HostSbeDecoder()
         self._knob = self.directory.obj
         self._stats = ref_obj(self.stats, IngestStats)
         self._tap = self.tap.obj

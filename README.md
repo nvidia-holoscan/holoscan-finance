@@ -10,8 +10,8 @@ Holoscan as `holoscan.finance`, and the module runs on the
 
 | The module provides | Where |
 | --- | --- |
-| Ten [operators](#operators): four receive sources (kernel UDP, DAQIRI into pinned host memory, DAQIRI GPUDirect into GPU memory, and a NIC-free GPU replay of a capture), MITCH decode, event-time quote bars, rolling GPU risk, a CPU cross-check, a callback sink and a holomq risk summary | `holoscan_finance.operators`; a catalog entry per operator under [operators/](operators/README.md) |
-| The libraries the operators wrap: the MITCH codec, CUDA decode and quote-bar kernels, the covariance engine, receive accounting, the control plane, telemetry and validation, all tested without Holoscan | `holoscan_finance.marketdata`, `nyq`, `ingest`, `analytics`, `control`, `telemetry`, `validation` |
+| Ten [operators](#operators): four receive sources (kernel UDP, DAQIRI into pinned host memory, DAQIRI GPUDirect into GPU memory, and a NIC-free GPU replay of a capture), SBE decode, event-time quote bars, rolling GPU risk, a CPU cross-check, a callback sink and a holomq risk summary | `holoscan_finance.operators`; a catalog entry per operator under [operators/](operators/README.md) |
+| The libraries the operators wrap: the FIX SBE schema and codec, CUDA encode/decode and quote-bar kernels, the covariance engine, receive accounting, the control plane, telemetry and validation, all tested without Holoscan | `holoscan_finance.marketdata`, `nyq`, `ingest`, `analytics`, `control`, `telemetry`, `validation` |
 | Application plumbing (flags, authored lanes and CPU placement, plan rules, runner, drained predicate) and a web dashboard | `holoscan_finance.app`, `holoscan_finance.dashboard` |
 | CPU-only [tools](#tools): synthetic tape and pcap generation, a paced replay sender, measurement and benchmarks | `holoscan_finance.tools` |
 | Two [example applications](#examples): a live dashboard and a headless, verified benchmark, both `holoscan run` targets | [examples/](examples/) |
@@ -24,13 +24,17 @@ and [adding an operator](docs/ARCHITECTURE.md#adding-an-operator) extends the mo
 
 ## Examples
 
-The examples replay deterministic synthetic equity trades and quotes as MITCH over UDP
-and continuously compute five-second quote returns, historical volatility and
-cross-instrument correlation. A Holoscan SDK 5 graph runs the receiver, MITCH decode, quote
-bars and analytics; custom CUDA kernels (CuPy) compute the rolling statistics on the GPU,
-and a NumPy/SciPy worker computes the same windows with the same algorithm on the CPU for
-comparison. With GPUDirect ingest, packets go from the NIC straight into GPU memory and
-CUDA kernels decode them and build the quote bars.
+The examples replay deterministic synthetic equity trades and quotes encoded with
+[FIX Simple Binary Encoding 1.0](https://www.fixtrading.org/standards/sbe/) over UDP (one
+SBE message per datagram under the module's own [schema](python/holoscan_finance/marketdata/sbe_schema.xml):
+a repeating group of fixed 48-byte entries, one per observation) and continuously compute
+five-second quote returns, historical volatility and cross-instrument correlation. A
+Holoscan SDK 5 graph runs the receiver, SBE decode, quote bars and analytics; custom CUDA
+kernels (CuPy) compute the rolling statistics on the GPU, and a NumPy/SciPy worker computes
+the same windows with the same algorithm on the CPU for comparison. With GPUDirect ingest,
+packets go from the NIC straight into GPU memory and CUDA kernels decode them (one warp per
+packet, one lane per entry) and build the quote bars; the synthetic captures can be encoded
+on the GPU too.
 
 Generate the input with `python -m holoscan_finance.tools.synth`; the examples' replay
 modes generate it automatically. See [methodology](docs/METHODOLOGY.md) for the synthetic
@@ -39,7 +43,7 @@ reproducible commands and pass gates.
 
 | Example | What it is | Front ends |
 | --- | --- | --- |
-| [`equity_analytics`](examples/equity_analytics/README.md) | The live dashboard: MITCH feed → quote bars → rolling risk → web UI, with an optional live CPU cross-check of every validated GPU window (`--analytics-backend compare`) | `udp` (kernel socket), `daqiri-host` (DAQIRI into pinned host memory), `gpudirect` (DAQIRI GPUDirect into GPU memory), `replay` (pcap frames staged in GPU memory: the GPUDirect chain without a NIC) |
+| [`equity_analytics`](examples/equity_analytics/README.md) | The live dashboard: SBE feed → quote bars → rolling risk → web UI, with an optional live CPU cross-check of every validated GPU window (`--analytics-backend compare`) | `udp` (kernel socket), `daqiri-host` (DAQIRI into pinned host memory), `gpudirect` (DAQIRI GPUDirect into GPU memory), `replay` (pcap frames staged in GPU memory: the GPUDirect chain without a NIC) |
 | [`market_data_bench`](examples/market_data_bench/README.md) | Headless, finite and verified: replays a pcap from GPU memory through gather → decode → quote bars (→ risk) and reports throughput, loss, lag and placement against pass/fail gates. With `--check`, the same decoded stream also feeds a CPU `QuoteBarsOp`, and every GPU window is compared with its CPU twin in the graph | `replay` |
 
 Both are plain compositions: an example file builds the graph from
@@ -78,7 +82,7 @@ holoscan run market_data_bench smoke             # headless: GPU vs CPU bars, lo
 plus holoscan-cli and the test dependencies), mounts the checkout, writes a synthetic day
 under `data/` (`python -m holoscan_finance.tools.synth`) and runs the mode's command. The
 `replay` mode stages the day's pcap frames in GPU memory and replays them at 2,000
-packets/s, in a loop, through the production gather, ring, MITCH decode and quote-bar
+packets/s, in a loop, through the production gather, ring, SBE decode and quote-bar
 code, with live CPU validation. Select a GPU with
 `CUDA_VISIBLE_DEVICES=<n> CUDA_DEVICE_ORDER=PCI_BUS_ID`, which the CLI forwards. Inside the
 dev container (`holoscan run-container`), or anywhere the 5.0 SDK is installed, add `--local`.
@@ -96,7 +100,7 @@ dev container (`holoscan run-container`), or anywhere the 5.0 SDK is installed, 
 | `smoke` (default) | 50,000 synthetic packets, unpaced, `--check --require-lossless` |
 | `check` | 1M packets, in-graph GPU vs CPU bars and an independent host decode of every closed bar |
 | `paced` | A full-size synthetic day at 200,000 packets/s with the NIC-buffer drop model and GPU risk: lossless, real time, lag p99 ≤ 5 ms |
-| `throughput` | The same day unpaced; gate ≥ 13.2M messages/s (2× the 6.6M line rate) |
+| `throughput` | The same day unpaced; gate ≥ 12M entries/s (2× the 6M line rate) |
 | `drops` | A capture with every 997th packet missing: GPU and CPU recover identically |
 | `pcap` | A generated full-size synthetic day at 200,000 packets/s, with lossless and real-time gates |
 | `plan` | Compiles the `--check --risk gpu` graph; no GPU work, no I/O |
@@ -110,11 +114,11 @@ non-root container without DAQIRI. They run only through the Thor launchers in
 
 | Operator | In → out | Trigger | Lane | What it does |
 | --- | --- | --- | --- | --- |
-| `GpuMitchSourceOp` | → `events` | `OnClock` 500 µs | ingest | DAQIRI GPUDirect into GPU memory; a native drain thread (never takes the Python lock) gathers payloads into a 1M-slot device ring; GPU MITCH decode |
-| `GpuMitchReplaySourceOp` | → `events` | `OnClock` 500 µs | ingest | The same ring, accounting, staging and decode, fed from pcap frames in GPU memory by a software NIC (DAQIRI burst cadence, optional NIC-buffer drop model) |
+| `GpuSbeSourceOp` | → `events` | `OnClock` 500 µs | ingest | DAQIRI GPUDirect into GPU memory; a native drain thread (never takes the Python lock) gathers payloads into a 1M-slot device ring; GPU SBE decode |
+| `GpuSbeReplaySourceOp` | → `events` | `OnClock` 500 µs | ingest | The same ring, accounting, staging and decode, fed from pcap frames in GPU memory by a software NIC (DAQIRI burst cadence, optional NIC-buffer drop model) |
 | `UdpPacketSourceOp` | → `packets` | `OnClock` 500 µs | ingest | Kernel UDP socket receiver with sequence accounting |
 | `DaqiriPacketSourceOp` | → `packets` | `OnClock` 500 µs | ingest | DAQIRI into pinned host memory |
-| `MitchDecodeOp` | `packets` → `events` | `OnEach` | ingest | Python reference MITCH decode (host front ends) |
+| `SbeDecodeOp` | `packets` → `events` | `OnEach` | ingest | Python reference SBE decode (host front ends) |
 | `QuoteBarsOp` | `events` → `window` | `OnEach` | ingest | Event-time five-second quote bars, `backend="gpu"` (CUDA kernels) or `"cpu"` (NumPy), bit-identical |
 | `RollingRiskOp` | `window` → `risk`, `validate` | `OnClock` 250 µs + `DrainAll` | analytics | Rolling volatility, covariance and correlation on the newest window at a bounded rate; GPU or CPU, inline or in a spawned process |
 | `RiskCrossCheckOp` | `risk` → `comparison` | `OnClock` 5 ms + `DrainAll` | crosscheck | Recomputes validated GPU windows on the CPU and checks agreement |
@@ -134,12 +138,12 @@ checkout uses the alias `holoscan.finance`, as in this simplified version of the
 ```python
 import holoscan as hs
 from holoscan.finance import Knob, Ref
-from holoscan.finance.operators import CallbackSinkOp, GpuMitchReplaySourceOp, QuoteBarsOp, RollingRiskOp
+from holoscan.finance.operators import CallbackSinkOp, GpuSbeReplaySourceOp, QuoteBarsOp, RollingRiskOp
 from holoscan.finance.operators.edges import LATEST, lossless
 
 g = hs.Graph("replay_chain", default_clock=hs.RealtimeClock)
 directory, results = Ref(Knob()), []  # live objects travel as Ref parameters
-source = g.op(GpuMitchReplaySourceOp, "source", pcap_path="day.pcap", pps=200_000, directory=directory)
+source = g.op(GpuSbeReplaySourceOp, "source", pcap_path="day.pcap", pps=200_000, directory=directory)
 bars = g.op(QuoteBarsOp, "bars", backend="gpu", directory=directory)
 risk = g.op(RollingRiskOp, "risk", backend="gpu", executor="inline", min_interval_us=50_000)
 publish = g.op(CallbackSinkOp, "publish", callback=Ref(results.append))
@@ -210,7 +214,7 @@ conditions.
 | In-graph GPU/CPU bars | `holoscan run market_data_bench check` | Every compared window and the independent host decode agree |
 | Loss recovery | `holoscan run market_data_bench drops` | GPU and CPU recover identically from the generated sequence gaps |
 | Paced full-size replay | `holoscan run market_data_bench paced` | Lossless at 200,000 packets/s, real time, replay lag p99 ≤ 5 ms |
-| Throughput headroom | `holoscan run market_data_bench throughput` | At least 13.2M MITCH messages/s |
+| Throughput headroom | `holoscan run market_data_bench throughput` | At least 12M SBE entries/s |
 | Complete analytics graph | `holoscan run equity_analytics smoke` | At least one analyzed window; every CPU/GPU comparison agrees |
 | Analytics and latency | [`risk_bench`, `measure`, `compare_runs`](docs/VALIDATION.md#analytics-per-window) | Correctness and matched-work checks pass; report timing separately |
 
@@ -220,7 +224,7 @@ conditions.
 | --- | --- | --- |
 | NIC delivers packets to | pinned CPU memory | GPU memory (dma-buf; no `nvidia_peermem`) |
 | Packet handling | Python copies each packet into a ring | CUDA kernel gathers payloads into slots |
-| MITCH decode | Python, one message at a time | CUDA kernel, one thread per packet |
+| SBE decode | Python, one packet at a time (NumPy over its entries) | CUDA kernel, one warp per packet, one lane per entry |
 | Five-second quote bars | NumPy on the CPU | CUDA kernels |
 | Rolling covariance / correlation | CUDA kernels (CuPy) in a separate process, sent each window's new bars | CUDA kernels (CuPy) in-process on the device-resident window (`RollingRiskOp`) |
 | Market data on the CPU | every packet, observation and bar | none (control metadata and dashboard results only) |
@@ -236,25 +240,25 @@ graph, which is why the front end is a single flag with no change downstream. Th
 path is three operators:
 
 ```text
-GpuMitchSourceOp ──events──▶ QuoteBarsOp(gpu) ──window──▶ RollingRiskOp(gpu)
+GpuSbeSourceOp ──events──▶ QuoteBarsOp(gpu) ──window──▶ RollingRiskOp(gpu)
 NIC → GPU memory,             5 s quote bars              volatility, covariance and
-GPU gather + MITCH decode     on the GPU                  correlation on the GPU (CUDA)
+GPU gather + SBE decode       on the GPU                  correlation on the GPU (CUDA)
 ```
 
 ### What runs where
 
 | Stage | Library | Device |
 | --- | --- | --- |
-| Generate synthetic observations, tape and pcap | NumPy, project codec | CPU, before playback |
-| Replay sender (MITCH over UDP) | NumPy memory map, project codec | CPU |
-| Receive | `GpuMitchSourceOp` (DAQIRI GPUDirect) or `GpuMitchReplaySourceOp` (pcap in GPU memory), or the host baselines `UdpPacketSourceOp` and `DaqiriPacketSourceOp` | NIC → GPU memory, or CPU |
-| MITCH decode, quote bars | CUDA kernels on the GPU front ends; `MitchDecodeOp` (Python) and `QuoteBarsOp(cpu)` (NumPy) on the host front ends | GPU or CPU |
+| Generate synthetic observations, tape and pcap | NumPy, project codec; `--encoder gpu` packs and frames the capture with CUDA kernels | CPU (GPU encode optional), before playback |
+| Replay sender (SBE over UDP) | NumPy memory map, project codec | CPU |
+| Receive | `GpuSbeSourceOp` (DAQIRI GPUDirect) or `GpuSbeReplaySourceOp` (pcap in GPU memory), or the host baselines `UdpPacketSourceOp` and `DaqiriPacketSourceOp` | NIC → GPU memory, or CPU |
+| SBE decode, quote bars | CUDA kernels on the GPU front ends; `SbeDecodeOp` (Python) and `QuoteBarsOp(cpu)` (NumPy) on the host front ends | GPU or CPU |
 | Volatility, covariance, correlation | CuPy `RawModule` kernels: a fused rank update and device reductions, one CUDA graph launch per window of any kind (slides of any length, growth after a seek, rebuilds) | GPU |
 | CPU comparator | The same algorithm in NumPy + SciPy BLAS (`dgemm`, `gemv`), threadpoolctl | CPU, separate process |
 | Dashboard and controls | FastAPI / Uvicorn, JavaScript | CPU / browser |
 
 The custom CUDA kernels are in
-[gpu_mitch.py](python/holoscan_finance/marketdata/gpu_mitch.py),
+[gpu_sbe.py](python/holoscan_finance/marketdata/gpu_sbe.py),
 [gpu_bars.py](python/holoscan_finance/marketdata/gpu_bars.py) and, for the analytics,
 [_risk_kernels.py](python/holoscan_finance/marketdata/_risk_kernels.py) (driven by
 [covariance.py](python/holoscan_finance/marketdata/covariance.py)). The graph is

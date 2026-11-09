@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Capture the synthetic replay sender's MITCH wire packets (egress on the ConnectX port) from
+# Capture the synthetic replay sender's SBE wire packets (egress on the ConnectX port) from
 # a fresh replay generation, so they can be replayed at arbitrary rates.
 # Requires a running demo (receiver + feed) and the MST_IMAGE helper image (tcpdump, nsenter).
 set -euo pipefail

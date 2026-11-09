@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``MitchDecodeOp`` under the operator harness: outputs equal ``decode_packet``, packets from
-another sender port (or with no directory) are stale, malformed units are counted, the
+"""``SbeDecodeOp`` under the operator harness: outputs equal ``decode_packet``, packets from
+another sender port (or with no directory) are stale, malformed packets are counted, the
 counters it owns are exact, and an active capture tap sees every decoded list."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from holoscan.testing import OperatorTestHarness
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import synthetic_stream
-from holoscan_finance.operators import MitchDecodeOp
+from holoscan_finance.operators import SbeDecodeOp
 from holoscan_finance.payloads import PacketBatch
 from holoscan_finance.ref import Knob, Ref
 from holoscan_finance.telemetry.stats import IngestStats
@@ -65,7 +65,7 @@ def packet_batch(
 
 def run(batches: list[PacketBatch], **params) -> tuple[list, IngestStats]:
     stats = IngestStats()
-    with OperatorTestHarness(MitchDecodeOp, params={"stats": Ref(stats), **params}) as h:
+    with OperatorTestHarness(SbeDecodeOp, params={"stats": Ref(stats), **params}) as h:
         h.push_many("packets", batches)
         result = h.run()
     return result.values("events"), stats
@@ -95,8 +95,8 @@ def test_outputs_equal_decode_packet_and_the_counters_are_exact():
 def test_another_sender_port_is_stale_and_malformed_units_are_counted():
     good = synthetic_stream(np.random.default_rng(5), 4, UNIVERSE, MIDNIGHT)
     truncated = good[0][:-3]
-    bad_group = good[1][:3] + b"B" + good[1][4:]  # unit header: length, count, group, sequence
-    batch = packet_batch([good[2], truncated, bad_group])
+    other_schema = good[1][:4] + b"\x00\x00" + good[1][6:]  # another schemaId in the SBE header
+    batch = packet_batch([good[2], truncated, other_schema])
     stale = packet_batch([good[3]], port=PORT + 1, index=1)
     outputs, stats = run([batch, stale], directory=Ref(directory()))
     (decoded,) = decode_packet(good[2], 0, generation=1, midnight_ns=MIDNIGHT, universe=UNIVERSE)[0]

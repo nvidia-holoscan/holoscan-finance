@@ -1,6 +1,6 @@
 # Benchmarking synthetic ingest
 
-Use generated MITCH packets with `tcpreplay` to measure the receiver independently
+Use generated SBE packets with `tcpreplay` to measure the receiver independently
 of the paced Python sender.
 Method: [docs/GPU_INGEST.md](../../../docs/GPU_INGEST.md).
 

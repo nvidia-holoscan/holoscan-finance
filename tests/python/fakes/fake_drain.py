@@ -23,28 +23,23 @@ from typing import ClassVar
 import numpy as np
 
 from holoscan_finance.ingest.drains import DRAIN_FIELDS
-from holoscan_finance.marketdata.mitch_codec import inspect_unit
+from holoscan_finance.marketdata.gpu_sbe import HEADER_COLS, PACKET_HEADER
+from holoscan_finance.marketdata.sbe_codec import frame_fields
 
 
 def receive_header(packets: list[tuple[bytes | None, int, int]]) -> np.ndarray:
     """What ``gather_frame`` reports for each ``(UDP payload | None, source port, source
-    ip)``, as a ``7 x n`` header: length, port, ip, framing status, count, sequence, group."""
+    ip)``, as a ``HEADER_COLS x n`` header: length, port, ip, framing status, entry count,
+    sequence."""
     rows = []
     for data, port, ip in packets:
         if data is None:  # not IPv4/UDP
-            rows.append([-1, -1, 0, 1, 0, 0, -1])
+            rows.append([-1, -1, 0, 1, 0, 0])
             continue
-        try:
-            group, seq, count = inspect_unit(data)
-            rows.append([len(data), port, ip, 0, count, seq, group])
-        except ValueError:
-            count, group, seq = (
-                (data[2], data[3], int.from_bytes(data[4:8], "little"))
-                if len(data) >= 8
-                else (0, -1, 0)
-            )
-            rows.append([len(data), port, ip, 1, count, seq, group])
-    return np.asarray(rows, np.int64).reshape(-1, 7).T
+        ok, seq, count = frame_fields(data)
+        seq = int(np.array(seq, np.uint64).view(np.int64))  # as the kernel reports it
+        rows.append([len(data), port, ip, 0 if ok else 1, count, seq])
+    return np.asarray(rows, np.int64).reshape(-1, HEADER_COLS).T
 
 
 class FakeNativeDrain:
@@ -67,7 +62,7 @@ class FakeNativeDrain:
         packed_dev: int = 0,
         packed_host: int = 0,
         max_burst: int = 65536,
-        min_payload: int = 8,
+        min_payload: int = PACKET_HEADER,
         max_records: int = 65536,
         cpu: int = -1,
     ) -> None:
@@ -158,17 +153,19 @@ class FakeNativeDrain:
     def _loop(self) -> None:
         import cupy as cp
 
-        from holoscan_finance.marketdata.gpu_mitch import _kernels
+        from holoscan_finance.marketdata.gpu_sbe import _kernels
 
         daq = importlib.import_module("daqiri")
         cp.cuda.Device(self.device).use()
         stream = cp.cuda.Stream(non_blocking=True)
         slots = self._device_view("slots", (self.capacity, self.stride), cp.uint8)
-        header_dev = self._device_view("header_dev", (self.capacity, 7), cp.int64)
+        header_dev = self._device_view("header_dev", (self.capacity, HEADER_COLS), cp.int64)
         packed_dev = self._device_view("packed_dev", (2 * self.max_burst,), cp.uint64)
         header_host = np.ctypeslib.as_array(
-            (ctypes.c_int64 * (self.capacity * 7)).from_address(self._addresses["header_host"])
-        ).reshape(self.capacity, 7)
+            (ctypes.c_int64 * (self.capacity * HEADER_COLS)).from_address(
+                self._addresses["header_host"]
+            )
+        ).reshape(self.capacity, HEADER_COLS)
         gather = _kernels().get_function("gather_frame")
         while not self._stop.is_set():
             status, burst = daq.get_rx_burst(self.port, self.queue)

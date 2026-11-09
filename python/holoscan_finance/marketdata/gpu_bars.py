@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Device-resident event-time quote bars: a GPU mirror of :class:`bars.QuoteBars`.
 
-Observations stay in GPU memory (straight from :mod:`gpu_mitch`). Per-symbol
+Observations stay in GPU memory (straight from :mod:`gpu_sbe`). Per-symbol
 state -- last valid quote midpoint, quote time, last trade, cumulative volume --
 is updated with scatter-max ("last observation in tape order wins") and
 scatter-add, segment by segment exactly as the host implementation does. Host
@@ -36,7 +36,7 @@ class GpuReplayBatch:
     columns: dict
     generation: int
     sequence: np.ndarray  # per packet (host)
-    wire_count: np.ndarray  # per packet (host), MITCH messages incl. Time
+    wire_count: np.ndarray  # per packet (host), SBE entries (one per observation)
     packet_offsets: np.ndarray  # per packet: index of its first observation
     packet_recv_ns: np.ndarray  # per packet receive wall clock
     recv_wall_ns: int

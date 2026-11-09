@@ -65,7 +65,7 @@ class ReplayDirectory:
             if current is not None and d.generation <= current.generation:
                 return {"generation": current.generation}
             if d.sender_port in self.used_sender_ports:
-                raise ValueError("MITCH replay sender port must be new for each generation")
+                raise ValueError("SBE replay sender port must be new for each generation")
             self.used_sender_ports.add(d.sender_port)
             self.knob.set(d)
             # Hand over hand: listeners of consecutive generations run in publication order,
@@ -80,7 +80,7 @@ class ReplayDirectory:
 
 
 class ReplayGenerations:
-    """``GpuMitchReplaySourceOp.on_loop``: every replay pass after the first is a new
+    """``GpuSbeReplaySourceOp.on_loop``: every replay pass after the first is a new
     generation from a fresh sender port, as ``tools.replay_sender`` registers each loop."""
 
     def __init__(self, directory: ReplayDirectory, base_manifest: dict, first_port: int) -> None:

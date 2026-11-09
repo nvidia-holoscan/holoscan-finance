@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Python reference MITCH decode of host packet batches: the processor of ``MitchDecodeOp``.
+"""Python reference SBE decode of host packet batches: the processor of ``SbeDecodeOp``.
 
 The rules: a packet is stale without a directory or from a sender port other than the
 directory's; otherwise ``mapping.decode_packet`` runs under the directory's generation,
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from .manifest import FeedDirectory
 
 
-class HostMitchDecoder:
+class HostSbeDecoder:
     """Stateless per-batch decoder; counts are returned, never stored."""
 
     def decode(

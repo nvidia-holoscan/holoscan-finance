@@ -2,15 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """``GpuIngest``: the processor of both GPU sources.
 
-Per burst it accounts the 7-column receive header (``ReceiveAccounting.observe_burst``) and
+Per burst it accounts the ``HEADER_COLS``-column receive header (``ReceiveAccounting.observe_burst``) and
 admits the accepted rows into a queue of ``ring_size`` packets. Per batch it stages up to
-``batch_size`` messages (a zero-copy view when the bursts are consecutive ring rows),
-decodes MITCH on the GPU under the directory read just before, synchronizes the legacy
-stream and only then releases the ring rows to the drain: decode is the single consumer of
-each lease, in FIFO order. No payload byte reaches the host. Records drains (native,
-replay) are pulled from the source's lane; the Python drain pushes bursts from its thread.
-Sized for 200k packets/s (6.6M msgs/s) with 131072-message batches (the paced NIC-free
-gate, docs/VALIDATION.md).
+``batch_size`` entries (a zero-copy view when the bursts are consecutive ring rows), decodes
+SBE on the GPU under the directory read just before -- one launch, since the header's entry
+counts fix every packet's output position -- synchronizes the legacy stream and only then
+releases the ring rows to the drain: decode is the single consumer of each lease, in FIFO
+order. No payload byte reaches the host. Records drains (native, replay) are pulled from the
+source's lane; the Python drain pushes bursts from its thread. Sized for 200k packets/s (6M
+entries/s) with 131072-entry batches (the paced NIC-free gate, docs/VALIDATION.md).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from .accounting import ReceiveAccounting
 
 if TYPE_CHECKING:
     from ..marketdata.gpu_bars import GpuReplayBatch
-    from ..marketdata.gpu_decoder import GpuMitchDecoder
+    from ..marketdata.gpu_decoder import GpuSbeDecoder
     from ..nyq.manifest import FeedDirectory
     from ..telemetry.capture import CaptureTap
     from .drains import DeviceRing, DrainLike
@@ -40,7 +40,7 @@ _DRAIN_STATS_PERIOD_NS = 100_000_000
 @dataclass
 class _Burst:
     slots: Any  # device (n, SLOT_BYTES) uint8
-    header: Any  # device (n, 7) int64 receive header (column 0: payload length)
+    header: Any  # device (n, HEADER_COLS) int64 receive header (column 0: payload length)
     index: np.ndarray  # accepted rows (passed framing, fit in the queue)
     src_port: np.ndarray  # host, per accepted row
     recv_ns: int
@@ -56,7 +56,7 @@ class GpuIngest:
         self,
         *,
         stats: IngestStats,
-        decoder: GpuMitchDecoder,
+        decoder: GpuSbeDecoder,
         ring_size: int,
         batch_size: int,
         keep_alive: bool,
@@ -140,7 +140,7 @@ class GpuIngest:
             if "replay" in st:
                 stats.replay = st["replay"]
             if st["error"]:
-                stats.error = f"GPU MITCH RX failed: {st['error']}"
+                stats.error = f"GPU SBE RX failed: {st['error']}"
             elif not self._keep_alive and (
                 # The replay drain knows where its input ends; a NIC goes silent.
                 st["eof"] if "eof" in st else now - st["last_rx_ns"] > self._timeout_ns
@@ -161,7 +161,7 @@ class GpuIngest:
             )
 
     def next_batch(self, directory: FeedDirectory | None) -> list[GpuReplayBatch] | None:
-        """Stage, decode and release up to ``batch_size`` queued messages; None if nothing
+        """Stage, decode and release up to ``batch_size`` queued entries; None if nothing
         was queued or nothing decoded."""
         stats = self.stats
         staged = []
@@ -178,11 +178,11 @@ class GpuIngest:
         import cupy as cp
 
         marks = [time.perf_counter_ns()]
-        slots, lens = self._stage(staged)
+        slots, header = self._stage(staged)
         sport = np.concatenate([b.src_port for b in staged])
         recv = np.concatenate([np.full(len(b.index), b.recv_ns, np.int64) for b in staged])
         marks.append(time.perf_counter_ns())
-        batches, counts = self._decoder.decode(slots, lens, sport, recv, directory)
+        batches, counts = self._decoder.decode(slots, header, sport, recv, directory, msgs)
         marks.append(time.perf_counter_ns())
         # The drains gather on their own non-blocking streams: finish the decode before
         # these ring rows can be gathered into again.
@@ -203,13 +203,13 @@ class GpuIngest:
         return batches or None
 
     def _stage(self, staged: list[_Burst]) -> tuple[Any, Any]:
-        """One device slot buffer and int32 lengths for the staged bursts."""
+        """One device slot buffer and its device receive header rows for the staged bursts."""
         import cupy as cp
 
         first = staged[0]
         whole = all(len(b.index) == b.slots.shape[0] for b in staged)
         if whole and len(staged) == 1:
-            return first.slots, first.header[:, 0].astype(cp.int32)
+            return first.slots, first.header
         if (
             whole
             and first.start is not None
@@ -220,11 +220,11 @@ class GpuIngest:
             # Consecutive positions can still straddle the ring end when a burst ends
             # exactly there; only rows inside one ring pass form one view.
             if hi <= self._ring.capacity:  # consecutive ring rows: one view, no copy
-                return self._ring.slots[lo:hi], self._ring.header_dev[lo:hi, 0].astype(cp.int32)
+                return self._ring.slots[lo:hi], self._ring.header_dev[lo:hi]
         picks = [cp.asarray(b.index) for b in staged]
         slots = cp.concatenate([b.slots[i] for b, i in zip(staged, picks)])
-        lens = cp.concatenate([b.header[i, 0] for b, i in zip(staged, picks)]).astype(cp.int32)
-        return slots, lens
+        header = cp.concatenate([b.header[i] for b, i in zip(staged, picks)])
+        return slots, header
 
     def count_event_batch(self) -> None:
         """``on_sent`` callback of the source's ``PendingEmits``."""

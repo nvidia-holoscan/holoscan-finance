@@ -1,8 +1,8 @@
 # GPUDirect ingest: NIC → GPU memory → GPU decode → GPU quote bars
 
 `--ingest gpudirect` keeps market data on the GPU from the network card onward. DAQIRI
-receives MITCH packets straight into GPU memory (GPUDirect RDMA over dma-buf), and CUDA
-kernels gather the UDP payloads, decode MITCH and maintain the five-second quote bars. The
+receives SBE packets straight into GPU memory (GPUDirect RDMA over dma-buf), and CUDA
+kernels gather the UDP payloads, decode SBE and maintain the five-second quote bars. The
 rolling covariance/correlation analytics then run in the receiving process on the
 device-resident window (`RollingRiskOp`); the CPU comparator and the dashboard are the
 same as on the host paths.
@@ -16,8 +16,8 @@ The front end is one flag on the same graph (`examples/equity_analytics`):
 --ingest replay       # pcap frames staged in GPU memory, then the gpudirect chain (no NIC)
 ```
 
-The GPU path targets 200,000 packets/s (about 6.6M MITCH messages/s with 32 observations
-per packet): 131,072-message batches, 4,096-packet DAQIRI bursts with a 20 ms
+The GPU path targets 200,000 packets/s (6M SBE entries/s with 30 observations per
+packet, one entry each): 131,072-entry batches, 4,096-packet DAQIRI bursts with a 20 ms
 partial-burst timeout, 114,688 NIC buffers, a 1,048,576-slot device ring and a receive
 drain in a native thread ([design parameters](#design-parameters)).
 
@@ -34,7 +34,7 @@ includes a compiled CPU decoder; see
 flowchart LR
     NIC[ConnectX-7] -->|GPUDirect RDMA, dma-buf| RX[DAQIRI RX buffers in GPU memory]
     RX -->|gather_frame kernel| SL[Payload slots on GPU]
-    SL -->|mitch_decode kernel, 2 passes| EV[Observation columns on GPU]
+    SL -->|sbe_decode kernel, one pass| EV[Observation columns on GPU]
     EV -->|bars_scatter / apply / close kernels| QB[Quote bars on GPU]
     QB -->|one row per closed 5 s bar| AN[CUDA kernels: rolling covariance]
     AN --> W[Dashboard]
@@ -44,14 +44,14 @@ flowchart LR
 | --- | --- | --- | --- |
 | Receive | Flow-matched frames DMA'd from the NIC into a `device` memory region | NIC → GPU | DAQIRI (DPDK engine, dma-buf; no `nvidia_peermem`) |
 | Frame addresses | Device address and length of every frame in a burst | CPU, native drain thread (never takes the Python lock) | [daqiri_drain.cpp](../python/holoscan_finance/ingest/native/daqiri_drain.cpp), built on first start; one host→device copy per burst |
-| Gather + framing | Copy each UDP payload into a slot of a preallocated device ring (1,048,576 slots, ~5 s at 200,000 packets/s); apply the IPv4/UDP boundary checks and MITCH `inspect_unit` framing check | GPU | `gather_frame` kernel ([gpu_mitch.py](../python/holoscan_finance/marketdata/gpu_mitch.py)) |
-| Receive accounting | Sequence gaps, reordering, ring capacity, per-100 ms arrival buckets from a 7-column header per packet | CPU, per burst, in the source operator's `compute()` | vectorized NumPy ([`GpuMitchSourceOp`](../operators/gpu_mitch_source_op/README.md), [accounting.py](../python/holoscan_finance/ingest/accounting.py)) |
-| MITCH decode | Validate every message and write observations (quotes, trades, halts) in wire order | GPU, one thread per packet | `mitch_decode` kernel, count pass + write pass ([gpu_decoder.py](../python/holoscan_finance/marketdata/gpu_decoder.py)) |
+| Gather + framing | Copy each UDP payload into a slot of a preallocated device ring (1,048,576 slots, ~5 s at 200,000 packets/s); apply the IPv4/UDP boundary checks and the SBE `inspect_packet` framing check (header, block lengths, entry count, sequence) | GPU | `gather_frame` kernel ([gpu_sbe.py](../python/holoscan_finance/marketdata/gpu_sbe.py)) |
+| Receive accounting | Sequence gaps, reordering, ring capacity, per-100 ms arrival buckets from a 6-column header per packet | CPU, per burst, in the source operator's `compute()` | vectorized NumPy ([`GpuSbeSourceOp`](../operators/gpu_sbe_source_op/README.md), [accounting.py](../python/holoscan_finance/ingest/accounting.py)) |
+| SBE decode | Validate every entry and write observations (quotes, trades, halts) in wire order | GPU, one warp per packet, one lane per entry | `sbe_offsets` + `sbe_decode` kernels, one pass ([gpu_decoder.py](../python/holoscan_finance/marketdata/gpu_decoder.py)) |
 | Quote bars | Last valid quote/trade per instrument per bar segment, volume, marks, log returns | GPU | `bars_scatter`, `bars_apply`, `bars_close` kernels ([`QuoteBarsOp`](../operators/quote_bars_op/README.md) with `backend="gpu"`, [gpu_bars.py](../python/holoscan_finance/marketdata/gpu_bars.py)) |
 | Analytics | Rolling volatility, covariance, correlation and eligibility | GPU | Custom CUDA kernels (CuPy) on the device-resident bar window, in the receiving process; only each new bar is copied in ([`RollingRiskOp`](../operators/rolling_risk_op/README.md)) |
 | Scheduling, HTTP | Operator scheduling, generation/sequence checks per batch, dashboard | CPU | Holoscan, NumPy, FastAPI |
 
-Receive, bars and analytics are the operators `GpuMitchSourceOp` →
+Receive, bars and analytics are the operators `GpuSbeSourceOp` →
 `QuoteBarsOp(backend="gpu")` → `RollingRiskOp` ([operators](../operators/README.md)); the
 application adds the replay instrument directory, the dashboard and the CPU cross-check
 (`RiskCrossCheckOp`). Source and bars share one thread (the `ingest` lane), so the
@@ -60,8 +60,8 @@ per-packet path crosses no thread boundary; see [architecture](ARCHITECTURE.md).
 **No market data is copied to or computed on the CPU in this mode**: packet payloads,
 decoded observations, quote bars and the rolling return window all stay in GPU memory,
 and the covariance engine consumes the window in place. What crosses to the host is
-control metadata (a 7-field header per packet for loss accounting, segment boundaries,
-counters) and the dashboard's compact results. Three things made that true:
+control metadata (a 6-field header per packet for loss accounting, segment boundaries,
+counters) and the dashboard's compact results. Four things made that true:
 
 - **Native drain.** DAQIRI's Python binding returns one packet address per call (~1 µs
   of Python each). A C++ thread,
@@ -75,6 +75,12 @@ counters) and the dashboard's compact results. Three things made that true:
   (`HOLOSCAN_FINANCE_NATIVE_DRAIN=0` selects it; `HOLOSCAN_FINANCE_NATIVE=0` disables the
   native helper). The fallback reads each packet's address through the binding (one call
   per packet).
+- **Header-driven decode.** The receive header the gather kernel writes (framing status,
+  entry count and sequence per packet) stays on the device too, so a batch decodes with no
+  host-to-device copy: one scan kernel turns the header's counts into every packet's
+  output position, and `sbe_decode` runs one warp per packet, one lane per 48-octet entry,
+  each field one aligned little-endian load, with a warp vote rejecting the packet if any
+  entry fails a rule. Only the per-packet results come back, in one copy.
 - **Device-resident bars.** Closed bars stay on the GPU and the window is a tuple of CuPy
   vectors, which the analytics copy into their own window buffer one new bar at a time,
   instead of copying each bar to the host.
@@ -86,7 +92,7 @@ counters) and the dashboard's compact results. Three things made that true:
   receives a host copy; that is validation, not the data path.)
 
 Beyond the analytics kernels that every GPU analytics run uses, this mode adds **custom
-CUDA kernels** for gather, MITCH decode and quote bars, compiled at startup with CuPy's
+CUDA kernels** for gather, SBE decode and quote bars, compiled at startup with CuPy's
 NVRTC.
 Compilation takes about 10 s once; set `CUPY_CACHE_DIR` to a persistent directory
 (the Thor launcher does) and later starts load them in under a second. Warm-up runs in
@@ -97,14 +103,15 @@ accepted, so the NIC starts last.
 
 The GPU code reproduces the host implementation it replaces, including every
 rejection rule. [`gpu_validate`](../python/holoscan_finance/tools/gpu_validate.py) replays
-synthetic MITCH wire packets through both implementations and compares them
+synthetic SBE wire packets through both implementations and compares them
 ([validation procedure](VALIDATION.md#library-bit-identity)). The pass gates are:
 
 | Check | Scope | Pass gate |
 | --- | --- | --- |
-| MITCH decode | every packet of the capture → observations | **Bit-identical**: accept/reject stage, counts, sequences and every field (floats compared as raw bits) |
-| MITCH decode, mutated packets | 240,000 mutated packets (framing and decode rejects included) | **Identical** decisions and fields |
-| Price decoding above 2⁵³ | Sign-magnitude prices up to 2⁶³−1 (`tests/python/gpu/test_gpu_decode.py`) | Correctly rounded, identical to Python's integer division |
+| SBE decode | every packet of the capture → observations | **Bit-identical**: accept/reject stage, counts, sequences and every field (floats compared as raw bits) |
+| SBE decode, mutated packets | 240,000 mutated packets (framing and decode rejects, schema extensions and value edges included) | **Identical** decisions and fields |
+| PriceNULL4 edges, sequence edges, schema extensions | Mantissas at ±2⁶³, past 2⁵³ and null; sequences at 2⁶³; longer root blocks and entries (`tests/python/gpu/test_gpu_decode.py`) | Identical to `float64(mantissa) / 10000.0` on every decoder; sequences past int64 rejected on both sides; aligned extensions decode, misaligned ones are rejected on both sides |
+| SBE encode | `pack_units` vs the `sbe_encode` kernel, pcap records vs `sbe_frame` | **Byte-identical** packets and captures; the same `ValueError` for the same bad input |
 | Quote bars | every bar and analytics window of the synthetic capture | Marks, quote times, trades, volumes, the final per-symbol state and every counter: **bit-identical** |
 | Returns | every finite return | within **1 ULP** (CUDA `log` vs NumPy `log`); NaN pattern identical |
 | Loss handling | every 5,000th packet dropped from the synthetic capture | the same sequence gaps on both sides, identical recovery and state; returns within 1 ULP |
@@ -115,8 +122,9 @@ far below the analytics' own CPU/GPU agreement tolerance (relative 10⁻⁸).
 `tests/python/gpu/` runs a smaller version of every check when a GPU is present, and
 `market_data_bench --check` repeats the bars comparison inside the graph: the same decoded
 stream feeds `QuoteBarsOp` with the GPU and the CPU backend, and every closed bar is also
-compared with an independent host decode. Any change to `mitch_codec.py`,
-`nyq/mapping.py` or `bars.py` must be mirrored in `gpu_mitch.py` / `gpu_bars.py` and
+compared with an independent host decode. Any change to `sbe_schema.xml`, `sbe_codec.py`,
+`nyq/mapping.py` or `bars.py` must be mirrored in `gpu_sbe.py` / `gpu_bars.py` (the CUDA
+source takes its offsets from the schema and refuses a layout its stores do not spell) and
 revalidated with `gpu_validate` on a generated synthetic capture.
 
 Run from the repository root in the SDK environment:
@@ -138,7 +146,7 @@ why it is built the way it is.
 ### NIC sweep method
 
 The sweep ([`deploy/igx_thor/gpu_ingest_bench`](../deploy/igx_thor/gpu_ingest_bench/README.md))
-feeds the receiver a generated synthetic MITCH capture with `tcpreplay`
+feeds the receiver a generated synthetic SBE capture with `tcpreplay`
 at fixed rates, 15 s per rate, on the same host through the ConnectX-7 in PHY local
 loopback. Loss counters come from the NIC, the receiver's sequence accounting and the
 application's ring. "No loss" is checked end to end: the observations that reach the
@@ -167,7 +175,7 @@ and sequence gaps.
 
 | Parameter | Value | Why |
 | --- | --- | --- |
-| Batch size | 131,072 messages (`--batch-messages`) | each compute call covers about 4,000 packets, so per-batch Python, scheduling and kernel-launch overhead is amortized; sources never wait to fill a batch |
+| Batch size | 131,072 entries (`--batch-messages`) | each compute call covers about 4,400 packets, so per-batch Python, scheduling and kernel-launch overhead is amortized; sources never wait to fill a batch |
 | DAQIRI bursts | up to 4,096 packets, 20 ms partial-burst timeout | few, large bursts (about 50/s at 200,000 packets/s) keep the drain's fixed per-burst cost low; the timeout bounds the wait at rates that do not fill a burst |
 | NIC buffers | 114,688 in GPU memory (`--nic-num-bufs`) | about 0.57 s at 200,000 packets/s; the RTX PRO 6000's 256 MiB BAR1 window bounds the count |
 | Device ring | 1,048,576 slots of 2 KiB (`--ring-size`) | about 5 s at 200,000 packets/s: a consumer stall is absorbed while the native drain keeps recycling NIC buffers |
@@ -188,7 +196,7 @@ at 200,000 packets/s), and `compute()` catches up after the stall. The Python dr
 (`HOLOSCAN_FINANCE_NATIVE_DRAIN=0`, or `native_drain=False` on the operator) needs the lock
 for every burst and reads each packet's address through the binding, so a stall longer
 than the NIC buffers cover (about 0.57 s) costs packets; see the
-[operator](../operators/gpu_mitch_source_op/README.md).
+[operator](../operators/gpu_sbe_source_op/README.md).
 
 Fault injection checks this on the NIC. Start the receiver with
 `HOLOSCAN_FINANCE_FAULTS=1`, which enables `POST /debug/hold_gil` with
@@ -202,7 +210,7 @@ alike. Keep these NIC checks separate from the software replay checks ([status](
 ## Is it the GPU, or is it removing Python?
 
 To separate the two, a third decoder compiles the same algorithm for the CPU with
-numba ([cpu_mitch.py](../python/holoscan_finance/tools/cpu_mitch.py)).
+numba ([cpu_sbe.py](../python/holoscan_finance/tools/cpu_sbe.py)).
 `gpu_validate --decoder cpu` checks it bit for bit against the Python reference, including
 the mutated packets. The benchmark
 ([decode_bench.py](../python/holoscan_finance/tools/decode_bench.py)) feeds all three
@@ -211,7 +219,7 @@ and staging them in message groups. Compilation is excluded; GPU timing includes
 per-packet header copy back and a synchronize.
 
 Use the [offline decode and bars procedure](VALIDATION.md#offline-decode-and-bars) to
-compare 16,384- and 131,072-message groups across CPU thread counts. Report decode alone
+compare 16,384- and 131,072-entry groups across CPU thread counts. Report decode alone
 and decode plus bars separately: the CPU bars implementation is NumPy, while the GPU
 path uses CUDA kernels. A compiled, multi-core CPU bars stage is not implemented, so this
 comparison does not measure that alternative. `decode_bench` times one pass per process,
@@ -230,7 +238,7 @@ coordination before NIC measurements.
 
 ## Caveats
 
-- **Replay traffic.** The NIC sweep replays generated synthetic MITCH bytes with `tcpreplay`
+- **Replay traffic.** The NIC sweep replays generated synthetic SBE bytes with `tcpreplay`
   at a **uniform** rate, and the NIC-free source paces a capture uniformly too. The
   receive ring absorbs bursts, but uniform pacing does not model external-feed bursts.
 - **One host, PHY loopback.** Sender and receiver share the Thor and a single

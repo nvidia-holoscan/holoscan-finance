@@ -60,9 +60,9 @@ def test_holoscan_finance_alias_is_the_canonical_package(tmp_path: Path) -> None
     assert out["modules"] == {
         "CallbackSinkOp": "holoscan_finance.operators.callback_sink",
         "DaqiriPacketSourceOp": "holoscan_finance.operators.packet_sources",
-        "GpuMitchReplaySourceOp": "holoscan_finance.operators.gpu_mitch_source",
-        "GpuMitchSourceOp": "holoscan_finance.operators.gpu_mitch_source",
-        "MitchDecodeOp": "holoscan_finance.operators.mitch_decode",
+        "GpuSbeReplaySourceOp": "holoscan_finance.operators.gpu_sbe_source",
+        "GpuSbeSourceOp": "holoscan_finance.operators.gpu_sbe_source",
+        "SbeDecodeOp": "holoscan_finance.operators.sbe_decode",
         "QuoteBarsOp": "holoscan_finance.operators.quote_bars",
         "RiskCrossCheckOp": "holoscan_finance.operators.risk_cross_check",
         "RiskSummaryOp": "holoscan_finance.operators.risk_summary",

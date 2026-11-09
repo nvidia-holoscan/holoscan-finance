@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "holoscan-finance"
 version = "0.2.0"
-description = "Holoscan Module for Financial Services Industry: reusable Holoscan SDK 5 operators for streaming market data (MITCH ingest over UDP, DAQIRI, GPUDirect or NIC-free replay; quote bars; rolling GPU risk) and example applications."
+description = "Holoscan Module for Financial Services Industry: reusable Holoscan SDK 5 operators for streaming market data (FIX Simple Binary Encoding ingest over UDP, DAQIRI, GPUDirect or NIC-free replay; quote bars; rolling GPU risk) and example applications."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -31,7 +31,7 @@ where = ["python"]
 include = ["holoscan_finance*"]
 
 [tool.setuptools.package-data]
-holoscan_finance = ["py.typed", "dashboard/webui/*.html", "ingest/native/*.cpp"]
+holoscan_finance = ["py.typed", "dashboard/webui/*.html", "ingest/native/*.cpp", "marketdata/*.xml"]
 
 [tool.holoscan]
 cuda = 13

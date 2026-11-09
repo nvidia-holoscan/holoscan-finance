@@ -6,7 +6,7 @@ A drain thread copies every datagram into a ring of ``ring_size`` packets after 
 header peek (``ReceiveAccounting.observe_packet``), so decode load can never make the
 kernel or the NIC drop packets; overload is counted as ``ring_dropped`` instead. The
 source's lane takes ``PacketBatch``es of up to ``batch_size`` messages out of the ring, and
-``MitchDecodeOp`` decodes them. These are the front ends of the host (CPU) path.
+``SbeDecodeOp`` decodes them. These are the front ends of the host (CPU) path.
 """
 
 from __future__ import annotations
@@ -20,9 +20,10 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 
 from ..marketdata.framing import strip_udp_datagram
+from ..marketdata.gpu_sbe import PACKET_HEADER
 from ..payloads import PacketBatch
 from ..telemetry.stats import IngestStats, SourceProbe
-from .accounting import ReceiveAccounting, mitch_packet_header
+from .accounting import ReceiveAccounting, sbe_packet_header
 from .affinity import helper_mask, keep_off_cores, thread_mask
 from .daqiri import require_daqiri
 
@@ -116,7 +117,7 @@ class _HostReceiver:
         """Account one datagram and admit it to the ring."""
         stats = self._stats
         try:
-            session, seq, count = mitch_packet_header(data, peer)
+            session, seq, count = sbe_packet_header(data, peer)
         except (ValueError, struct.error):
             stats.malformed_packets += 1
             return
@@ -284,7 +285,7 @@ class DaqiriHostReceiver(_HostReceiver):
                     st, frame = daq.get_packet_bytes(burst, idx)
                     if st != ok:
                         raise RuntimeError(f"get_packet_bytes returned {st}")
-                    datagram = strip_udp_datagram(frame, minimum_payload=8)
+                    datagram = strip_udp_datagram(frame, minimum_payload=PACKET_HEADER)
                     if datagram is not None:
                         self._enqueue(datagram[0], recv_ns, datagram[1])
             finally:

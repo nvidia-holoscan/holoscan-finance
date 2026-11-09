@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
     "name": "UdpPacketSourceOp",
-    "description": "MITCH datagrams from a kernel UDP socket into a host ring, emitted as packet batches for MitchDecodeOp (the host baseline).",
+    "description": "SBE datagrams from a kernel UDP socket into a host ring, emitted as packet batches for SbeDecodeOp (the host baseline).",
     "authors": [
       {
         "name": "Bruce Hashemian",

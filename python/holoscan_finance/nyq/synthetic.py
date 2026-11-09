@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Deterministic synthetic equity data: replay units, fuzzed units, tapes and pcap captures.
+"""Deterministic synthetic equity data: replay packets, fuzzed packets, tapes and pcap captures.
 
-``synthetic_stream`` and ``fuzz`` generate random but valid units covering every observation
-kind (one-sided, negative and halted quotes, trades, conditions, several Time seconds per
-packet) and mutations aimed at each rejection rule. ``synthetic_tape`` writes a tape in the
-``open_tape`` format and ``synthetic_capture`` packetizes a tape as ``tools.replay_sender``
-sends it, into a pcap. These generated inputs support tests and NIC-free validation.
-NumPy only.
+``synthetic_stream`` and ``fuzz`` generate random but valid SBE packets covering every
+observation kind (one-sided, crossed, zero-size and halted quotes, trades, conditions,
+several seconds per packet) and mutations aimed at each rejection rule. ``synthetic_tape``
+writes a tape in the ``open_tape`` format and ``synthetic_capture`` packetizes a tape as
+``tools.replay_sender`` sends it, into a pcap, with the NumPy packer or the GPU encoder
+(``encoder="gpu"``: the same bytes, built by ``gpu_sbe.encode_units`` and ``frame_units``).
+These generated inputs support tests and NIC-free validation.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..marketdata import sbe_codec as sbe
 from ..marketdata.framing import (
     FRAME_PREFIX,
     RECORD_HLEN,
@@ -37,20 +39,26 @@ logger = logging.getLogger(__name__)
 
 _SESSION_START_S = 34200  # 09:30 New York
 _CHUNK = 1 << 20  # observations generated per step: bounded memory for full-day tapes
-_CAPTURE_UNITS = 1 << 16  # units packed and framed per step
+_CAPTURE_UNITS = 1 << 16  # packets packed and framed per step
 _PROGRESS_PACKETS = 1 << 18
 # Tape kinds (quotes, trades, conditions) and anomaly rates: synthetic_stream's kinds, rare
 # enough that about 4 in 5 symbols keep every mark of a 60-bar window (risk eligibility).
 _KIND_P = (0.75, 0.248, 0.002)
-_ONE_SIDED, _NEGATIVE, _HALTED_QUOTE = 0.001, 0.0005, 0.0005  # per quote
+_ONE_SIDED, _CROSSED, _HALTED_QUOTE = 0.001, 0.0005, 0.0005  # per quote
 _HALT = 0.5  # of conditions; the rest resume trading
+# Wire offsets the fuzz aims at: the group dimensions, the first and second entry.
+_DIMENSIONS = sbe.HEADER.size + sbe.ROOT_BLOCK_LENGTH
+_FIRST_ENTRY = sbe.PACKET_HEADER
+_SECOND_ENTRY = _FIRST_ENTRY + sbe.ENTRY_BLOCK_LENGTH
+_E = {f.name: f.offset for f in sbe.SCHEMA.entries.fields}
+ENCODERS = ("numpy", "gpu")
 
 
 def synthetic_stream(
     rng: np.random.Generator, packets: int, universe: int, midnight_ns: int, start_s: int = 34200
 ) -> list[bytes]:
-    """Random but valid replay units: quotes (incl. one-sided, halted, negative),
-    trades, halt/resume conditions, several Time seconds per packet."""
+    """Random but valid replay packets: quotes (incl. one-sided, crossed, zero-size and
+    halted), trades, halt/resume conditions, several seconds per packet."""
     out, seq, t = [], 1, midnight_ns + start_s * 10**9
     for _ in range(packets):
         n = int(rng.integers(1, MAX_EVENTS + 1))
@@ -67,11 +75,13 @@ def synthetic_stream(
         ev["bid"][q] = np.round(mid[q] * rng.uniform(0.97, 1.0, q.sum()), 4)
         ev["ask"][q] = np.round(mid[q] * rng.uniform(1.0, 1.03, q.sum()), 4)
         ev["bid"][q & (rng.random(n) < 0.05)] = np.nan
-        ev["bid"][q & (rng.random(n) < 0.03)] *= -1
+        crossed = q & (rng.random(n) < 0.03)
+        ev["bid"][crossed], ev["ask"][crossed] = ev["ask"][crossed], ev["bid"][crossed]
         ev["bid_size"][q] = rng.integers(0, 2000, q.sum())
         ev["ask_size"][q] = rng.integers(0, 2000, q.sum())
+        ev["ask_size"][q & (rng.random(n) < 0.02)] = np.nan
         tr = ev["kind"] == TRADE
-        ev["price"][tr] = np.round(rng.uniform(1, 900_000, tr.sum()), 6)
+        ev["price"][tr] = np.round(rng.uniform(1, 400_000, tr.sum()), 4)
         ev["volume"][tr] = rng.integers(0, 10_000, tr.sum())
         ev["flags"][(ev["kind"] == CONDITION) & (rng.random(n) < 0.5)] = HALTED
         ev["flags"][q & (rng.random(n) < 0.02)] = HALTED
@@ -82,48 +92,61 @@ def synthetic_stream(
 
 
 def fuzz(payloads: list[bytes], count: int, seed: int = 7) -> list[bytes]:
-    """Mutations aimed at each rejection rule, applied to real packets."""
+    """Mutations aimed at each rejection rule (and at value edges every decoder must agree
+    on), applied to real packets."""
     rng = np.random.default_rng(seed)
     out = []
     picks = rng.integers(0, len(payloads), count)
     for j, i in enumerate(picks):
         b = bytearray(payloads[int(i)])
-        mode = j % 12
+        mode = j % 13
+        two = len(b) >= _SECOND_ENTRY + sbe.ENTRY_BLOCK_LENGTH
         if mode == 0:  # random byte flip anywhere
             b[rng.integers(0, len(b))] ^= 1 << int(rng.integers(0, 8))
         elif mode == 1:  # truncate
             b = b[: int(rng.integers(0, len(b)))]
-        elif mode == 2:  # wrong unit length
-            struct.pack_into("<H", b, 0, (len(b) + int(rng.integers(1, 5))) & 0xFFFF)
-        elif mode == 3:  # wrong group
-            b[3] = int(rng.choice([ord("B"), 0, 255]))
-        elif mode == 4:  # sequence 0 / overflow
-            struct.pack_into("<I", b, 4, int(rng.choice([0, 0xFFFFFFFF])))
-        elif mode == 5:  # message kind / length byte corruption inside the unit
-            off = 8
-            k = int(rng.integers(0, max(1, b[2])))
-            for _ in range(k):
-                if off + 1 >= len(b):
-                    break
-                off += b[off]
-            if off + 1 < len(b):
-                b[off + int(rng.integers(0, 2))] = int(rng.integers(0, 256))
-        elif mode == 6:  # Time out of range
-            if len(b) > 13 and b[9] == ord("T"):
-                struct.pack_into("<I", b, 10, 86400 + int(rng.integers(0, 5)))
-        elif mode == 7:  # nanoseconds >= 1e9 on the first observation
-            if len(b) > 21 and b[9] == ord("T") and b[14] in (34, 35, 28):
-                struct.pack_into("<I", b, 16, 10**9 + int(rng.integers(0, 100)))
-        elif mode == 8:  # symbol 0 / beyond universe on the first observation
-            if len(b) > 25 and b[9] == ord("T") and b[15] == ord("q"):
-                struct.pack_into("<I", b, 20, int(rng.choice([0, 0xFFFFFFFF, 99999])))
+        elif mode == 2:  # root block length: too short, misaligned, or a longer (extended) root
+            struct.pack_into("<H", b, 0, int(rng.choice([0, 8, 13, 16, 20, 28, 1000])))
+        elif mode == 3:  # another schema, template or version
+            field, value = (int(rng.integers(1, 4)), int(rng.choice([0, 2, 0xFFFF])))
+            struct.pack_into("<H", b, 2 * field, value)
+        elif mode == 4:  # sequence 0 / beyond the int64 range
+            struct.pack_into("<Q", b, 8, (0, 2**63, 2**64 - 1)[int(rng.integers(0, 3))])
+        elif mode == 5:  # entry block length: too short, misaligned, or a longer entry
+            struct.pack_into("<H", b, _DIMENSIONS, int(rng.choice([0, 40, 52, 56, 64, 1000])))
+        elif mode == 6:  # timestamp outside the day on the first entry
+            if len(b) >= _SECOND_ENTRY:
+                t = struct.unpack_from("<Q", b, _FIRST_ENTRY + _E["TransactTime"])[0]
+                shift = int(rng.choice([86400 * 10**9, -(86400 * 10**9), 2**63]))
+                struct.pack_into("<Q", b, _FIRST_ENTRY + _E["TransactTime"], (t + shift) % 2**64)
+        elif mode == 7:  # the second entry steps back in time
+            if two:
+                t = struct.unpack_from("<Q", b, _FIRST_ENTRY + _E["TransactTime"])[0]
+                struct.pack_into("<Q", b, _SECOND_ENTRY + _E["TransactTime"], max(t - 1, 0))
+        elif mode == 8:  # instrument beyond the universe on the first entry
+            if len(b) >= _SECOND_ENTRY:
+                struct.pack_into(
+                    "<H", b, _FIRST_ENTRY + _E["SecurityID"], int(rng.choice([0xFFFF, 999, 50]))
+                )
         elif mode == 9:  # unmutated control packet
             pass
-        elif mode == 10:  # sign bit on a price (negative prices decode, not reject)
-            if len(b) > 30 and b[9] == ord("T") and b[15] == ord("q"):
-                b[31] |= 0x80
-        elif mode == 11:  # message count mismatch
-            b[2] = (b[2] + int(rng.integers(1, 4))) & 0xFF
+        elif mode == 10:  # an entry type or trading status the replay does not use
+            if len(b) >= _SECOND_ENTRY:
+                if rng.random() < 0.5:
+                    b[_FIRST_ENTRY + _E["EntryType"]] = int(rng.choice([0, 4, 255]))
+                else:  # a status entry without a status, or an unknown status value
+                    b[_FIRST_ENTRY + _E["SecurityTradingStatus"]] = int(rng.choice([0, 1, 3, 255]))
+        elif mode == 11:  # entry count mismatch: too many (truncated) or too few (trailing)
+            n = struct.unpack_from("<H", b, _DIMENSIONS + 2)[0]
+            struct.pack_into("<H", b, _DIMENSIONS + 2, (n + int(rng.integers(-1, 4))) & 0xFFFF)
+        elif mode == 12:  # value edges: huge or null mantissas and quantities (accepted)
+            if len(b) >= _SECOND_ENTRY:
+                px = int(rng.choice([sbe.PRICE_NULL, sbe.PRICE_NULL + 1, 2**63 - 1, 2**53 + 1, -1]))
+                field = ("BidPx", "OfferPx", "LastPx")[int(rng.integers(0, 3))]
+                struct.pack_into("<q", b, _FIRST_ENTRY + _E[field], px)
+                qty = int(rng.choice([sbe.QTY_NULL, sbe.QTY_NULL - 1, 0]))
+                field = ("BidSize", "OfferSize", "LastQty")[int(rng.integers(0, 3))]
+                struct.pack_into("<I", b, _FIRST_ENTRY + _E[field], qty)
         out.append(bytes(b))
     return out
 
@@ -140,14 +163,14 @@ def synthetic_tape(
     symbols: int = 500,
     packets: int = 20000,
     seconds: int = 600,
-    max_events_per_packet: int = 32,
+    max_events_per_packet: int = MAX_EVENTS,
     seed: int = 7,
 ) -> dict:
     """Write ``events.bin`` (time ordered within 09:30 New York + [0, ``seconds``)) and
     ``manifest.json`` in the ``open_tape`` format; returns the manifest.
 
     The tape holds ``packets * max_events_per_packet`` observations, so ``synthetic_capture``
-    with the same ``max_events_per_packet`` sends ``packets`` full units. Kinds and anomalies
+    with the same ``max_events_per_packet`` sends ``packets`` full packets. Kinds and anomalies
     are those of ``synthetic_stream``, but quote mids follow per-symbol random walks around
     a common market factor, with spreads inside the bar rules, and anomalies are rare: most
     symbols keep a complete return window, so risk windows have eligible instruments.
@@ -250,8 +273,8 @@ class _SymbolModel:
         rows["ask_size"][q] = rng.integers(1, 2000, q.sum())
         u = rng.random(n)
         rows["bid"][q & (u < _ONE_SIDED)] = np.nan
-        negative = q & (u >= _ONE_SIDED) & (u < _ONE_SIDED + _NEGATIVE)
-        rows["bid"][negative] *= -1
+        crossed = q & (u >= _ONE_SIDED) & (u < _ONE_SIDED + _CROSSED)
+        rows["bid"][crossed], rows["ask"][crossed] = rows["ask"][crossed], rows["bid"][crossed]
         rows["flags"][q & (u >= 1 - _HALTED_QUOTE)] = HALTED
         rows["price"][tr] = np.round(mid[tr] * (1 + rng.uniform(-1, 1, tr.sum()) * half[tr]), 4)
         rows["volume"][tr] = rng.integers(1, 5000, tr.sum())
@@ -265,26 +288,33 @@ def synthetic_capture(
     *,
     sender_port: int = 40000,
     dst_port: int = 26400,
-    max_events_per_packet: int = 32,
+    max_events_per_packet: int = MAX_EVENTS,
     start_seq: int = 1,
     drop_every: int = 0,
+    encoder: str = "numpy",
+    gpu_device: int = 0,
 ) -> dict:
-    """Packetize a tape as ``tools.replay_sender`` does (``pack_events`` units plus the final
-    Status marker) into UDP frames in a pcap; ``drop_every`` > 0 leaves out every n-th data
-    packet (sequence gaps; the marker is always sent). Returns the counts.
+    """Packetize a tape as ``tools.replay_sender`` does (``pack_events`` packets plus the final
+    trading-status marker) into UDP frames in a pcap; ``drop_every`` > 0 leaves out every
+    n-th data packet (sequence gaps; the marker is always sent). ``encoder`` ``"gpu"`` packs
+    and frames each block on GPU ``gpu_device`` (needs CuPy), writing the same bytes.
+    Returns the counts.
 
     The counts are what a lossless receiver of the pcap sees: ``packets``, ``events``
-    (observations, the marker's included) and ``messages`` (MITCH messages, Time included),
-    with ``dropped_messages`` sequence gaps; ``next_sequence`` follows the marker. Record
-    times are the event time of each unit's last observation.
+    (observations, the marker's included) and ``messages`` (SBE entries: one per
+    observation, so equal to ``events``), with ``dropped_messages`` sequence gaps;
+    ``next_sequence`` follows the marker. Record times are the event time of each packet's
+    last observation.
     """
     _check_unit_size(max_events_per_packet)
     if not (1 <= sender_port <= 65535 and 1 <= dst_port <= 65535):
         raise ValueError("UDP ports must be 1..65535")
     if start_seq < 1:
-        raise ValueError("start_seq must be >= 1 (MITCH sequence 0 is unsequenced)")
+        raise ValueError("start_seq must be >= 1 (SBE sequence numbers start at 1)")
     if drop_every < 0:
         raise ValueError("drop_every must be >= 0")
+    if encoder not in ENCODERS:
+        raise ValueError(f"encoder must be one of {ENCODERS}")
     manifest, rows = open_tape(tape_dir)
     midnight_ns = day_start_ns(manifest["date"])
     n_units = -(-len(rows) // max_events_per_packet)
@@ -295,32 +325,33 @@ def synthetic_capture(
         ("packets", "events", "messages", "dropped_packets", "dropped_events", "dropped_messages"),
         0,
     )
-    framing = _FrameWriter(sender_port, dst_port)
+    framing = (
+        _GpuFrameWriter(sender_port, dst_port, midnight_ns, max_events_per_packet, gpu_device)
+        if encoder == "gpu"
+        else _FrameWriter(sender_port, dst_port, midnight_ns, max_events_per_packet)
+    )
     sequence = start_seq
     with open(pcap_path, "wb") as f:
         f.write(pcap_header())
-        # Packed and framed in blocks: a full day is 2.9M units, so a unit at a time in
+        # Packed and framed in blocks: a full day is 1.8M packets, so one at a time in
         # Python took minutes; pack_units writes the same bytes as pack_events.
         for first in range(0, n_units, _CAPTURE_UNITS):
             stop = min(first + _CAPTURE_UNITS, n_units)
             lo, hi = first * max_events_per_packet, min(stop * max_events_per_packet, len(rows))
             chunk = np.asarray(rows[lo:hi])
-            data, offsets, lengths, messages = pack_units(
-                chunk, sequence, midnight_ns, max_events_per_packet
-            )
             kept = sent[first:stop]
             events = np.diff(np.r_[np.arange(0, hi - lo, max_events_per_packet), hi - lo])
+            # Record time: the event time of each packet's last observation.
+            last = np.minimum(np.arange(first + 1, stop + 1) * max_events_per_packet, len(rows)) - 1
+            stamps = rows["timestamp_ns"][last[kept]].astype(np.int64)
+            f.write(framing.records(chunk, sequence, kept, stamps))
             for prefix, mask in (("", kept), ("dropped_", ~kept)):
                 counts[prefix + "packets"] += int(mask.sum())
                 counts[prefix + "events"] += int(events[mask].sum())
-                counts[prefix + "messages"] += int(messages[mask].sum())
-            sequence += int(messages.sum())  # a dropped unit still consumes its sequence numbers
-            # Record time: the event time of each unit's last observation.
-            last = np.minimum(np.arange(first + 1, stop + 1) * max_events_per_packet, len(rows)) - 1
-            stamps = rows["timestamp_ns"][last[kept]].astype(np.int64)
-            f.write(framing.records(data, offsets[kept], lengths[kept], stamps))
+                counts[prefix + "messages"] += int(events[mask].sum())
+            sequence += hi - lo  # a dropped packet still consumes its sequences
             if stop % _PROGRESS_PACKETS == 0 and stop < n_units:
-                logger.info("synthetic capture: %d of %d units", stop, n_units)
+                logger.info("synthetic capture: %d of %d packets", stop, n_units)
         # Event-time watermark closes the final regular-session bar.
         marker = np.zeros(1, dtype=EVENT_DTYPE)
         marker["timestamp_ns"] = manifest["end_ns"]
@@ -332,24 +363,33 @@ def synthetic_capture(
         counts.update(first_sequence=start_seq, next_sequence=sequence + count)
         frame = udp_frame(unit, src_port=sender_port, dst_port=dst_port)
         f.write(pcap_record(manifest["end_ns"], len(frame)) + frame)
-    counts.update(sender_port=sender_port, dst_port=dst_port)
+    counts.update(sender_port=sender_port, dst_port=dst_port, encoder=encoder)
     logger.info("synthetic capture: %d packets to %s", counts["packets"], pcap_path)
     return counts
 
 
 class _FrameWriter:
-    """UDP frames and pcap records of packed units, built in bulk: the 42-byte Ethernet, IPv4
-    and UDP prefix depends on the payload length alone, so one ``udp_frame`` per distinct
+    """UDP frames and pcap records of packed packets, built in bulk: the 42-byte Ethernet,
+    IPv4 and UDP prefix depends on the payload length alone, so one ``udp_frame`` per distinct
     length gives every frame its headers, checksum included."""
 
-    def __init__(self, src_port: int, dst_port: int) -> None:
+    def __init__(self, src_port: int, dst_port: int, midnight_ns: int, unit_events: int) -> None:
         self._ports = dict(src_port=src_port, dst_port=dst_port)
+        self._midnight_ns, self._unit_events = midnight_ns, unit_events
         self._prefix: dict[int, np.ndarray] = {}
 
     def records(
+        self, rows: np.ndarray, sequence: int, kept: np.ndarray, stamps: np.ndarray
+    ) -> bytes:
+        """The pcap records of the ``kept`` packets of ``rows`` packed from ``sequence``, each
+        stamped from ``stamps`` (one per kept packet)."""
+        data, offsets, lengths, _ = pack_units(rows, sequence, self._midnight_ns, self._unit_events)
+        return self.frames(data, offsets[kept], lengths[kept], stamps)
+
+    def frames(
         self, data: np.ndarray, offsets: np.ndarray, lengths: np.ndarray, stamps: np.ndarray
     ) -> bytes:
-        """The pcap records of the units at ``offsets``/``lengths`` of ``data`` (in order),
+        """The pcap records of the packets at ``offsets``/``lengths`` of ``data`` (in order),
         each stamped from ``stamps``."""
         k = len(offsets)
         if not k:
@@ -370,7 +410,7 @@ class _FrameWriter:
         is_head = np.zeros(len(out), bool)
         is_head[(out_offsets[:, None] + np.arange(heads.shape[1])).ravel()] = True
         out[is_head] = heads.ravel()
-        # The units' bytes in order: all of ``data`` when every unit is kept, else a gather.
+        # The packets' bytes in order: all of ``data`` when every one is kept, else a gather.
         if int(lengths.sum()) == len(data):
             out[~is_head] = data
         else:
@@ -379,3 +419,33 @@ class _FrameWriter:
             marks[offsets + lengths] -= 1
             out[~is_head] = data[np.cumsum(marks[:-1]) > 0]
         return out.tobytes()
+
+
+class _GpuFrameWriter:
+    """``_FrameWriter`` on the GPU: the rows go up once per block, ``encode_units`` packs them
+    and ``frame_units`` builds the records; one copy of the finished records comes back."""
+
+    def __init__(
+        self, src_port: int, dst_port: int, midnight_ns: int, unit_events: int, gpu_device: int
+    ) -> None:
+        import cupy as cp
+
+        from ..marketdata.gpu_sbe import _kernels
+
+        self._ports = dict(src_port=src_port, dst_port=dst_port)
+        self._midnight_ns, self._unit_events = midnight_ns, unit_events
+        self._device = cp.cuda.Device(gpu_device)
+        with self._device:
+            _kernels()
+
+    def records(
+        self, rows: np.ndarray, sequence: int, kept: np.ndarray, stamps: np.ndarray
+    ) -> bytes:
+        from ..marketdata.gpu_sbe import columns_from_events, encode_units, frame_units
+
+        with self._device:
+            data, offsets, lengths, _ = encode_units(
+                columns_from_events(rows), sequence, self._midnight_ns, self._unit_events
+            )
+            out = frame_units(data, offsets[kept], lengths[kept], stamps, **self._ports)
+            return out.get().tobytes()

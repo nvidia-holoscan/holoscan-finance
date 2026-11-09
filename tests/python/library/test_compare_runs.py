@@ -95,6 +95,6 @@ def test_separate_run_comparison_rejects_unmatched_or_invalid_work(fault):
     elif fault == "capture":
         gpu["valid"] = False
     elif fault == "protocol":
-        gpu["wire_protocol"] = "mit303-11.9-nyq-replay-v1"
+        gpu["wire_protocol"] = "mit303-11.9-nyq-replay-v1"  # the previous wire format
     report = compare_runs(cpu, gpu, 10_000_000_000, 20_000_000_000)
     assert not report["valid"] and report["median_analytics_speedup"] is None

@@ -16,11 +16,13 @@ import sys
 import numpy as np
 import pytest
 
-from holoscan_finance.marketdata import mitch_codec as mitch
+from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.bars import QuoteBars
 from holoscan_finance.marketdata.framing import PcapFrames, strip_udp_datagram
+from holoscan_finance.marketdata.gpu_sbe import PACKET_HEADER
 from holoscan_finance.marketdata.records import CONDITION, HALTED, QUOTE, TRADE, ReplayBatch
 from holoscan_finance.nyq.manifest import validate_manifest
+from holoscan_finance.nyq.mapping import MAX_PACKET_EVENTS as MAX_EVENTS
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import fuzz, synthetic_capture, synthetic_stream, synthetic_tape
 from holoscan_finance.nyq.tape import open_tape
@@ -29,8 +31,8 @@ from holoscan_finance.tools import synth
 MIDNIGHT = day_start_ns("2025-04-01")
 # Expected SHA-256 of the generators' output for these arguments: the generators must
 # reproduce them byte for byte.
-STREAM_DIGEST = "5210bc2f12d578a3ac2e9df8e605d4c6d1a477c38d51c929ab152e90340e4063"
-FUZZ_DIGEST = "3c2bbf7814c5089d01dae0c23817c039727143db9e59ea778379d524febb1e27"
+STREAM_DIGEST = "2d005ead320f1d37d6f6e45e56e7a8e66f4af7439f99d8a84e561b6dc966cec1"
+FUZZ_DIGEST = "e2536343bc780aa3dc1d553b37c54a39ee0da69a9481a0753365024da6a1e20d"
 
 
 def digest(units):
@@ -66,7 +68,7 @@ def test_fuzz_exercises_every_rejection_stage():
     stages = set()
     for unit in mutated:
         try:
-            mitch.inspect_unit(unit)
+            sbe.inspect_packet(unit)
         except (ValueError, struct.error):
             stages.add("framing")
             continue
@@ -88,7 +90,7 @@ def tape(tmp_path_factory):
 def test_tape_format_and_content(tape):
     out, manifest = tape
     m, rows = open_tape(out)
-    assert m == manifest and m["events"] == len(rows) == 300 * 32
+    assert m == manifest and m["events"] == len(rows) == 300 * MAX_EVENTS
     assert len(m["symbols"]) == len(set(m["symbols"])) == 40
     assert m["start_ns"] == MIDNIGHT + 34200 * 10**9 and m["end_ns"] == m["start_ns"] + 120 * 10**9
     ts = rows["timestamp_ns"]
@@ -117,11 +119,12 @@ def test_tape_quotes_are_mostly_valid_with_rare_anomalies(tmp_path):
     synthetic_tape(tmp_path, symbols=30, packets=2000, seconds=600, seed=2)
     _, rows = open_tape(tmp_path)
     q = rows[rows["kind"] == QUOTE]
-    one_sided, negative = np.isnan(q["bid"]), q["bid"] < 0
+    one_sided, crossed = np.isnan(q["bid"]), q["bid"] > q["ask"]
     halted = (q["flags"] & HALTED) != 0
-    assert one_sided.any() and negative.any() and halted.any()
-    assert (one_sided | negative | halted).mean() < 0.01
-    ok = ~(one_sided | negative | halted)
+    assert one_sided.any() and crossed.any() and halted.any()
+    assert (one_sided | crossed | halted).mean() < 0.01
+    assert (q["bid"][~one_sided] > 0).all()
+    ok = ~(one_sided | crossed | halted)
     spread_bps = (q["ask"][ok] - q["bid"][ok]) / ((q["ask"][ok] + q["bid"][ok]) / 2) * 1e4
     assert (spread_bps > 0).all() and (spread_bps <= 25).all()
     conditions = rows[rows["kind"] == CONDITION]
@@ -152,7 +155,7 @@ def test_capture_carries_the_tape_as_replay_units(tape, tmp_path):
     expected, events, messages = 5, [], 0
     for i in range(len(frames)):
         frame = frames.frame(i)
-        payload, peer = strip_udp_datagram(frame, minimum_payload=8)
+        payload, peer = strip_udp_datagram(frame, minimum_payload=PACKET_HEADER)
         assert peer[1] == 40123 and struct.unpack_from(">H", frame, 36)[0] == 26400
         (batch,), count = decode(payload, 40, recv_ns=i)
         assert batch.sequence == expected
@@ -163,14 +166,19 @@ def test_capture_carries_the_tape_as_replay_units(tape, tmp_path):
     decoded = np.concatenate(events)
     for name in ("timestamp_ns", "symbol_id", "kind"):
         np.testing.assert_array_equal(decoded[name][:-1], rows[name], err_msg=name)
+    # Every entry carries the directory index of its instrument.
+    _, entries = sbe.parse_packet(strip_udp_datagram(frames.frame(0))[0])
+    assert (entries["SecurityID"] < len(manifest["symbols"])).all()
+    assert len(entries) == MAX_EVENTS
     marker = decoded[-1]
     assert (marker["timestamp_ns"], marker["kind"], marker["flags"]) == (
         manifest["end_ns"],
         CONDITION,
         0,
     )
-    valid = (rows["kind"] == QUOTE) & np.isfinite(rows["bid"]) & (rows["flags"] == 0)
-    np.testing.assert_array_equal(decoded["bid"][:-1][valid], rows["bid"][valid])
+    for name in ("bid", "ask", "bid_size", "ask_size", "price", "volume", "flags"):
+        np.testing.assert_array_equal(decoded[name][:-1], rows[name], err_msg=name)
+    assert messages == len(rows) + 1  # one entry per observation
     assert counts == dict(
         packets=301,
         events=len(rows) + 1,
@@ -182,6 +190,7 @@ def test_capture_carries_the_tape_as_replay_units(tape, tmp_path):
         next_sequence=expected,
         sender_port=40123,
         dst_port=26400,
+        encoder="numpy",
     )
 
 
@@ -204,10 +213,20 @@ def test_drop_every_leaves_sequence_gaps_but_keeps_the_marker(tape, tmp_path):
 
 def test_invalid_arguments_are_rejected(tape, tmp_path):
     out, _ = tape
-    for bad in (dict(symbols=0), dict(seconds=86400 - 34200), dict(max_events_per_packet=33)):
+    for bad in (
+        dict(symbols=0),
+        dict(seconds=86400 - 34200),
+        dict(max_events_per_packet=MAX_EVENTS + 1),
+    ):
         with pytest.raises(ValueError):
             synthetic_tape(tmp_path / "bad", **bad)
-    for bad in (dict(drop_every=-1), dict(sender_port=0), dict(dst_port=65536), dict(start_seq=0)):
+    for bad in (
+        dict(drop_every=-1),
+        dict(sender_port=0),
+        dict(dst_port=65536),
+        dict(start_seq=0),
+        dict(encoder="fpga"),
+    ):
         with pytest.raises(ValueError):
             synthetic_capture(out, tmp_path / "bad.pcap", **bad)
 
@@ -230,7 +249,7 @@ def test_synth_cli_writes_a_data_set_and_reuses_it(tmp_path):
     assert first.returncode == 0, first.stderr
     summary = json.loads((out / "synth.json").read_text())
     assert summary["args"]["packets"] == 200 and summary["args"]["seed"] == 7
-    assert summary["tape"]["events"] == 200 * 32 and summary["capture"]["packets"] == 201
+    assert summary["tape"]["events"] == 200 * MAX_EVENTS and summary["capture"]["packets"] == 201
     assert summary["files"]["day.pcap"] == (out / "day.pcap").stat().st_size
     stamps = {p: (out / p).stat().st_mtime_ns for p in synth._FILES}
     reused = run_synth(*args, "--reuse")

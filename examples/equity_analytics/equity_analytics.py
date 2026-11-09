@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""equity MITCH -> quote bars -> rolling risk -> web dashboard, composed from holoscan.finance operators.
+"""equity SBE market data -> quote bars -> rolling risk -> web dashboard, composed from holoscan.finance operators.
 
 The front end (kernel socket, DAQIRI host memory, DAQIRI GPUDirect, or NIC-free GPU replay) is
 chosen in compose(); everything downstream is shared. `holoscan run equity_analytics <mode>`.
@@ -19,13 +19,13 @@ from holoscan_finance.dashboard.server import serve
 from holoscan_finance.operators import (
     CallbackSinkOp,
     DaqiriPacketSourceOp,
-    GpuMitchReplaySourceOp,
-    GpuMitchSourceOp,
-    MitchDecodeOp,
+    GpuSbeReplaySourceOp,
+    GpuSbeSourceOp,
     QuoteBarsOp,
     RiskCrossCheckOp,
     RiskSummaryOp,
     RollingRiskOp,
+    SbeDecodeOp,
     UdpPacketSourceOp,
 )
 from holoscan_finance.operators.edges import LATEST, lossless, topic_export_kwargs
@@ -51,9 +51,9 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
 
     # ingest lane: the front end is the only mode-specific part of the graph
     if args.ingest == "gpudirect":
-        # ConnectX -> GPU memory (DAQIRI GPUDirect) -> GPU gather + MITCH decode
+        # ConnectX -> GPU memory (DAQIRI GPUDirect) -> GPU gather + SBE decode
         source = g.op(
-            GpuMitchSourceOp,
+            GpuSbeSourceOp,
             "source",
             port=args.udp_port,
             **cli.nic_params(args, ctx.cpus, gpudirect=True),
@@ -62,7 +62,7 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
     elif args.ingest == "replay":
         # NIC-free: pcap frames in GPU memory, the same gather/ring/decode code
         source = g.op(
-            GpuMitchReplaySourceOp,
+            GpuSbeReplaySourceOp,
             "source",
             pcap_path=args.pcap,
             pps=args.replay_pps,
@@ -96,7 +96,7 @@ def compose(args: argparse.Namespace, ctx: EquityContext) -> tuple[hs.Graph, Lan
     if gpu_front_end:  # decode is fused in the GPU sources: ring slots stay leased until decoded
         events, front = source.events, [source]
     else:  # host paths: the Python reference decoder is its own operator
-        decode = g.op(MitchDecodeOp, "decode", directory=directory, stats=ingest, tap=Ref(ctx.tap))
+        decode = g.op(SbeDecodeOp, "decode", directory=directory, stats=ingest, tap=Ref(ctx.tap))
         g.add_flow(source.packets, decode.packets, **lossless(16))
         events, front = decode.events, [source, decode]
     bars = g.op(

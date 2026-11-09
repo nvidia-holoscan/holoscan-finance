@@ -21,7 +21,7 @@ from ..payloads import BarCounters, BarWindow, SymbolSnapshot
 from ..settings import BarSettings
 from .bars import QuoteBars
 from .gpu_bars import GpuQuoteBars, GpuReplayBatch, apply_sequence
-from .gpu_mitch import FIELDS
+from .gpu_sbe import FIELDS
 from .records import EVENT_DTYPE, ReplayBatch
 from .sequence import SequenceTracker
 

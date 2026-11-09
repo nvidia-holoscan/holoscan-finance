@@ -3,10 +3,10 @@
 """``UdpPacketSourceOp`` and ``DaqiriPacketSourceOp``: the host-memory baselines.
 
 Port: ``packets`` (out, ``PacketBatch`` of up to ``batch_size`` messages). Contract:
-``OnClock(poll_period_us)``. Edge: ``packets -> MitchDecodeOp.packets`` with ``lossless(16)``
+``OnClock(poll_period_us)``. Edge: ``packets -> SbeDecodeOp.packets`` with ``lossless(16)``
 in the same lane; the source is the entry of ``ingest``. A drain thread copies datagrams
 into a host ring after a header peek, so decode load never drops packets at the socket or
-NIC (overload is ``ring_dropped``); decode is the separate ``MitchDecodeOp``. Processors:
+NIC (overload is ``ring_dropped``); decode is the separate ``SbeDecodeOp``. Processors:
 ``ingest.host_receivers``.
 """
 

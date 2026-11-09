@@ -101,7 +101,7 @@ jobs:
           cd /
           /tmp/v/bin/python -c "
           import importlib.metadata as m, importlib.resources as r
-          import holoscan_finance as g, holoscan_finance.marketdata.mitch_codec
+          import holoscan_finance as g, holoscan_finance.marketdata.sbe_codec
           assert g.__file__.startswith('/tmp/v/'), g.__file__
           assert 'finance' in [e.name for e in m.entry_points(group='holoscan.modules')]
           assert r.files(g).joinpath('dashboard/webui/index.html').is_file()

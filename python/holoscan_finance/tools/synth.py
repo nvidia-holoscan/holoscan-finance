@@ -4,13 +4,14 @@
 
     python -m holoscan_finance.tools.synth --out DIR [--symbols 500] [--packets 20000]
         [--seconds 600] [--seed 7] [--sender-port 40000] [--drop-every 0]
-        [--max-events-per-packet 32] [--reuse]
+        [--max-events-per-packet 30] [--encoder numpy|gpu] [--reuse]
 
 ``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the replay
 sender's packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
 counts and expected totals (``capture``: what a lossless receiver of the pcap counts).
-``--reuse`` keeps an existing directory made with identical arguments. Generation is
-CPU-only; the outputs support tests and NIC-free validation.
+``--reuse`` keeps an existing directory made with identical arguments. The tape is generated
+on the CPU; ``--encoder gpu`` packs and frames the capture on the GPU (CuPy), writing the
+same bytes as the NumPy packer. The outputs support tests and NIC-free validation.
 """
 
 from __future__ import annotations
@@ -20,7 +21,8 @@ import json
 import logging
 from pathlib import Path
 
-from ..nyq.synthetic import synthetic_capture, synthetic_tape
+from ..nyq.mapping import MAX_PACKET_EVENTS
+from ..nyq.synthetic import ENCODERS, synthetic_capture, synthetic_tape
 
 _FILES = ("tape/events.bin", "tape/manifest.json", "day.pcap")
 
@@ -38,7 +40,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--drop-every", type=int, default=0, help="leave out every n-th packet (0: none)"
     )
-    p.add_argument("--max-events-per-packet", type=int, default=32)
+    p.add_argument("--max-events-per-packet", type=int, default=MAX_PACKET_EVENTS)
+    p.add_argument(
+        "--encoder", choices=ENCODERS, default="numpy", help="pack and frame the capture with"
+    )
+    p.add_argument("--gpu-device", type=int, default=0, help="CUDA device of --encoder gpu")
     p.add_argument(
         "--reuse", action="store_true", help="keep DIR if it was made with identical arguments"
     )
@@ -65,7 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     out = Path(a.out)
-    args = {k: v for k, v in sorted(vars(a).items()) if k not in ("out", "reuse")}
+    # The encoder does not change the bytes, so either one may reuse the other's output.
+    args = {
+        k: v
+        for k, v in sorted(vars(a).items())
+        if k not in ("out", "reuse", "encoder", "gpu_device")
+    }
     if a.reuse and _reusable(out, args):
         print(f"synth: {out} already holds this data set (--reuse)")
         return 0
@@ -87,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
             sender_port=a.sender_port,
             max_events_per_packet=a.max_events_per_packet,
             drop_every=a.drop_every,
+            encoder=a.encoder,
+            gpu_device=a.gpu_device,
         )
     except ValueError as exc:
         raise SystemExit(f"synth: {exc}") from exc

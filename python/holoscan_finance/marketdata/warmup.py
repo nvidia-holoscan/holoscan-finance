@@ -21,7 +21,7 @@ import numpy as np
 from ..nyq.mapping import pack_events
 from .framing import udp_frame
 from .gpu_bars import GpuQuoteBars, GpuReplayBatch, apply_sequence
-from .gpu_mitch import SLOT_BYTES, UNIT_HEADER, decode_packets, receive_frames
+from .gpu_sbe import PACKET_HEADER, SLOT_BYTES, decode_packets, receive_frames
 from .records import EVENT_DTYPE
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ _SYMBOLS = ["A", "B", "C"]
 
 
 def _unit(step: int, sequence: int, bar_ns: int, *, late_ns: int = 0) -> tuple[bytes, int]:
-    """One MITCH unit of quotes, trades and a halt in bar ``step``; ``late_ns`` moves the
+    """One SBE packet of quotes, trades and a halt in bar ``step``; ``late_ns`` moves the
     first observation that far back."""
     rows = np.zeros(6, EVENT_DTYPE)
     rows["timestamp_ns"] = _MIDNIGHT + 36000 * 10**9 + step * bar_ns + np.arange(6) * 10**6
@@ -74,7 +74,7 @@ def _once(kernels: str, gpu_device: int, warm) -> float:
 
 
 def warm_decode_kernels(gpu_device: int = 0) -> float:
-    """Compile and run ``gather_frame`` and ``mitch_decode`` on synthetic units; returns seconds
+    """Compile and run ``gather_frame``, ``sbe_inspect`` and ``sbe_decode`` on synthetic units; returns seconds
     (0.0 when this device is already warm)."""
 
     def warm(cp) -> None:
@@ -84,12 +84,18 @@ def warm_decode_kernels(gpu_device: int = 0) -> float:
         lengths = np.array([len(f) for f in frames], np.uint64)
         packed = cp.asarray(np.concatenate([addresses, lengths]))
         slots = cp.zeros_like(pool)
-        header = receive_frames(packed, len(frames), slots, min_payload=UNIT_HEADER)
-        # The sources decode with a stale-port mask, which takes the masked pass-2 path.
-        keep = np.array([True, False])
+        header = receive_frames(packed, len(frames), slots, min_payload=PACKET_HEADER)
+        # The sources decode with a stale-port mask and the header's entry counts; the
+        # benchmarks and tests without a header take the sbe_inspect path.
         decode_packets(
-            slots, header[:, 0].astype(cp.int32), midnight_ns=_MIDNIGHT, universe=3, keep=keep
+            slots,
+            header=header,
+            midnight_ns=_MIDNIGHT,
+            universe=3,
+            sender_port=40000,
+            max_events=12,
         )
+        decode_packets(slots, header[:, 0].astype(cp.int32), midnight_ns=_MIDNIGHT, universe=3)
 
     return _once("decode", gpu_device, warm)
 

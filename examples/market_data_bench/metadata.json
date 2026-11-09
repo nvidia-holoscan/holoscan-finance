@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:application:v1",
   "application": {
     "name": "market_data_bench",
-    "description": "Example application of the holoscan-finance module: NIC-free MITCH replay through the production GPU chain (gather, decode, quote bars, optional risk) with throughput, loss and lag gates, and in-graph GPU vs CPU bit identity.",
+    "description": "Example application of the holoscan-finance module: NIC-free SBE replay through the production GPU chain (gather, decode, quote bars, optional risk) with throughput, loss and lag gates, and in-graph GPU vs CPU bit identity.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -27,7 +27,7 @@
     "ranking": 2,
     "requirements": {
       "operators": [
-        "gpu_mitch_replay_source_op",
+        "gpu_sbe_replay_source_op",
         "quote_bars_op",
         "rolling_risk_op",
         "callback_sink_op"
@@ -52,14 +52,14 @@
       "paced": {
         "description": "Full synthetic day at 200k packets/s with the NIC buffer model and GPU risk: lossless, real time, replay lag p99 within 5 ms",
         "run": {
-          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --risk gpu --require-lossless --require-realtime --max-lag-p99-ms 5 --report <holohub_bin>/bench_paced.json\"",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --risk gpu --require-lossless --require-realtime --max-lag-p99-ms 5 --report <holohub_bin>/bench_paced.json\"",
           "workdir": "holohub_bin"
         }
       },
       "throughput": {
-        "description": "Full synthetic day, unpaced: at least 13.2M MITCH messages/s (twice the 200k packets/s line rate)",
+        "description": "Full synthetic day, unpaced: at least 12M SBE entries/s (twice the 200k packets/s line rate)",
         "run": {
-          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 0 --min-msgs-per-s 13200000 --report <holohub_bin>/bench_throughput.json\"",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 0 --min-msgs-per-s 12000000 --report <holohub_bin>/bench_throughput.json\"",
           "workdir": "holohub_bin"
         }
       },
@@ -73,7 +73,7 @@
       "pcap": {
         "description": "A full synthetic day at 200k packets/s: lossless and real time",
         "run": {
-          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --require-lossless --require-realtime\"",
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse && python3 <holohub_app_source>/market_data_bench.py --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --pps 200000 --nic-bufs 114688 --require-lossless --require-realtime\"",
           "workdir": "holohub_bin"
         }
       },

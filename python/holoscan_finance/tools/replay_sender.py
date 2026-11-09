@@ -11,8 +11,8 @@ socket bound, the NIC drain running), so no packet goes to a port nobody reads y
 seek or loop is a new generation from a fresh UDP source port, registered with ``POST
 /manifest`` before its first packet, so the receiver can tell old packets from new ones. The
 pacing
-(``/feedrate``) is polled every 200 ms; the final Status marker of a pass closes the last
-regular-session bar. Packets are packed in blocks of 1,024 ahead of sending
+(``/feedrate``) is polled every 200 ms; the final trading-status marker of a pass closes the
+last regular-session bar. Packets are packed in blocks of 1,024 ahead of sending
 (``pack_units``), so one Python thread sustains tens of thousands of packets/s; the pace is
 set by the receiver's controls. ``bench_replay`` covers line-rate replay. CPU only.
 """
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             sock.close()
         else:
-            raise RuntimeError("no fresh UDP source port for MITCH replay generation")
+            raise RuntimeError("no fresh UDP source port for SBE replay generation")
         used_ports.add(port)
         accepted = request(
             a.control_url,
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.ready_timeout > 0:
         wait_ready(a.control_url, a.ready_timeout)
     print(
-        f"MITCH equity replay: {len(rows):,} observations / {len(manifest['symbols']):,} instruments -> {target}",
+        f"SBE equity replay: {len(rows):,} observations / {len(manifest['symbols']):,} instruments -> {target}",
         flush=True,
     )
     while a.loops == 0 or loops < a.loops:

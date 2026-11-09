@@ -30,6 +30,8 @@ import sysconfig
 from pathlib import Path
 from types import ModuleType
 
+from ...marketdata.gpu_sbe import HEADER_COLS
+
 logger = logging.getLogger(__name__)
 
 _SOURCE = Path(__file__).with_name("daqiri_drain.cpp")
@@ -125,6 +127,10 @@ def _build() -> type:
     spec = importlib.util.spec_from_file_location(module_name, str(target), loader=loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
+    if module.HEADER_COLS != HEADER_COLS:  # the ring's header rows are copied by width
+        raise ImportError(
+            f"native drain writes {module.HEADER_COLS} header columns, gpu_sbe {HEADER_COLS}"
+        )
     return module.Drain
 
 

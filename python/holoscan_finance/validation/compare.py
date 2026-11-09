@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Host decode oracle and bitwise comparisons for the GPU and numba MITCH decoders.
+"""Host decode oracle and bitwise comparisons for the GPU and numba SBE decoders.
 
 ``host_decode`` decodes captured payloads with the reference ``nyq.mapping.decode_packet`` in
 a fork pool; ``compare_decoded`` requires another decoder's output to match it bit for bit:
@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..marketdata import mitch_codec as unit
+from ..marketdata import sbe_codec as sbe
 from ..marketdata.bars import QuoteBars
-from ..marketdata.gpu_mitch import FIELDS
+from ..marketdata.gpu_sbe import FIELDS
 from ..marketdata.records import EVENT_DTYPE, ReplayBatch
 from ..marketdata.sequence import SequenceTracker
 from ..nyq.mapping import decode_packet
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     import cupy as cp
 
     from ..marketdata.framing import PcapFrames
-    from ..marketdata.gpu_mitch import DecodedPackets
+    from ..marketdata.gpu_sbe import DecodedPackets
     from ..nyq.manifest import FeedDirectory
     from ..settings import BarSettings
 
@@ -53,11 +53,11 @@ def _host_decode(chunk: list[bytes]) -> tuple:
     status = np.zeros(n, np.int32)
     nev = np.zeros(n, np.int32)
     wire = np.zeros(n, np.int32)
-    seq = np.zeros(n, np.uint32)
+    seq = np.zeros(n, np.uint64)
     rows = []
     for i, data in enumerate(chunk):
         try:
-            _, s, c = unit.inspect_unit(data)
+            s, c = sbe.inspect_packet(data)
         except (ValueError, struct.error):
             status[i] = 1
             continue
@@ -78,7 +78,7 @@ def _host_decode(chunk: list[bytes]) -> tuple:
 
 def host_decode(payloads: list[bytes], midnight_ns: int, universe: int, workers: int = 6) -> tuple:
     """``(status, events_per_packet, wire_count, sequence, events)`` of every payload; status
-    is 0 decoded, 1 rejected by ``inspect_unit``, 2 rejected by ``decode_packet``.
+    is 0 decoded, 1 rejected by ``inspect_packet``, 2 rejected by ``decode_packet``.
 
     ``workers`` > 1 decodes in a fork pool (about 0.3M messages/s per worker); 1 decodes in
     this process."""
@@ -117,7 +117,7 @@ def compare_decoded(host: tuple, gpu: DecodedPackets) -> dict:
     }
     ok = status == 0
     out["events_per_packet_mismatch"] = int((nev[ok] != gpu.events_per_packet[ok]).sum())
-    fr = status != 1  # framing fields are defined whenever inspect_unit passed
+    fr = status != 1  # framing fields are defined whenever inspect_packet passed
     out["wire_count_mismatch"] = int((wire[fr] != gpu.wire_count[fr]).sum())
     out["sequence_mismatch"] = int((seq[fr] != gpu.sequence[fr]).sum())
     out["events_host"] = int(len(events))

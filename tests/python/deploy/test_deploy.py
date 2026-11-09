@@ -201,7 +201,7 @@ def preflight_fakes(require_daqiri) -> dict[str, ModuleType]:
     fakes["cupy"].cuda = SimpleNamespace(runtime=SimpleNamespace(getDeviceCount=lambda: 1))
     sdk = fakes["holoscan"] = ModuleType("holoscan")
     sdk.compile = lambda *args, **kwargs: None
-    for name in ("operators.gpu_mitch_source", "dashboard.server", "ingest.daqiri"):
+    for name in ("operators.gpu_sbe_source", "dashboard.server", "ingest.daqiri"):
         fakes[f"holoscan_finance.{name}"] = ModuleType(f"holoscan_finance.{name}")
     fakes["holoscan_finance.ingest.daqiri"].require_daqiri = require_daqiri
     return fakes

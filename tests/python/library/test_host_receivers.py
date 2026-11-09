@@ -21,7 +21,7 @@ import pytest
 from fakes.fake_daqiri import make_fake_daqiri
 
 from holoscan_finance.ingest import host_receivers
-from holoscan_finance.ingest.accounting import ReceiveAccounting, mitch_packet_header
+from holoscan_finance.ingest.accounting import ReceiveAccounting, sbe_packet_header
 from holoscan_finance.ingest.affinity import process_mask
 from holoscan_finance.ingest.host_receivers import DaqiriHostReceiver, UdpReceiver
 from holoscan_finance.marketdata.framing import udp_frame
@@ -36,7 +36,7 @@ COUNTERS = ("packets", "received_messages", "dropped", "out_of_order_packets", "
 
 
 def unit(sequence: int, bids: list[tuple[int, float]]) -> tuple[bytes, int]:
-    """One MITCH unit of quotes and its wire-message count (Time messages included)."""
+    """One SBE packet of quotes and its entry count (one entry per quote)."""
     rows = np.zeros(len(bids), EVENT_DTYPE)
     rows["kind"] = QUOTE
     rows["timestamp_ns"] = MIDNIGHT + 34200 * 10**9 + np.arange(len(rows))
@@ -103,7 +103,7 @@ def test_udp_receiver_counts_like_receive_accounting():
     reference = IngestStats()
     acct = ReceiveAccounting(reference)
     for p in payloads[:-1]:
-        acct.observe_packet(*mitch_packet_header(p, src), stats.last_packet_wall_ns)
+        acct.observe_packet(*sbe_packet_header(p, src), stats.last_packet_wall_ns)
     reference.malformed_packets = 1
     for name in COUNTERS:
         assert getattr(stats, name) == getattr(reference, name), name
@@ -168,7 +168,7 @@ def test_socket_and_daqiri_receive_identical_units(monkeypatch):
     for f in ("bid", "ask", "bid_size", "ask_size", "price", "volume"):
         rows[f] = np.nan
     rows["bid"][0], rows["ask"][0], rows["bid_size"][0], rows["ask_size"][0] = 1.5, 1.6, 10, 20
-    rows["price"][1], rows["volume"][1] = 812345.12, 300
+    rows["price"][1], rows["volume"][1] = 412345.12, 300
     data, _ = pack_events(rows, 1, MIDNIGHT)
     received = []
 
@@ -216,7 +216,7 @@ def test_daqiri_receiver_strips_frames_counts_gaps_and_frees_bursts(monkeypatch)
     try:
         assert wait(lambda: stats.packets == 2)
         assert stats.dropped == 3 and stats.malformed_packets == 0
-        assert stats.messages == 0  # decode is MitchDecodeOp's job, not the drain's
+        assert stats.messages == 0  # decode is SbeDecodeOp's job, not the drain's
         assert stats.ring_fill() == stats.received_messages
         assert wait(lambda: len(fake.freed) == 2)  # every burst returned to the pool
     finally:

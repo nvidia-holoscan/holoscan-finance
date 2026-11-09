@@ -14,37 +14,50 @@ universe and volume. A final status marker closes the last bar. `synth.json` rec
 seed, generation arguments, file sizes and exact expected capture counts. See
 [synthetic inputs](VALIDATION.md#synthetic-inputs) for commands.
 
-## Wire format: MITCH replay
+## Wire format: FIX SBE replay
 
-Sender and receivers use the binary layouts and unit framing of
-[MIT303 issue 11.9](https://docs.londonstockexchange.com/sites/default/files/documents/mit303issue119.pdf).
-The UDP payload starts with the MITCH unit header; there is no other envelope or
-hidden timing field. The generator encodes synthetic observations in these layouts for
-replay; the packets do not represent an exchange feed.
+Sender and receivers use [FIX Simple Binary Encoding 1.0](https://www.fixtrading.org/standards/sbe/)
+(the FIX Trading Community's binary encoding) under the replay's own message schema,
+[`sbe_schema.xml`](../python/holoscan_finance/marketdata/sbe_schema.xml). Every UDP datagram
+is exactly one `MarketDataIncrementalRefresh` message, little-endian: the 8-octet SBE
+message header (`blockLength`, `templateId` 1, `schemaId` 18502, `version`), the root block
+(`SeqNum`, padded to 12 octets) and the `NoMDEntries` repeating group (`blockLength` 48,
+`numInGroup`, then one fixed 48-octet entry per observation). There is no other envelope or
+hidden timing field; every byte of a datagram is described by the schema, and the
+[reference SBE tool](VALIDATION.md#library-bit-identity) decodes the replay from the XML
+alone. The generator encodes synthetic observations in this schema for replay; the packets
+do not represent an exchange feed.
 
-| Synthetic input | MITCH message | Replay interpretation |
+| Synthetic input | Entry fields (FIX tag) | Replay interpretation |
 | --- | --- | --- |
-| Market timestamp | Time (`T`) plus message nanosecond offset | Source date and New York midnight come from the HTTP manifest. A Time message starts every unit and repeats when the second changes. |
-| Bid/ask prices and displayed sizes | Top of Book (`q`) | Both sides travel together; no individual orders are invented. |
-| Trade price and volume | Trade (`P`) | Synthetic trade with a generated replay trade ID. |
-| Recognized halt / other condition | Symbol Status (`H`) | Halt (`H`) or regular-session (`T`) marker. |
-| Symbol name | Instrument ID | One-based replay directory ID; full names stay in the HTTP directory. |
+| Market timestamp | `TransactTime` (60): nanoseconds since the Unix epoch | Must lie in the market day of the HTTP manifest's date and be non-decreasing within a packet; every packet decodes on its own. |
+| Bid/ask prices and displayed sizes | `EntryType` Quote; `BidPx` (132), `OfferPx` (133), `BidSize` (134), `OfferSize` (135) | One entry carries both sides; no order book is reconstructed. |
+| Trade price and volume | `EntryType` Trade; `LastPx` (31), `LastQty` (32) | Synthetic trade. |
+| Recognized halt / other condition | `EntryType` TradingStatus; `SecurityTradingStatus` (326) `TradingHalt` (2) or `ReadyToTrade` (17) | A halt or a resume. `TradingHalt` on a quote or trade entry marks it halted; the quote keeps its prices. |
+| Symbol name | `SecurityID` (48) | Zero-based replay directory index, the instrument key; names live in the directory only. |
 
-The `q` and `P` **layouts** are reused for synthetic quotes and trades; no LSE
-auction state, order book or trade-correction service is reconstructed. Instrument
-IDs, trade IDs and market-data group `A` are local replay identifiers.
+Prices are the `PriceNULL4` composite: a signed 64-bit mantissa with a constant exponent of
+-4 (four implied decimals), `null` (the int64 minimum) when absent. Quantities are
+`QtyNULL`, an unsigned 32-bit count, `null` (the uint32 maximum) when absent. Fields that
+do not belong to an entry's type are null. Missing source values travel as null and decode
+as NaN; nothing is coerced. A price decodes as `float64(mantissa) / 10000.0` (the mantissa
+converts to the nearest double, then one IEEE division), the same two roundings on every
+decoder. The codec rejects infinite prices, mantissas outside the int64 range and
+fractional, negative or overflowing quantities; negative prices are representable. Units
+are the source units; no lot-size conversion is applied.
 
-Prices use eight decimal places in the specification's sign-magnitude form; the codec
-rejects out-of-range prices. Quantities must be integral UInt32; fractional or
-overflowing quantities stop the replay. Unavailable prices and unavailable or
-nonpositive quantities become zero, which the quote rules treat as absent. Quote rows
-with the halt flag are sent with unavailable prices. Units are the source units; no
-lot-size conversion is applied.
+Sequence numbers advance for **every entry**, so an entry count is an observation count and
+a sequence gap is a count of lost observations. The sender packs at most 30 observations per
+packet within a 1,472-byte payload (30 entries are 1,464 bytes); a requested rate of 75,000
+means source observations/s. One final `TradingStatus` marker closes the last bar at
+session end.
 
-MITCH sequence numbers advance for **every wire message**, including Time messages,
-so wire-message counts exceed observation counts. The sender packs at most 32
-observations per unit within a 1,472-byte payload; a requested rate of 75,000 means
-source observations/s. One final Status marker closes the last bar at session end.
+As SBE requires, the decoders take the root and entry block lengths from the wire, so a
+later schema version that appends fields decodes with today's receivers, and a later
+`version` is accepted. The replay receivers additionally require the lengths to keep every
+entry on an 8-octet boundary (the GPU reads each field with one aligned load) and reject the
+message otherwise, as they reject another `schemaId` or `templateId`, an unknown entry type
+or trading status, and a `TradingStatus` entry without a status.
 
 Each seek, loop or sender restart registers a new generation and a fresh UDP source
 port through the manifest endpoint; the receiver rejects packets from earlier ports
@@ -126,7 +139,7 @@ microstructure noise ([Aït-Sahalia and Yu](https://arxiv.org/abs/0906.1444)).
 
 ## Workers
 
-The receiver, MITCH decode and the quote bars run on one Holoscan lane (thread); the
+The receiver, SBE decode and the quote bars run on one Holoscan lane (thread); the
 risk operator and its publisher run on a second, and in `compare` mode the CPU
 cross-check and its publisher on a third ([architecture](ARCHITECTURE.md)). On the host
 front ends (`udp`, `daqiri-host`) the GPU and CPU analytics each run in a spawned
@@ -175,7 +188,7 @@ after the run every closed bar is compared with an independent host decode of th
 
 ## Timing scopes
 
-MITCH carries no sender wall-clock time, so sender-to-receiver latency is unavailable.
+The entries carry market time, not sender wall-clock time, so sender-to-receiver latency is unavailable.
 
 - **Analytics timer:** copying the window's new bars in, the incremental statistics,
   volatility, mean correlation, heatmap and probes, and the transfer of the compact
@@ -224,7 +237,7 @@ On Thor with the NIC, they use the launcher's default host-memory ingest
 
 ```bash
 PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD/python" python3 -m holoscan_finance.tools.synth \
-    --out data/synth-day --symbols 2886 --packets 2880000 --seconds 23400 --reuse
+    --out data/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse
 export TAPE_DIR="$PWD/data/synth-day/tape"
 for backend in cpu gpu; do
     bash deploy/igx_thor/igx_down.sh

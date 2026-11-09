@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """``UdpPacketSourceOp`` and ``DaqiriPacketSourceOp`` under the harness and in tiny placed
-graphs: the emitted ``PacketBatch``es decode (through ``HostMitchDecoder``) to what was
+graphs: the emitted ``PacketBatch``es decode (through ``HostSbeDecoder``) to what was
 sent, DAQIRI bursts are freed and gaps counted, failures fail the run with their message,
 and threads keep their masks.
 
@@ -26,7 +26,7 @@ from holoscan.testing import OperatorTestHarness, TestRunOptions
 from holoscan_finance.ingest.affinity import process_mask
 from holoscan_finance.marketdata.framing import udp_frame
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
-from holoscan_finance.nyq.host_decoder import HostMitchDecoder
+from holoscan_finance.nyq.host_decoder import HostSbeDecoder
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
 from holoscan_finance.operators import DaqiriPacketSourceOp, UdpPacketSourceOp
@@ -72,7 +72,7 @@ def quotes(bids: list[tuple[int, float]]) -> np.ndarray:
 
 
 def unit(sequence: int, bids: list[tuple[int, float]]) -> tuple[bytes, int]:
-    """One MITCH unit and its wire-message count (Time messages included)."""
+    """One SBE packet and its entry count (one entry per observation)."""
     return pack_events(quotes(bids), sequence, MIDNIGHT)
 
 
@@ -99,7 +99,7 @@ def decoded(batches, port: int = PEER[1]) -> tuple[np.ndarray, int]:
     """Every emitted packet through the host reference decoder."""
     events, messages = [], 0
     for batch in batches:
-        out, counts = HostMitchDecoder().decode(batch, directory(port))
+        out, counts = HostSbeDecoder().decode(batch, directory(port))
         assert counts.stale == counts.malformed == 0
         events += [b.events for b in out]
         messages += counts.messages
@@ -187,12 +187,12 @@ def test_daqiri_source_decodes_units_and_frees_bursts(monkeypatch):
 
 
 def test_daqiri_source_preserves_the_quote_payload(monkeypatch):
-    rows = quotes([(2885, 812345.12)])
+    rows = quotes([(2885, 412345.12)])
     payload, _ = pack_events(rows, 1, MIDNIGHT)
     fake = make_fake_daqiri([[frame(payload)]])
     monkeypatch.setitem(sys.modules, "daqiri", fake)
     (batch,) = run_source(DaqiriPacketSourceOp, {}, emitted(1))
-    (out,), counts = HostMitchDecoder().decode(batch, directory(PEER[1]))
+    (out,), counts = HostSbeDecoder().decode(batch, directory(PEER[1]))
     (got,) = out.events
     for field in ("timestamp_ns", "symbol_id", "kind", "bid", "ask", "bid_size", "ask_size"):
         assert got[field] == rows[0][field]

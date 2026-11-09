@@ -16,9 +16,10 @@ from fakes.fake_drain import FakeNativeDrain
 from holoscan_finance.ingest.drains import DeviceFrames, DeviceRing
 from holoscan_finance.ingest.gpu_ingest import GpuIngest
 from holoscan_finance.marketdata.framing import PcapFrames, udp_frame, write_pcap
-from holoscan_finance.marketdata.gpu_decoder import GpuMitchDecoder
-from holoscan_finance.marketdata.gpu_mitch import SLOT_BYTES, receive_frames
+from holoscan_finance.marketdata.gpu_decoder import GpuSbeDecoder
+from holoscan_finance.marketdata.gpu_sbe import SLOT_BYTES, receive_frames
 from holoscan_finance.marketdata.records import EVENT_DTYPE
+from holoscan_finance.marketdata.sbe_codec import packet_count
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import synthetic_stream
@@ -45,12 +46,12 @@ DIRECTORY = validate_manifest(
 )
 
 
-class RecordingDecoder(GpuMitchDecoder):
+class RecordingDecoder(GpuSbeDecoder):
     """The real decoder; remembers the slot buffer it was given."""
 
-    def decode(self, slots, lens_i32, src_port, recv_ns, directory):
+    def decode(self, slots, header, src_port, recv_ns, directory, max_events=None):
         self.slots = slots
-        return super().decode(slots, lens_i32, src_port, recv_ns, directory)
+        return super().decode(slots, header, src_port, recv_ns, directory, max_events)
 
 
 class SyncCheckingDrain(FakeNativeDrain):
@@ -131,7 +132,9 @@ def test_consecutive_bursts_decode_from_one_zero_copy_view(tmp_path):
     assert rig.decoder.slots.shape == (48, SLOT_BYTES)
     assert_decoded(batches, payloads)
     assert rig.drain.released == [48] and rig.drain.idle_at_release == [True]
-    assert rig.stats.messages == sum(p[2] for p in payloads) and rig.stats.ring_packets == 0
+    assert (
+        rig.stats.messages == sum(packet_count(p) for p in payloads) and rig.stats.ring_packets == 0
+    )
     assert batches[0].packet_recv_ns.tolist() == [1000] * 16 + [1016] * 16 + [1032] * 16
 
 
@@ -155,7 +158,9 @@ def test_rows_across_the_ring_end_are_copied_not_viewed(tmp_path):
 
 def test_rejected_rows_are_staged_by_copy_and_counted(tmp_path):
     payloads = units(8)
-    mixed = frames(payloads[:4]) + [b"\x00" * 60] + frames([b"\x01\x02" * 8]) + frames(payloads[4:])
+    mixed = (
+        frames(payloads[:4]) + [b"\x00" * 60] + frames([b"\x01\x02" * 12]) + frames(payloads[4:])
+    )
     rig = Rig(tmp_path, mixed)
     rig.gather(0, len(mixed), 0)
     rig.ingest.pull()

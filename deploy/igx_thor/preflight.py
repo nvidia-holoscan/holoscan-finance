@@ -29,7 +29,7 @@ def check(args):
         "threadpoolctl",
         "fastapi",
         "uvicorn",
-        "holoscan_finance.operators.gpu_mitch_source",
+        "holoscan_finance.operators.gpu_sbe_source",
         "holoscan_finance.dashboard.server",
     ):
         importlib.import_module(name)

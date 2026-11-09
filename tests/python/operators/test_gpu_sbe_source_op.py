@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuMitchSourceOp`` with the fake ``daqiri`` (frames in GPU memory) and
+"""``GpuSbeSourceOp`` with the fake ``daqiri`` (frames in GPU memory) and
 ``FakeNativeDrain`` standing in for the native helper.
 
 The emitted device batches decode like the host decoder; ring space is released in order;
@@ -28,13 +28,13 @@ from fakes.fake_daqiri import make_fake_daqiri
 from fakes.fake_drain import FakeNativeDrain
 from holoscan.testing import OperatorTestHarness, TestRunOptions
 
-from holoscan_finance.ingest.accounting import ReceiveAccounting, mitch_packet_header
+from holoscan_finance.ingest.accounting import ReceiveAccounting, sbe_packet_header
 from holoscan_finance.ingest.affinity import process_mask
 from holoscan_finance.marketdata.framing import udp_frame
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import synthetic_stream
-from holoscan_finance.operators import GpuMitchSourceOp, gpu_mitch_source
+from holoscan_finance.operators import GpuSbeSourceOp, gpu_sbe_source
 from holoscan_finance.ref import Knob, Ref
 from holoscan_finance.telemetry.stats import IngestStats
 
@@ -89,7 +89,7 @@ def nic(monkeypatch):
         calls.append("load_daqiri_drain")
         return FakeNativeDrain
 
-    monkeypatch.setattr(gpu_mitch_source, "load_daqiri_drain", loader)
+    monkeypatch.setattr(gpu_sbe_source, "load_daqiri_drain", loader)
 
     def install(burst_list=(), **kw):
         fake = make_fake_daqiri(burst_list, device=True, calls=calls, **kw)
@@ -115,7 +115,7 @@ def run_source(params: dict, packets: int) -> list:
     params.setdefault("directory", Ref(directory()))
     params.setdefault("warmup", False)
     params.update(keep_alive=False, recv_timeout_s=0.2)
-    with OperatorTestHarness(GpuMitchSourceOp, params=params) as h:
+    with OperatorTestHarness(GpuSbeSourceOp, params=params) as h:
         h.capture("events", capacity=10_000)
         with h.run_async(TestRunOptions(expect_stop=True, timeout_ms=30_000)) as running:
             assert wait(lambda: stats.eof)  # set after the last emit
@@ -152,7 +152,7 @@ def reference(payloads: list[bytes]) -> IngestStats:
     stats = IngestStats()
     acct = ReceiveAccounting(stats)
     for p in payloads:
-        acct.observe_packet(*mitch_packet_header(p, SENDER), 0)
+        acct.observe_packet(*sbe_packet_header(p, SENDER), 0)
     return stats
 
 
@@ -188,7 +188,7 @@ def test_drain_core_reaches_the_native_drain(nic):
 def test_warm_up_runs_in_start(nic, monkeypatch):
     nic(bursts(1, 4))
     warmed = []
-    monkeypatch.setattr(gpu_mitch_source, "warm_decode_kernels", warmed.append)
+    monkeypatch.setattr(gpu_sbe_source, "warm_decode_kernels", warmed.append)
     run_source({"warmup": True}, 4)
     assert warmed == [0]
 
@@ -206,14 +206,14 @@ def test_python_drain_path(nic):
 def test_drain_error_fails_the_run_with_its_message(nic):
     nic(bursts(1, 4))
     stats = IngestStats()
-    with OperatorTestHarness(GpuMitchSourceOp, params={"stats": Ref(stats), "warmup": False}) as h:
+    with OperatorTestHarness(GpuSbeSourceOp, params={"stats": Ref(stats), "warmup": False}) as h:
         with h.run_async(TestRunOptions(expect_stop=True, timeout_ms=30_000)) as running:
             assert wait(lambda: FakeNativeDrain.instances and stats.packets == 4)
             FakeNativeDrain.instances[0].fail("gather_frame launch failed")
             assert wait(lambda: stats.error is not None)
             result = running.finish(check=False)
     assert not result.ok
-    assert "GPU MITCH RX failed: gather_frame launch failed" in result.describe_failure()
+    assert "GPU SBE RX failed: gather_frame launch failed" in result.describe_failure()
 
 
 @pytest.mark.parametrize(
@@ -238,7 +238,7 @@ def test_start_failures_undo_daqiri_init(nic, monkeypatch, fault, message, shutd
     elif fault == "port":
         fake.get_port_id = lambda name: -1
     else:  # the helper mask cannot be restored after the drain started
-        real, uses = gpu_mitch_source.thread_mask, []
+        real, uses = gpu_sbe_source.thread_mask, []
 
         @contextlib.contextmanager
         def unrestorable(cpus=None):
@@ -248,8 +248,8 @@ def test_start_failures_undo_daqiri_init(nic, monkeypatch, fault, message, shutd
             if len(uses) == 2:
                 raise RuntimeError("thread mask not restored")
 
-        monkeypatch.setattr(gpu_mitch_source, "thread_mask", unrestorable)
-    with OperatorTestHarness(GpuMitchSourceOp, params={"warmup": False}) as h:
+        monkeypatch.setattr(gpu_sbe_source, "thread_mask", unrestorable)
+    with OperatorTestHarness(GpuSbeSourceOp, params={"warmup": False}) as h:
         result = h.run(TestRunOptions(timeout_ms=10_000), check=False)
     assert not result.ok and message in result.describe_failure()
     assert fake.shutdowns == shutdowns
@@ -277,7 +277,7 @@ def run_graph(params: dict, until, *, lanes: dict[str, list[int]], split: bool) 
     params.setdefault("directory", Ref(directory()))
     params.setdefault("warmup", False)
     g = hs.Graph("gpu_source", default_clock=hs.RealtimeClock)
-    src = g.op(GpuMitchSourceOp, "source", **params)
+    src = g.op(GpuSbeSourceOp, "source", **params)
     out = g.op(SlowSink, "sink", sink=Ref(sink))
     g.add_flow(src.events, out.items, queue_policy=hs.QueuePolicy.BLOCKING, queue_depth=1)
     if split:

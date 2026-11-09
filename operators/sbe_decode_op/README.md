@@ -1,16 +1,16 @@
-# MitchDecodeOp
+# SbeDecodeOp
 
-The Python reference MITCH decoder of the host front ends. Each `PacketBatch` from
+The Python reference FIX SBE decoder of the host front ends. Each `PacketBatch` from
 `UdpPacketSourceOp` or `DaqiriPacketSourceOp` is decoded under the current feed directory into
 one `ReplayBatch` per accepted packet. This is the host reference decoder; the GPU front
 ends decode inside the source. Compare Python, compiled CPU and GPU implementations with
 the [synthetic decode benchmark](../../docs/VALIDATION.md#offline-decode-and-bars).
 
 ```text
-packets (PacketBatch) → sender-port check → MIT303 unit parse → equity observation mapping → events (list[ReplayBatch])
+packets (PacketBatch) → sender-port check → SBE message parse → equity observation mapping → events (list[ReplayBatch])
 ```
 
-Processor: `holoscan_finance.nyq.host_decoder.HostMitchDecoder`.
+Processor: `holoscan_finance.nyq.host_decoder.HostSbeDecoder`.
 
 ## Ports
 
@@ -50,13 +50,13 @@ is written last, so a finite run's drained check never runs ahead of the event b
 ## Example
 
 ```python
-from holoscan_finance.operators import MitchDecodeOp, QuoteBarsOp, UdpPacketSourceOp
+from holoscan_finance.operators import SbeDecodeOp, QuoteBarsOp, UdpPacketSourceOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
 directory, ingest = Ref(directory_knob), Ref(ingest_stats)
 source = g.op(UdpPacketSourceOp, "source", port=26400, stats=ingest)
-decode = g.op(MitchDecodeOp, "decode", directory=directory, stats=ingest)
+decode = g.op(SbeDecodeOp, "decode", directory=directory, stats=ingest)
 # nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
 bars = g.op(QuoteBarsOp, "bars", backend="cpu", emit_windows=False, directory=directory)
 g.add_flow(source.packets, decode.packets, **lossless(16))

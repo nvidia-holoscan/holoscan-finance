@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""The compiled CPU MITCH decoder must be bit-identical to the Python reference.
+"""The compiled CPU SBE decoder must be bit-identical to the Python reference.
 
 Same checks as the GPU decoder: golden bytes, randomized streams, mutated packets
-exercising every rejection rule, sign-magnitude prices above 2**53, and every
-thread count. Needs numba>=0.68, not a GPU; skipped without it.
+exercising every rejection rule, the PriceNULL4 value edges, sequences at the int64 edge,
+schema extensions and every thread count. Needs numba>=0.68, not a GPU; skipped without it.
 """
 
 from __future__ import annotations
@@ -13,14 +13,15 @@ import struct
 
 import numpy as np
 import pytest
-from library.test_mitch_codec import GOLDEN
+from library.test_sbe_codec import GOLDEN, extended
 
-from holoscan_finance.marketdata.gpu_mitch import SLOT_BYTES
+from holoscan_finance.marketdata import sbe_codec as sbe
+from holoscan_finance.marketdata.gpu_sbe import SLOT_BYTES
 from holoscan_finance.nyq.mapping import day_start_ns
 from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
 from holoscan_finance.validation.compare import compare_decoded, host_decode
 
-cpu_mitch = pytest.importorskip("holoscan_finance.tools.cpu_mitch")  # needs numba>=0.68
+cpu_sbe = pytest.importorskip("holoscan_finance.tools.cpu_sbe")  # needs numba>=0.68
 
 MIDNIGHT = day_start_ns("2025-04-01")
 UNIVERSE = 50
@@ -41,7 +42,7 @@ def _check(payloads, threads=None):
     if threads:
         numba.set_num_threads(min(threads, numba.config.NUMBA_NUM_THREADS))
     slots, lens = _slots(payloads)
-    decoded = cpu_mitch.decode_packets(slots, lens, midnight_ns=MIDNIGHT, universe=UNIVERSE)
+    decoded = cpu_sbe.decode_packets(slots, lens, midnight_ns=MIDNIGHT, universe=UNIVERSE)
     report = compare_decoded(host, decoded)
     bad = {k: v for k, v in report.items() if k.endswith("mismatch") and v}
     assert not bad, report
@@ -62,9 +63,16 @@ def test_random_streams_and_mutations(threads):
     assert set(report["status_counts_host"]) == {0, 1, 2}
 
 
-def test_huge_prices_patched_exactly():
+def test_value_edges_sequence_edges_and_extensions():
     unit = bytearray(GOLDEN)
-    for magnitude in (2**53 + 1, 2**60 + 12345, 2**63 - 1, 123456789012345678):
-        struct.pack_into("<Q", unit, 24, magnitude | (1 << 63))
-        struct.pack_into("<Q", unit, 36, magnitude)
+    for bid, ask in ((2**63 - 1, sbe.PRICE_NULL + 1), (2**53 + 1, -(2**53) - 1), (1, -1)):
+        struct.pack_into("<q", unit, 24 + 8, bid)
+        struct.pack_into("<q", unit, 24 + 16, ask)
+        report = _check([bytes(unit)])
+        assert report["events_gpu"] == 1
+        assert report["max_price_magnitude"] == max(abs(float(bid)), abs(float(ask))) / 1e4
+    for sequence in (1, 2**63 - 3, 2**63 - 2, 2**63 - 1, 2**63, 2**64 - 1):
+        struct.pack_into("<Q", unit, 8, sequence)
         _check([bytes(unit)])
+    report = _check([extended(), extended(8, 0), extended(0, 16), extended(4, 0), extended(0, 4)])
+    assert report["status_counts_host"] == {0: 3, 1: 2}

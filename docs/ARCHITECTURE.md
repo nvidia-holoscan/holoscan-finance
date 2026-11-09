@@ -16,7 +16,7 @@ plane, and the performance invariants the layout protects. The operator referenc
 
 Each operator wraps a library *processor* that holds the logic and is tested without
 Holoscan: `GpuIngest` (both GPU sources), `UdpReceiver`, `DaqiriHostReceiver`,
-`HostMitchDecoder`, `BarBuilder`, `RollingRisk` and `CpuCrossCheck`. Nothing below the
+`HostSbeDecoder`, `BarBuilder`, `RollingRisk` and `CpuCrossCheck`. Nothing below the
 operator layer imports the SDK, so the CPU tools, the feed containers, spawned analytics
 workers and the pure test tier run without a GPU driver (the SDK's `import holoscan` links
 libcuda). `tests/python/packaging/test_import_hygiene.py` enforces this.
@@ -41,7 +41,7 @@ and the session diagnostics use these names.
 ```mermaid
 flowchart LR
     subgraph ingest["lane ingest · CpuSets.ingest"]
-        source["source<br/>GpuMitchSourceOp or GpuMitchReplaySourceOp<br/>OnClock 500 µs"]
+        source["source<br/>GpuSbeSourceOp or GpuSbeReplaySourceOp<br/>OnClock 500 µs"]
         bars["bars<br/>QuoteBarsOp(backend=gpu)<br/>OnEach"]
         source -->|"events · BLOCKING/4"| bars
     end
@@ -69,7 +69,7 @@ synchronized, so the lease has exactly one consumer by construction and no extra
 share the source's lane, so the per-packet path never crosses a thread; the only
 cross-lane edge on the data path is the latest-only window edge, used once per closed bar.
 Sharing the lane also serializes the decode and bars CUDA work on one thread. The NIC-free
-throughput gate (at least twice the 6.6M messages/s line rate, `market_data_bench
+throughput gate (at least twice the 6M entries/s line rate, `market_data_bench
 throughput`) guards this choice; if it fails, moving `bars` into its own lane is a one-line
 fallback.
 
@@ -79,7 +79,7 @@ fallback.
 flowchart LR
     subgraph ingest["lane ingest"]
         source["source<br/>UdpPacketSourceOp or DaqiriPacketSourceOp<br/>OnClock 500 µs"]
-        decode["decode<br/>MitchDecodeOp<br/>OnEach"]
+        decode["decode<br/>SbeDecodeOp<br/>OnEach"]
         bars["bars<br/>QuoteBarsOp(backend=cpu)<br/>OnEach"]
         source -->|"packets · BLOCKING/16"| decode
         decode -->|"events · BLOCKING/16"| bars
@@ -108,7 +108,7 @@ exclude it.
 ```mermaid
 flowchart LR
     subgraph ingest["lane ingest"]
-        source["source<br/>GpuMitchReplaySourceOp"]
+        source["source<br/>GpuSbeReplaySourceOp"]
         bars["bars<br/>QuoteBarsOp(gpu)"]
         windows["windows<br/>CallbackSinkOp → BarsChecker.left"]
         source -->|"events · BLOCKING/4"| bars
@@ -179,8 +179,8 @@ no payload carries a CUDA event.
 
 | Payload | Producer → consumer | Memory |
 | --- | --- | --- |
-| `PacketBatch` (datagrams, receive times, wire counts, peers) | host sources → `MitchDecodeOp` | host; the receiver hands the bytes over |
-| `list[ReplayBatch]` (the host record batch, one per packet) | `MitchDecodeOp` → `QuoteBarsOp(cpu)` | host |
+| `PacketBatch` (datagrams, receive times, wire counts, peers) | host sources → `SbeDecodeOp` | host; the receiver hands the bytes over |
+| `list[ReplayBatch]` (the host record batch, one per packet) | `SbeDecodeOp` → `QuoteBarsOp(cpu)` | host |
 | `list[GpuReplayBatch]` (device columns, one element) | GPU sources → `QuoteBarsOp(gpu)`, and `QuoteBarsOp(cpu)` in the bench reference lane | device columns from CuPy's pool; complete before emit; never aliases ring slots |
 | `BarWindow` (per-bar return vectors, bar times, generation, completed bars, receive stamp) | `QuoteBarsOp` → `RollingRiskOp` (latest only), `CallbackSinkOp` | NumPy or CuPy parts; closed bars are never mutated, so the risk engine proves the bars two windows share by identity and copies in only the new ones; `rows` is stacked only on demand (validation, captures), and a skipped window costs no GPU work |
 | `RiskUpdate` (window, result dict, host rows when validated) | `RollingRiskOp` → `CallbackSinkOp`, `RiskCrossCheckOp`, `RiskSummaryOp` | host results |
@@ -225,7 +225,7 @@ only these host objects. No CUDA call and no data-plane lock is ever taken from 
 
 | Object | Writer | Contents |
 | --- | --- | --- |
-| `IngestStats` | the source (and its drain thread for ring and arrival buckets); `MitchDecodeOp` for decode counters | packets, messages, sequence gaps, ring drops, stale and malformed packets, bursts, stalls (`burst_gaps_ms`, `native.poll_gaps_*`), replay pacing, retries, lane CPUs |
+| `IngestStats` | the source (and its drain thread for ring and arrival buckets); `SbeDecodeOp` for decode counters | packets, messages, sequence gaps, ring drops, stale and malformed packets, bursts, stalls (`burst_gaps_ms`, `native.poll_gaps_*`), replay pacing, retries, lane CPUs |
 | `BarsStats` | `QuoteBarsOp` | an immutable `BarCounters` per batch (one 40-byte D2H on the GPU), a `SymbolSnapshot` at most every 250 ms, sequence and stale counters, the last window key |
 | `RiskStats` | `RollingRiskOp`, `RiskCrossCheckOp`, `RiskSummaryOp` (disjoint fields) | windows received and superseded, analyses, gate waits, late activations, timings, errors |
 
@@ -241,7 +241,7 @@ on a 200, so no datagram goes to a port nobody reads yet.
 
 Two loss counters, kept apart because they answer different questions:
 `network.sequence_gaps` (`IngestStats.dropped`, the dashboard's "Sequence gaps") counts the
-MITCH messages missing between the packets the receiver got from one sender, from that
+SBE entries (observations) missing between the packets the receiver got from one sender, from that
 sender's first packet; `network.analytics_sequence_gaps` (`BarsStats.sequence_gaps`,
 "Bar input gaps") counts what the quote bars did not get, from each generation's first
 sequence (1), so it also includes the ring drops and anything a sender sent before the
@@ -262,7 +262,7 @@ Operators never complete or stop the run themselves.
 
 | # | Invariant | How the layout keeps it | Checked by |
 | --- | --- | --- | --- |
-| 1 | Lossless 200,000 packets/s (6.6M msgs/s) on GPUDirect | 131,072-message batches, 4,096-packet / 20 ms bursts, 114,688 NIC buffers, a 1M-slot ring, zero-copy staging, the native drain; source and bars in one lane | NIC run (with approval); NIC-free bench `paced` and `throughput` (≥ 2× line rate) |
+| 1 | Lossless 200,000 packets/s (6M entries/s) on GPUDirect | 131,072-entry batches, 4,096-packet / 20 ms bursts, 114,688 NIC buffers, a 1M-slot ring, zero-copy staging, the native drain; source and bars in one lane | NIC run (with approval); NIC-free bench `paced` and `throughput` (≥ 2× line rate) |
 | 2 | A GIL-free native drain | `daqiri_drain.cpp`, built before `daqiri_init`; ring rows released only after decode synchronized, in order; bursts never wrap | `library/test_gpu_ingest_pull.py`, `gpu/test_gpu_ingest.py` |
 | 3 | No market data on the CPU in GPU mode | only headers, counters, a 250 ms symbol snapshot and results cross to the host; GPU front ends with CPU analytics are rejected | `app/test_cli.py`, `operators/test_quote_bars_op.py` |
 | 4 | Latest-only windows; bars never block; bounded analysis rate | `DROP_OLDEST/1` window edge; a one-window slot polled every 250 µs with the minimum interval enforced in the operator | plan rules; `graphs/test_latest_only.py`; `graphs/test_risk_pickup_latency.py` |

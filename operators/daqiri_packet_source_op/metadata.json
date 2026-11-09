@@ -2,7 +2,7 @@
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
     "name": "DaqiriPacketSourceOp",
-    "description": "MITCH datagrams received through DAQIRI into pinned host memory, emitted as packet batches for MitchDecodeOp (the DAQIRI host-memory baseline).",
+    "description": "SBE datagrams received through DAQIRI into pinned host memory, emitted as packet batches for SbeDecodeOp (the DAQIRI host-memory baseline).",
     "authors": [
       {
         "name": "Bruce Hashemian",

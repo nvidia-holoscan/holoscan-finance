@@ -128,20 +128,20 @@ def unit(sequence: int, count: int = 2) -> bytes:
 
 
 def test_bench_replay_inspect_reads_ports_and_sequences_past_ip_options(tmp_path):
-    # Port 40001 sends 3 units (2 quotes + 1 Time = 3 messages each), then a gap of 3
-    # messages; port 40002 interleaves. IHL 6 moves every UDP header by 4 bytes.
+    # Port 40001 sends 3 packets (2 quote entries each), then a gap of 4 entries;
+    # port 40002 interleaves. IHL 6 moves every UDP header by 4 bytes.
     frames = [
         udp_frame(unit(1), src_port=40001, ihl=6),
-        udp_frame(unit(4), src_port=40001, ihl=6),
+        udp_frame(unit(3), src_port=40001, ihl=6),
         udp_frame(unit(1), src_port=40002),
-        udp_frame(unit(10), src_port=40001, ihl=6),
-        udp_frame(unit(4), src_port=40002, ihl=7),
+        udp_frame(unit(9), src_port=40001, ihl=6),
+        udp_frame(unit(3), src_port=40002, ihl=7),
     ]
     write_pcap(tmp_path / "c.pcap", frames)
     out = bench_replay.inspect(str(tmp_path / "c.pcap"), 40001)
     assert out["ports_in_order"] == [40001, 40002, 40001, 40002]
     assert out["packets_per_port"] == {40001: 3, 40002: 2}
-    assert (out["packets"], out["first_sequence"], out["messages"]) == (3, 1, 9)
+    assert (out["packets"], out["first_sequence"], out["messages"]) == (3, 1, 6)
     assert out["discontinuities"] == 1
     assert "first_sequence" not in bench_replay.inspect(str(tmp_path / "c.pcap"))
     assert bench_replay.inspect(str(tmp_path / "c.pcap"), 40002)["discontinuities"] == 0

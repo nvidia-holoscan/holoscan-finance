@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// GIL-free GPUDirect drain for GpuMitchSourceOp. A native thread takes DAQIRI bursts,
+// GIL-free GPUDirect drain for GpuSbeSourceOp. A native thread takes DAQIRI bursts,
 // launches the gather_frame kernel (compiled by CuPy, passed in as a CUfunction) into a
 // device slot ring, copies the per-packet receive header to pinned host memory and
 // returns the burst to the NIC. Python reads one record per burst and releases ring
@@ -50,7 +50,7 @@ bool env_off(const char* name) {
 }
 
 constexpr int kFields = 9;  // start, n, recv_ns, t0, t_frames, t_launch, t_sync, t_free, wait_ns
-constexpr int kHeaderCols = 7;
+constexpr int kHeaderCols = 6;  // gpu_sbe.HEADER_COLS; checked by the loader
 constexpr std::array<int64_t, 3> kGapMs{10, 50, 100};
 
 int64_t clock_ns(clockid_t id) {
@@ -355,4 +355,5 @@ PYBIND11_MODULE(_daqiri_drain, m) {
       .def("stats", &Drain::stats);
   m.attr("FIELDS") = py::make_tuple("start", "n", "recv_ns", "t0", "t_frames", "t_launch",
                                     "t_sync", "t_free", "wait_ns");
+  m.attr("HEADER_COLS") = kHeaderCols;
 }

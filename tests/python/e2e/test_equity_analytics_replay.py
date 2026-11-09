@@ -3,7 +3,7 @@
 """The ``smoke`` mode end to end: a synthetic day through the whole GPU chain with the CPU
 cross-check, headless, stopped once drained.
 
-Synthetic tape and capture -> ``GpuMitchReplaySourceOp`` (pcap frames in GPU memory, GPU
+Synthetic tape and capture -> ``GpuSbeReplaySourceOp`` (pcap frames in GPU memory, GPU
 gather and decode) -> ``QuoteBarsOp(gpu)`` -> ``RollingRiskOp`` -> results, with every
 validated window recomputed by ``RiskCrossCheckOp`` on the CPU. The run must stop by itself
 once drained, analyze windows, publish agreeing comparisons and report latencies.

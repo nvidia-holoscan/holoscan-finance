@@ -1,16 +1,16 @@
 # UdpPacketSourceOp
 
-MITCH datagrams from a kernel UDP socket, the host baseline that runs anywhere. A drain
+SBE datagrams from a kernel UDP socket, the host baseline that runs anywhere. A drain
 thread moves every datagram into a host ring after only a header peek, so decode load can
 never make the kernel drop packets; overload is counted as `ring_dropped` instead. Each
-activation emits the oldest packets as one `PacketBatch` for `MitchDecodeOp`:
+activation emits the oldest packets as one `PacketBatch` for `SbeDecodeOp`:
 
 ```text
-socket → udp-drain: recvfrom, receive accounting, ring → packets (PacketBatch) → MitchDecodeOp
+socket → udp-drain: recvfrom, receive accounting, ring → packets (PacketBatch) → SbeDecodeOp
 ```
 
 Processor: `holoscan_finance.ingest.host_receivers.UdpReceiver`. Decode is the separate
-`MitchDecodeOp`.
+`SbeDecodeOp`.
 
 ## Ports
 
@@ -33,13 +33,13 @@ Contract: `OnClock(poll_period_us)`.
 | `keep_alive` | bool | `True` | `False`: `recv_timeout_s` of silence ends the input (`stats.eof`) |
 | `recv_timeout_s` | float | `5.0` | |
 | `helper_cpus` | list | `[]` | mask the receiver thread starts under; `[]` = the process mask, never the lane mask |
-| `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`, shared with `MitchDecodeOp`; private if empty |
+| `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`, shared with `SbeDecodeOp`; private if empty |
 
 ## Behaviour
 
 - **Accounting** (per datagram, `ReceiveAccounting`): sessions are keyed by sender address
-  and MITCH group; a sequence above the expected one adds the gap to `dropped` (messages),
-  one below it is out of order; malformed units are counted and not queued.
+  and port; a sequence above the expected one adds the gap to `dropped` (entries),
+  one below it is out of order; malformed packets are counted and not queued.
 - **Backpressure.** A full edge to the decoder is held and retried at the next activation;
   a compute with a backlog emits nothing new.
 - **End of input.** With `keep_alive` off, `stats.eof` is set once the socket was silent for
@@ -48,7 +48,7 @@ Contract: `OnClock(poll_period_us)`.
 
 ## Edges and lane
 
-- Out: `lossless(16)` into `MitchDecodeOp.packets`, same lane.
+- Out: `lossless(16)` into `SbeDecodeOp.packets`, same lane.
 - Lane: the entry of `ingest`.
 - Threads: `udp-drain` (Python; `recvfrom` releases the GIL), created under
   `helper_mask(helper_cpus)`.
@@ -60,19 +60,19 @@ Contract: `OnClock(poll_period_us)`.
 `IngestStats` (`front_end = "socket"`): `packets`, `received_messages`, `dropped`,
 `out_of_order_packets`, `malformed_packets`, `ring_dropped`, `last_packet_wall_ns`,
 `packet_batches`, `retries`, `held`, `eof`, `error`, `lane_cpus`, plus `feed_buckets()`,
-`ring_fill()` and `ring_peak()`. `MitchDecodeOp` adds `messages`, `stale_packets`,
+`ring_fill()` and `ring_peak()`. `SbeDecodeOp` adds `messages`, `stale_packets`,
 `decode_malformed`, `event_batches` and `packet_batches_decoded`.
 
 ## Example
 
 ```python
-from holoscan_finance.operators import MitchDecodeOp, QuoteBarsOp, UdpPacketSourceOp
+from holoscan_finance.operators import SbeDecodeOp, QuoteBarsOp, UdpPacketSourceOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
 source = g.op(UdpPacketSourceOp, "source", host="0.0.0.0", port=26400,
               helper_cpus=sorted(cpus.helper), stats=Ref(ingest_stats))
-decode = g.op(MitchDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest_stats))
+decode = g.op(SbeDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest_stats))
 # nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
 bars = g.op(QuoteBarsOp, "bars", backend="cpu", emit_windows=False, directory=Ref(knob),
             stats=Ref(bars_stats))

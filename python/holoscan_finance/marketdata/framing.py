@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .sbe_codec import PACKET_HEADER as _SBE_PREFIX
+
 # Ethernet header without VLAN; DAQIRI raw RX delivers full L2 frames.
 _ETH_HLEN = 14
 _ETHERTYPE_IPV4 = b"\x08\x00"
@@ -176,8 +178,9 @@ class PcapFrames:
         start = int(self.offsets[i])
         return self.data[start : start + int(self.lengths[i])].tobytes()
 
-    def payloads(self, minimum_payload: int = 8) -> list[bytes]:
-        """UDP payloads of every IPv4/UDP frame, via the host strip path."""
+    def payloads(self, minimum_payload: int = _SBE_PREFIX) -> list[bytes]:
+        """UDP payloads of every IPv4/UDP frame (at least an SBE message prefix long), via the
+        host strip path."""
         out = []
         for i in range(len(self)):
             got = strip_udp_datagram(self.frame(i), minimum_payload)

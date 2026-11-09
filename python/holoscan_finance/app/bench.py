@@ -47,7 +47,7 @@ def bench_parser() -> argparse.ArgumentParser:
     """The bench flags; the bar, placement and plan groups are shared with equity_analytics."""
     d = IngestDefaults()
     p = argparse.ArgumentParser(
-        description="Replay a MITCH capture from GPU memory through the production GPU chain "
+        description="Replay an SBE capture from GPU memory through the production GPU chain "
         "(gather, decode, quote bars, optionally risk); measure throughput, loss and lag, and "
         "with --check verify every bar against the CPU backend and a host decode.",
     )

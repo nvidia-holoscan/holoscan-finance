@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""``GpuMitchReplaySourceOp``: a synthetic pcap replayed from GPU memory through the
+"""``GpuSbeReplaySourceOp``: a synthetic pcap replayed from GPU memory through the
 production gather, ring, accounting and decode.
 
 Every packet is accounted and decoded like the host decoder, the run ends (``stats.eof``);
@@ -25,10 +25,11 @@ from holoscan.testing import OperatorTestHarness, TestRunOptions
 
 from holoscan_finance.app.drained import DrainedCondition
 from holoscan_finance.marketdata.framing import udp_frame, write_pcap
+from holoscan_finance.marketdata.sbe_codec import packet_count
 from holoscan_finance.nyq.manifest import validate_manifest
 from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
 from holoscan_finance.nyq.synthetic import synthetic_stream
-from holoscan_finance.operators import GpuMitchReplaySourceOp, QuoteBarsOp
+from holoscan_finance.operators import GpuSbeReplaySourceOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Knob, Ref
 from holoscan_finance.telemetry.stats import BarsStats, IngestStats
@@ -83,7 +84,7 @@ def replay(path: str, *, during=None, **params):
     stats = IngestStats()
     params = dict(pcap_path=path, pps=0, warmup=False, stats=Ref(stats)) | params
     params.setdefault("directory", Ref(Knob(validate_manifest(manifest(1, PORT)))))
-    with OperatorTestHarness(GpuMitchReplaySourceOp, params=params) as h:
+    with OperatorTestHarness(GpuSbeReplaySourceOp, params=params) as h:
         h.capture("events", capacity=100_000)
         with h.run_async(TestRunOptions(expect_stop=True, timeout_ms=60_000)) as running:
             if during is not None:
@@ -120,7 +121,7 @@ def test_one_pass_is_accounted_decoded_and_ends(capture):
     batches, stats = replay(path, on_loop=Ref(calls.append), batch_size=8192)
     assert stats.packets == 2000
     assert stats.dropped == stats.ring_dropped == stats.stale_packets == 0
-    assert stats.messages == stats.received_messages == sum(u[2] for u in units)
+    assert stats.messages == stats.received_messages == sum(packet_count(u) for u in units)
     assert stats.malformed_packets == stats.decode_malformed == 0
     got, expected = columns(batches), host_events(units)
     for name, values in got.items():
@@ -139,7 +140,7 @@ def test_two_passes_get_two_generations_and_nothing_stale(capture):
     batches, stats = replay(path, loops=2, on_loop=Ref(generations), directory=Ref(knob))
     assert generations.calls == [1]  # before pass 1 only
     assert stats.packets == 4000 and stats.stale_packets == 0 and stats.dropped == 0
-    assert stats.messages == 2 * sum(u[2] for u in units)
+    assert stats.messages == 2 * sum(packet_count(u) for u in units)
     per_generation = {g: sum(b.n_packets for b in batches if b.generation == g) for g in (1, 2)}
     assert per_generation == {1: 2000, 2: 2000}
     assert stats.replay["pass_index"] == 1 and stats.replay["sent"] == 4000
@@ -151,7 +152,7 @@ def test_a_first_generation_port_the_capture_does_not_carry_sends_pass_0_from_it
     knob = Knob(validate_manifest(manifest(1, PORT + 500)))
     batches, stats = replay(path, directory=Ref(knob), batch_size=8192)
     assert stats.packets == 2000 and stats.stale_packets == 0 and stats.dropped == 0
-    assert stats.messages == sum(u[2] for u in units)
+    assert stats.messages == sum(packet_count(u) for u in units)
     got, expected = columns(batches), host_events(units)
     for name, values in got.items():
         np.testing.assert_array_equal(values, expected[name].astype(values.dtype), err_msg=name)
@@ -176,7 +177,7 @@ def test_another_senders_frames_stay_stale_in_every_pass(mixed_capture):
     batches, stats = replay(path, loops=2, on_loop=Ref(Generations(knob)), directory=Ref(knob))
     assert stats.packets == 2 * 2035 and stats.stale_packets == 2 * 35
     assert stats.out_of_order_packets == stats.dropped == 0
-    assert stats.messages == 2 * sum(u[2] for u in units)
+    assert stats.messages == 2 * sum(packet_count(u) for u in units)
     per_generation = {g: sum(b.n_packets for b in batches if b.generation == g) for g in (1, 2)}
     assert per_generation == {1: 2000, 2: 2000}
 
@@ -191,7 +192,7 @@ def test_looped_passes_reach_the_bars_under_their_own_generation(capture):
     drained = DrainedCondition(ingest=ingest, bars=[bars_stats])
     g = hs.Graph("replay_loops", default_clock=hs.RealtimeClock)
     source = g.op(
-        GpuMitchReplaySourceOp,
+        GpuSbeReplaySourceOp,
         "source",
         pcap_path=path,
         pps=0,
@@ -247,17 +248,17 @@ def test_nic_buffer_drops_show_up_as_sequence_gaps(capture):
     dropped = stats.replay["nic_dropped"]
     assert dropped > 0 and stats.packets + dropped == 2000 and stats.ring_dropped == 0
     sequences = {int(s) for b in batches for s in b.sequence}
-    received = [i for i, u in enumerate(units) if int.from_bytes(u[4:8], "little") in sequences]
+    received = [i for i, u in enumerate(units) if int.from_bytes(u[8:16], "little") in sequences]
     lost = [u for i, u in enumerate(units) if received[0] < i < received[-1] and i not in received]
-    assert stats.dropped == sum(u[2] for u in lost) > 0  # the drops are sequence gaps
+    assert stats.dropped == sum(packet_count(u) for u in lost) > 0  # the drops are sequence gaps
 
 
 def test_setup_rejects_a_missing_capture_and_oversized_bursts():
     g = hs.Graph("bad", default_clock=hs.RealtimeClock)
     with pytest.raises(hs.errors.HoloscanError, match="pcap_path is required"):
-        g.op(GpuMitchReplaySourceOp, "replay")
+        g.op(GpuSbeReplaySourceOp, "replay")
     with pytest.raises(hs.errors.HoloscanError, match="burst_packets"):
-        g.op(GpuMitchReplaySourceOp, "replay2", pcap_path="x", ring_size=4096, burst_packets=8192)
+        g.op(GpuSbeReplaySourceOp, "replay2", pcap_path="x", ring_size=4096, burst_packets=8192)
 
 
 def test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts(capture, monkeypatch):
@@ -265,9 +266,9 @@ def test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts(capture, 
     ``drain.start()``, it made the first bursts that late: paced lag p99 86 ms against the
     5 ms gate of ``market_data_bench paced``."""
     from holoscan_finance.ingest import drains
-    from holoscan_finance.operators import gpu_mitch_source
+    from holoscan_finance.operators import gpu_sbe_source
 
-    read, start, seen = gpu_mitch_source.PcapFrames.read, drains.DeviceReplayDrain.start, {}
+    read, start, seen = gpu_sbe_source.PcapFrames.read, drains.DeviceReplayDrain.start, {}
 
     def tracked_read(path, limit=0):
         frames = read(path, limit)
@@ -278,7 +279,7 @@ def test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts(capture, 
         seen["host_copy_alive"] = seen["data"]() is not None
         start(self)
 
-    monkeypatch.setattr(gpu_mitch_source.PcapFrames, "read", staticmethod(tracked_read))
+    monkeypatch.setattr(gpu_sbe_source.PcapFrames, "read", staticmethod(tracked_read))
     monkeypatch.setattr(drains.DeviceReplayDrain, "start", checked_start)
     _, stats = replay(capture[0])
     assert stats.packets == 2000
@@ -288,7 +289,7 @@ def test_the_host_copy_of_the_capture_is_freed_before_the_drain_starts(capture, 
 def test_an_unreadable_capture_fails_start(tmp_path):
     bad = tmp_path / "bad.pcap"
     bad.write_bytes(b"not a pcap at all, just text....")
-    with OperatorTestHarness(GpuMitchReplaySourceOp, params={"pcap_path": str(bad)}) as h:
+    with OperatorTestHarness(GpuSbeReplaySourceOp, params={"pcap_path": str(bad)}) as h:
         result = h.run(TestRunOptions(timeout_ms=10_000), check=False)
     assert not result.ok and "not a pcap file" in result.describe_failure()
 

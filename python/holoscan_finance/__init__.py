@@ -31,11 +31,11 @@ _PAYLOADS = (
     "GpuReplayBatch",
 )
 _OPERATORS = (
-    "GpuMitchSourceOp",
-    "GpuMitchReplaySourceOp",
+    "GpuSbeSourceOp",
+    "GpuSbeReplaySourceOp",
     "UdpPacketSourceOp",
     "DaqiriPacketSourceOp",
-    "MitchDecodeOp",
+    "SbeDecodeOp",
     "QuoteBarsOp",
     "RollingRiskOp",
     "RiskCrossCheckOp",

@@ -1,8 +1,8 @@
 {
   "$schema": "urn:holoscan:operator:v1",
   "operator": {
-    "name": "GpuMitchSourceOp",
-    "description": "MITCH market data over DAQIRI GPUDirect: frames land in GPU memory, a GIL-free native drain gathers the UDP payloads into a device ring, and the source decodes MITCH on the GPU into device-resident event batches.",
+    "name": "GpuSbeSourceOp",
+    "description": "FIX SBE market data over DAQIRI GPUDirect: frames land in GPU memory, a GIL-free native drain gathers the UDP payloads into a device ring, and the source decodes SBE on the GPU (one warp per packet, one lane per entry) into device-resident event batches.",
     "authors": [
       {
         "name": "Bruce Hashemian",
@@ -44,7 +44,7 @@
       "hardware": [
         {
           "name": "CUDA GPU",
-          "description": "GPUDirect RDMA target (dma-buf); the ring, gather and MITCH decode run on it",
+          "description": "GPUDirect RDMA target (dma-buf); the ring, gather and SBE decode run on it",
           "required": true
         },
         {

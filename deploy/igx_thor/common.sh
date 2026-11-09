@@ -33,8 +33,8 @@ if [[ "$CONTROL_HOST" == 0.0.0.0 ]]; then CONTROL_HOST=127.0.0.1; fi
 UDP_PORT="${UDP_PORT:-26400}"
 TAPE_DIR="${TAPE_DIR:-$REPO_DIR/data/synth/tape}"
 GPU_UUID="${GPU_UUID:-}"
-# daqiri-host: DAQIRI into pinned host memory, Python MITCH decode.
-# gpudirect: DAQIRI GPUDirect into GPU memory, CUDA gather + MITCH decode + quote bars.
+# daqiri-host: DAQIRI into pinned host memory, Python SBE decode.
+# gpudirect: DAQIRI GPUDirect into GPU memory, CUDA gather + SBE decode + quote bars.
 INGEST="${INGEST:-daqiri-host}"
 # Persistent CUDA kernel cache for GPUDirect (avoids ~10 s JIT on every start).
 KERNEL_CACHE_DIR="${KERNEL_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/holoscan-finance/cupy}"

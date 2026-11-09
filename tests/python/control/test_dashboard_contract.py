@@ -104,12 +104,12 @@ ENGINE = {
 }  # fmt: skip
 
 # ---- pinned values -----------------------------------------------------------------------
-TRANSPORT = "MITCH (MIT303 11.9) / UDP · equity replay mapping"
-WIRE_PROTOCOL = "mit303-11.9-nyq-replay-v1"
-MESSAGE_COUNT_SCOPE = "MITCH messages including Time; replay rate is source observations/s"
+TRANSPORT = "FIX Simple Binary Encoding 1.0 / UDP · equity replay schema"
+WIRE_PROTOCOL = "fix-sbe-1.0-nyq-replay-v1"
+MESSAGE_COUNT_SCOPE = "SBE entries (one per observation); replay rate is source observations/s"
 PAYLOAD_PATH = {
-    "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU MITCH decode",
-    "replay": "pcap frames in GPU memory -> GPU gather -> GPU MITCH decode",
+    "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU SBE decode",
+    "replay": "pcap frames in GPU memory -> GPU gather -> GPU SBE decode",
 }
 FRONT_END = {
     "udp": "socket",

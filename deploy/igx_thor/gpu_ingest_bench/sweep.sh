@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Replay synthetic MITCH packets into the SAME receiver at fixed rates, one ingest
+# Replay synthetic SBE packets into the SAME receiver at fixed rates, one ingest
 # mode at a time, and report loss counters from the NIC, the receiver and the app.
 #   BASE_PCAP  capture filtered to one generation's source port (see README)
 #   BASE_PORT  that source port;  TCPREPLAY_DIR  directory with tcpreplay/tcprewrite

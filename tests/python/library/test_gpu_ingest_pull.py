@@ -16,7 +16,9 @@ from fakes.fake_drain import FakeNativeDrain, receive_header
 from holoscan_finance.ingest.drains import DeviceRing
 from holoscan_finance.ingest.gpu_ingest import GpuIngest
 from holoscan_finance.ingest.host_receivers import UdpReceiver
+from holoscan_finance.marketdata.gpu_sbe import HEADER_COLS
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
+from holoscan_finance.marketdata.sbe_codec import packet_count
 from holoscan_finance.nyq.mapping import day_start_ns, pack_events
 from holoscan_finance.telemetry.stats import IngestStats
 
@@ -48,7 +50,7 @@ def stream(start: int, packets: int, port: int = 40001, ip: int = 1) -> tuple[li
     for _ in range(packets):
         data = unit(seq)
         out.append((data, port, ip))
-        seq += data[2]
+        seq += packet_count(data)
     return out, seq
 
 
@@ -56,8 +58,8 @@ def host_ring(capacity: int) -> DeviceRing:
     """A ring of host arrays: pull() only slices it."""
     return DeviceRing(
         slots=np.zeros((capacity, 4), np.uint8),
-        header_dev=np.zeros((capacity, 7), np.int64),
-        header_host=np.zeros((capacity, 7), np.int64),
+        header_dev=np.zeros((capacity, HEADER_COLS), np.int64),
+        header_host=np.zeros((capacity, HEADER_COLS), np.int64),
         packed_dev=None,
         packed_host=None,
         capacity=capacity,
@@ -141,7 +143,7 @@ def test_drain_error_reaches_the_stats():
     ingest, drain, stats = records_ingest([])
     drain.fail("gather_frame launch failed")
     ingest.pull()
-    assert stats.error == "GPU MITCH RX failed: gather_frame launch failed"
+    assert stats.error == "GPU SBE RX failed: gather_frame launch failed"
     assert not ingest.probe().alive()
 
 
@@ -204,6 +206,6 @@ def test_a_pushing_drain_ends_input_and_reports_its_error():
     ingest.account_burst(None, None, receive_header(stream(1, 2)[0]), 5)
     assert probe.alive() and probe.pending() == 2
     ingest.pull()  # nothing to pull: the Python drain accounts from its own thread
-    ingest.end_input("GPU MITCH RX failed: get_rx_burst returned INTERNAL_ERROR")
+    ingest.end_input("GPU SBE RX failed: get_rx_burst returned INTERNAL_ERROR")
     assert not probe.alive() and stats.error.endswith("INTERNAL_ERROR")
     assert not ingest.eof  # two packets still queued

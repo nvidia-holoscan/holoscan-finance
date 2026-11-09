@@ -6,10 +6,10 @@ through PHY loopback. They are the only way to run the NIC ingest modes: `holosc
 starts an image without DAQIRI, as a non-root user, with the host IPC namespace.
 
 ```text
-INGEST=daqiri-host: MITCH / UDP → ConnectX / DAQIRI → pinned host memory
+INGEST=daqiri-host: SBE / UDP → ConnectX / DAQIRI → pinned host memory
             → Python decode / NumPy quote bars → custom CUDA kernels (CuPy) → dashboard
-INGEST=gpudirect:   MITCH / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect, dma-buf)
-            → CUDA gather / MITCH decode / quote bars → custom CUDA kernels (CuPy) → dashboard
+INGEST=gpudirect:   SBE / UDP → ConnectX / DAQIRI → GPU memory (GPUDirect, dma-buf)
+            → CUDA gather / SBE decode / quote bars → custom CUDA kernels (CuPy) → dashboard
 ```
 
 To run the same GPU chain without a NIC, use the `replay` mode of `equity_analytics`

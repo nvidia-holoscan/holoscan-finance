@@ -57,7 +57,7 @@ def add_plan_flags(p: argparse.ArgumentParser) -> None:
 
 def equity_analytics_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="equity MITCH -> quote bars -> rolling risk -> web dashboard on Holoscan 5."
+        description="equity SBE market data -> quote bars -> rolling risk -> web dashboard on Holoscan 5."
     )
 
     g = p.add_argument_group("dashboard")
@@ -75,7 +75,7 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
         default="udp",
         choices=INGEST_MODES,
         help="udp: kernel UDP socket; daqiri-host: DAQIRI into pinned host memory; gpudirect: "
-        "DAQIRI GPUDirect into GPU memory, GPU gather + MITCH decode + quote bars; replay: pcap "
+        "DAQIRI GPUDirect into GPU memory, GPU gather + SBE decode + quote bars; replay: pcap "
         "frames from GPU memory through that same GPU chain, no NIC",
     )
     g.add_argument("--udp-host", default="127.0.0.1")
@@ -107,7 +107,7 @@ def equity_analytics_parser() -> argparse.ArgumentParser:
     )
 
     g = p.add_argument_group("replay (NIC-free GPU chain)")
-    g.add_argument("--pcap", metavar="PATH", help="Ethernet capture of the MITCH feed")
+    g.add_argument("--pcap", metavar="PATH", help="Ethernet capture of the SBE feed")
     g.add_argument("--tape", metavar="DIR", help="the prepared tape the capture was made from")
     g.add_argument("--replay-pps", type=int, default=200000, help="packets/s; 0: unpaced")
     g.add_argument(
@@ -245,7 +245,7 @@ def normalize(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def nic_params(args: argparse.Namespace, cpus: CpuSets, *, gpudirect: bool) -> dict:
-    """DAQIRI Params of ``GpuMitchSourceOp`` (``gpudirect``) or ``DaqiriPacketSourceOp``.
+    """DAQIRI Params of ``GpuSbeSourceOp`` (``gpudirect``) or ``DaqiriPacketSourceOp``.
 
     ``daqiri_init`` runs widened to every start-up CPU, and its caller's mask is restored
     afterwards; ``num_bufs`` only applies to GPUDirect.

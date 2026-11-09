@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Replay MITCH frames from GPU memory through gather -> decode -> quote bars (-> risk); measure and verify.
+"""Replay SBE frames from GPU memory through gather -> decode -> quote bars (-> risk); measure and verify.
 
 Finite and NIC-free: the run stops when every packet is decoded and every bar is built. With --check
 the same decoded stream also feeds QuoteBarsOp(backend="cpu"), and every GPU window is compared with
@@ -16,7 +16,7 @@ from holoscan_finance.app.bench import BenchContext
 from holoscan_finance.app.placement import Lanes
 from holoscan_finance.operators import (
     CallbackSinkOp,
-    GpuMitchReplaySourceOp,
+    GpuSbeReplaySourceOp,
     QuoteBarsOp,
     RollingRiskOp,
 )
@@ -29,7 +29,7 @@ def compose(args, ctx: BenchContext) -> tuple[hs.Graph, Lanes]:
     lanes = Lanes(ctx.cpus, ingest_busy_poll=args.ingest_busy_poll)
     directory = Ref(ctx.directory_knob)
     source = g.op(
-        GpuMitchReplaySourceOp,
+        GpuSbeReplaySourceOp,
         "source",
         pcap_path=args.pcap,
         pps=args.pps,

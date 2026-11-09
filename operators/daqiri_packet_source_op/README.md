@@ -1,19 +1,19 @@
 # DaqiriPacketSourceOp
 
-MITCH datagrams received through DAQIRI into pinned host memory: the DAQIRI host-memory
+SBE datagrams received through DAQIRI into pinned host memory: the DAQIRI host-memory
 front end. The NIC DMAs flow-matched frames into host buffers; a drain thread copies each
 frame out, strips the Ethernet/IPv4/UDP headers, accounts it and queues the datagram, and
 returns every burst to DAQIRI at once. Each activation emits the oldest packets as one
-`PacketBatch` for `MitchDecodeOp`:
+`PacketBatch` for `SbeDecodeOp`:
 
 ```text
 ConnectX → DAQIRI RX buffers in pinned host memory
          → daqiri-host-drain: get_packet_bytes, strip_udp_datagram, receive accounting, ring
-         → packets (PacketBatch) → MitchDecodeOp
+         → packets (PacketBatch) → SbeDecodeOp
 ```
 
 Processor: `holoscan_finance.ingest.host_receivers.DaqiriHostReceiver`. Decode is the
-separate `MitchDecodeOp`.
+separate `SbeDecodeOp`.
 
 ## Requirements
 
@@ -49,7 +49,7 @@ Contract: `OnClock(poll_period_us)`.
 | `keep_alive` | bool | `True` | `False`: `recv_timeout_s` of silence ends the input (`stats.eof`) |
 | `recv_timeout_s` | float | `5.0` | |
 | `helper_cpus` | list | `[]` | mask the drain thread starts under; `[]` = the process mask, never the lane mask |
-| `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`, shared with `MitchDecodeOp`; private if empty |
+| `stats` | `Ref` | `Ref()` | `Ref(IngestStats)`, shared with `SbeDecodeOp`; private if empty |
 
 CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
 
@@ -69,7 +69,7 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
 
 ## Edges and lane
 
-- Out: `lossless(16)` into `MitchDecodeOp.packets`, same lane.
+- Out: `lossless(16)` into `SbeDecodeOp.packets`, same lane.
 - Lane: the entry of `ingest`.
 - Threads: `daqiri-host-drain` (Python); the DPDK lcores, pinned by DPDK.
 - Errors: a `start()` failure fails the run; a fatal RX status or a failed packet read goes
@@ -82,14 +82,14 @@ CPU lists are validated in `setup()`: a list or tuple of ints ≥ 0.
 ## Example
 
 ```python
-from holoscan_finance.operators import DaqiriPacketSourceOp, MitchDecodeOp, QuoteBarsOp
+from holoscan_finance.operators import DaqiriPacketSourceOp, SbeDecodeOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
 source = g.op(DaqiriPacketSourceOp, "source", port=26400, pcie_address="0004:03:00.0",
               init_cpus=sorted(cpus.all), helper_cpus=sorted(cpus.helper),
               stats=Ref(ingest_stats))
-decode = g.op(MitchDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest_stats))
+decode = g.op(SbeDecodeOp, "decode", directory=Ref(knob), stats=Ref(ingest_stats))
 # nothing consumes bar windows here: emit_windows=False leaves `window` undeclared
 bars = g.op(QuoteBarsOp, "bars", backend="cpu", emit_windows=False, directory=Ref(knob),
             stats=Ref(bars_stats))

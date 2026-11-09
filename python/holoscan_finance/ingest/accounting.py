@@ -2,30 +2,32 @@
 # SPDX-License-Identifier: Apache-2.0
 """Receive accounting of every source: one implementation of the sequence rules.
 
-Units are counted per sender session (source address and market-data group, so a new replay
-generation's sender is never read as the current one): a sequence above the expected one
-adds the gap to ``dropped`` (sequence gaps, in messages), one below it is out of order, and
-the expectation never moves back. The host receivers call ``observe_packet`` per datagram;
-the GPU path calls ``observe_burst`` on the 7-column receive header of a burst, vectorized
-for the normal single-session contiguous burst and per packet otherwise (``_account_slow``),
-with identical counters. Ring admission (``ring_dropped``) is left to the owner of each ring.
+Packets are counted per sender session (the source address and port; every replay
+generation sends from a fresh port, so a new generation's sender is never read as the
+current one): a sequence above the expected one adds the gap to ``dropped`` (sequence gaps,
+in entries), one below it is out of order, and the expectation never moves back. The host
+receivers call ``observe_packet`` per datagram; the GPU path calls ``observe_burst`` on the
+``HEADER_COLS``-column receive header of a burst, vectorized for the normal single-session
+contiguous burst and per packet otherwise (``_sequence``), with identical counters. Ring
+admission (``ring_dropped``) is left to the owner of each ring.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from ..marketdata.mitch_codec import inspect_unit
+from ..marketdata.sbe_codec import inspect_packet
 from ..telemetry.stats import IngestStats
 
 
-def mitch_packet_header(data: bytes, peer: tuple[str, int] | None) -> tuple[tuple, int, int]:
-    """``(session, sequence, message count)`` of one MITCH unit; ValueError if malformed.
-
-    Sequences count wire messages, Time messages included.
+def sbe_packet_header(
+    data: bytes, peer: tuple[str, int] | None
+) -> tuple[tuple[str, int] | None, int, int]:
+    """``(session, sequence, entry count)`` of one SBE packet; ValueError if malformed. The
+    session is the sender's address and port; sequences count entries (one per observation).
     """
-    group, sequence, count = inspect_unit(data)
-    return (peer, group), sequence, count
+    sequence, count = inspect_packet(data)
+    return peer, sequence, count
 
 
 class ReceiveAccounting:
@@ -39,7 +41,7 @@ class ReceiveAccounting:
         self._expected: int | None = None  # next sequence of the current session
 
     def observe_packet(self, session: tuple, seq: int, count: int, recv_ns: int) -> None:
-        """Account one framed unit that arrived at ``recv_ns`` (wall clock)."""
+        """Account one framed packet that arrived at ``recv_ns`` (wall clock)."""
         st = self.stats
         self._sequence(session, seq, count)
         st.last_packet_wall_ns = recv_ns
@@ -49,10 +51,10 @@ class ReceiveAccounting:
             st.add_bucket(recv_ns, count)
 
     def observe_burst(self, header_t: np.ndarray, recv_ns: int) -> np.ndarray:
-        """Account one burst from its receive header, ``7 x n`` (payload length, source port,
-        source IP, framing status, message count, sequence, group); returns the rows that
+        """Account one burst from its receive header, ``HEADER_COLS x n`` (payload length,
+        source port, source IP, framing status, entry count, sequence); returns the rows that
         are UDP and passed the framing check, the candidates for decode."""
-        length, sport, sip, status, count, seq, group = header_t
+        length, sport, sip, status, count, seq = header_t
         st = self.stats
         st.bursts += 1
         udp = length >= 0
@@ -62,7 +64,7 @@ class ReceiveAccounting:
         if not len(cand):
             return cand
         seq_c, cnt_c = seq[cand], count[cand]
-        sess = np.stack([sip[cand], sport[cand], group[cand]], axis=1)
+        sess = np.stack([sip[cand], sport[cand]], axis=1)
         single = len(cand) == 1 or bool((sess == sess[0]).all())
         contiguous = len(cand) == 1 or bool(np.array_equal(seq_c[1:], seq_c[:-1] + cnt_c[:-1]))
         first = int(seq_c[0])
@@ -98,4 +100,4 @@ class ReceiveAccounting:
         self._expected = max(expected or seq, seq + count)
 
 
-__all__ = ["ReceiveAccounting", "mitch_packet_header"]
+__all__ = ["ReceiveAccounting", "sbe_packet_header"]

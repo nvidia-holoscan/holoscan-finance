@@ -23,7 +23,7 @@ Processor: `holoscan_finance.marketdata.bar_builder.BarBuilder`.
 
 | Port | Type | Notes |
 | --- | --- | --- |
-| `events` (in) | `list[GpuReplayBatch]` (GPU sources) or `list[ReplayBatch]` (`MitchDecodeOp`) | |
+| `events` (in) | `list[GpuReplayBatch]` (GPU sources) or `list[ReplayBatch]` (`SbeDecodeOp`) | |
 | `window` (out) | `BarWindow` | declared only with `emit_windows`; `parts` (per-bar return vectors, CuPy on the gpu backend), `times`, `generation`, `completed_bars`, `recv_ns`; `rows` is stacked by the consumer |
 
 Contract: `OnEach(events)`.
@@ -65,7 +65,7 @@ The five bar Params are validated with the `QuoteBars` rules at `graph.op`
 
 ## Edges and lane
 
-- In: `lossless(4)` from a GPU source or `lossless(16)` from `MitchDecodeOp`, same lane.
+- In: `lossless(4)` from a GPU source or `lossless(16)` from `SbeDecodeOp`, same lane.
 - Out: `LATEST` to `RollingRiskOp` in another lane (bars never block on analytics; risk
   skips windows), or `lossless(64)` to a same-lane `CallbackSinkOp` when every window matters.
 - Lane: the source's (`ingest`), or the bench's `reference` lane.
@@ -86,12 +86,12 @@ Every window of a NIC-free replay, in order (the dashboard app instead sends `ba
 `RollingRiskOp` over `LATEST`):
 
 ```python
-from holoscan_finance.operators import CallbackSinkOp, GpuMitchReplaySourceOp, QuoteBarsOp
+from holoscan_finance.operators import CallbackSinkOp, GpuSbeReplaySourceOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 from holoscan_finance.settings import BarSettings
 
-source = g.op(GpuMitchReplaySourceOp, "source", pcap_path="day.pcap", directory=Ref(knob))
+source = g.op(GpuSbeReplaySourceOp, "source", pcap_path="day.pcap", directory=Ref(knob))
 bars = g.op(QuoteBarsOp, "bars", backend="gpu", **BarSettings().as_params(),
             directory=Ref(knob), stats=Ref(bars_stats))
 windows = g.op(CallbackSinkOp, "windows", callback=Ref(collected.append))

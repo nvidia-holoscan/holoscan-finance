@@ -3,7 +3,7 @@
 """``QuoteBarsOp``: event-time quote bars on the GPU (device-resident) or with NumPy.
 
 Ports: ``events`` (in: ``list[GpuReplayBatch]`` from the GPU sources, ``list[ReplayBatch]``
-from ``MitchDecodeOp``) -> ``window`` (out, ``BarWindow``; only with ``emit_windows``). Edges:
+from ``SbeDecodeOp``) -> ``window`` (out, ``BarWindow``; only with ``emit_windows``). Edges:
 in, ``lossless(4)`` from a GPU source or ``lossless(16)`` from decode, same lane; out,
 ``LATEST`` to risk in another lane (bars never block on analytics) or ``lossless(64)`` to a
 same-lane sink when every window matters. Lane: the source's (``ingest``). A new directory

@@ -1,13 +1,13 @@
-# GpuMitchReplaySourceOp
+# GpuSbeReplaySourceOp
 
-The NIC-free GPU MITCH source. It replays the Ethernet frames of a pcap as a software NIC:
+The NIC-free GPU SBE source. It replays the Ethernet frames of a pcap as a software NIC:
 the frames are uploaded once into GPU memory, as GPUDirect leaves received frames, and
-everything after the drain is the production code of `GpuMitchSourceOp`:
+everything after the drain is the production code of `GpuSbeSourceOp`:
 
 ```text
 pcap → GPU memory (one copy) → software NIC hf-replay: DAQIRI-sized bursts at pps,
        the same gather_frame kernel into the same device slot ring
-     → compute(): receive accounting, staging, GPU MITCH decode, sync, ring release
+     → compute(): receive accounting, staging, GPU SBE decode, sync, ring release
      → events (list[GpuReplayBatch])
 ```
 
@@ -31,13 +31,13 @@ to the ring (`ring_size` × 2 KiB).
 
 | Port | Type | Notes |
 | --- | --- | --- |
-| `events` (out) | `list[GpuReplayBatch]` | as `GpuMitchSourceOp` |
+| `events` (out) | `list[GpuReplayBatch]` | as `GpuSbeSourceOp` |
 
 Contract: `OnClock(poll_period_us)`.
 
 ## Params
 
-The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
+The shared Params of [GpuSbeSourceOp](../gpu_sbe_source_op/README.md#params)
 (`batch_size`, `ring_size`, `poll_period_us`, `gpu_device`, `recv_timeout_s`, `warmup`,
 `helper_cpus`, `directory`, `stats`, `tap`), plus:
 
@@ -71,7 +71,7 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
   pass k's directory and the wait never counts as lag. One pass registers no extra
   generation.
 - **Everything else** (accounting, staging, decode, release, backpressure, errors) is
-  `GpuMitchSourceOp`'s.
+  `GpuSbeSourceOp`'s.
 
 ## Edges and lane
 
@@ -87,7 +87,7 @@ The shared Params of [GpuMitchSourceOp](../gpu_mitch_source_op/README.md#params)
 
 ## Telemetry
 
-`IngestStats` as for `GpuMitchSourceOp` (`front_end = "replay"`, `frame_fetch = "device frame
+`IngestStats` as for `GpuSbeSourceOp` (`front_end = "replay"`, `frame_fetch = "device frame
 pool"`; `stalls["native"]` carries the drain's ring waits and wake-up gaps), plus
 `IngestStats.replay`: `pps`, `pass_index`, `sent`, `nic_dropped`, `lag_p50_ms`,
 `lag_p99_ms`, `lag_max_ms`, `loop_wait_ms`, `thread_cpu_s` (CPU time of `hf-replay`) and
@@ -96,11 +96,11 @@ pool"`; `stalls["native"]` carries the drain's ring waits and wake-up gaps), plu
 ## Example
 
 ```python
-from holoscan_finance.operators import GpuMitchReplaySourceOp, QuoteBarsOp
+from holoscan_finance.operators import GpuSbeReplaySourceOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Ref
 
-source = g.op(GpuMitchReplaySourceOp, "source", pcap_path="day.pcap", pps=200_000,
+source = g.op(GpuSbeReplaySourceOp, "source", pcap_path="day.pcap", pps=200_000,
               nic_bufs=114_688, loops=1, helper_cpus=sorted(cpus.helper),
               on_loop=Ref(replay_generations), settled=Ref(drained.batches_consumed),
               directory=Ref(knob), stats=Ref(ingest_stats))
