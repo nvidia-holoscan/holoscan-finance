@@ -16,23 +16,28 @@ import sys
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import MAX_PACKET_EVENTS as MAX_EVENTS
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import (
+    fuzz,
+    synthetic_capture,
+    synthetic_stream,
+    synthetic_tape,
+)
+from holoscan_finance.equity.tape import open_tape
 from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.bars import QuoteBars
 from holoscan_finance.marketdata.framing import PcapFrames, strip_udp_datagram
 from holoscan_finance.marketdata.gpu_sbe import PACKET_HEADER
 from holoscan_finance.marketdata.records import CONDITION, HALTED, QUOTE, TRADE, ReplayBatch
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import MAX_PACKET_EVENTS as MAX_EVENTS
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import fuzz, synthetic_capture, synthetic_stream, synthetic_tape
-from holoscan_finance.nyq.tape import open_tape
 from holoscan_finance.tools import synth
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 # Expected SHA-256 of the generators' output for these arguments: the generators must
 # reproduce them byte for byte.
-STREAM_DIGEST = "2d005ead320f1d37d6f6e45e56e7a8e66f4af7439f99d8a84e561b6dc966cec1"
-FUZZ_DIGEST = "e2536343bc780aa3dc1d553b37c54a39ee0da69a9481a0753365024da6a1e20d"
+STREAM_DIGEST = "04fd5eb920549b7a9fe8890b899673fe513628a0c5e709979b20b24ab16d72f5"
+FUZZ_DIGEST = "bcb6c46a2c6698d11ed9db370616f7e96f896579864ac49c6c1dd82443bac855"
 
 
 def digest(units):

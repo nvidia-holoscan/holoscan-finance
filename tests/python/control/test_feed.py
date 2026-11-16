@@ -8,21 +8,21 @@ import pytest
 
 from holoscan_finance.control.directory import ReplayDirectory
 from holoscan_finance.control.feed import FeedControl
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.ref import Knob
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 
 
 def manifest(generation=1, port=50001):
     return dict(
-        format="nyq-equity-replay-v1",
+        format="equity-replay-v1",
         wire_protocol=PROTOCOL,
         market_timezone=TIMEZONE,
         symbols=["A"],
         generation=generation,
         sender_port=port,
-        date="2025-04-01",
+        date="2026-06-01",
         start_ns=MIDNIGHT + 34200 * 10**9 + 7,
         end_ns=MIDNIGHT + 57600 * 10**9,
         events=1,

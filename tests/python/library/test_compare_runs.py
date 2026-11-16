@@ -20,7 +20,7 @@ def runs():
     )
     base = dict(
         settings={"bar_seconds": 5},
-        source_date="2025-04-01",
+        source_date="2026-06-01",
         requested_rate=75000,
         ingest="daqiri-host",
         minimum_update_interval_seconds=0.05,
@@ -95,6 +95,6 @@ def test_separate_run_comparison_rejects_unmatched_or_invalid_work(fault):
     elif fault == "capture":
         gpu["valid"] = False
     elif fault == "protocol":
-        gpu["wire_protocol"] = "mit303-11.9-nyq-replay-v1"  # the previous wire format
+        gpu["wire_protocol"] = "mit303-11.9-equity-replay-v1"  # the previous wire format
     report = compare_runs(cpu, gpu, 10_000_000_000, 20_000_000_000)
     assert not report["valid"] and report["median_analytics_speedup"] is None

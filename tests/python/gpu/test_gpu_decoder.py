@@ -12,13 +12,13 @@ import numpy as np
 import pytest
 from test_gpu_decode import MIDNIGHT, UNIVERSE, host_decode, to_slots
 
+from holoscan_finance.equity.manifest import MANIFEST_FORMAT, validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE
+from holoscan_finance.equity.synthetic import fuzz, synthetic_stream
 from holoscan_finance.marketdata import warmup
 from holoscan_finance.marketdata.gpu_decoder import DecodeCounts, GpuSbeDecoder
 from holoscan_finance.marketdata.gpu_sbe import FIELDS, inspect_packets
 from holoscan_finance.marketdata.records import EVENT_DTYPE, ReplayBatch
-from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE
-from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
 from holoscan_finance.telemetry.capture import CaptureTap, LatencyCapture
 
 pytestmark = pytest.mark.gpu
@@ -36,7 +36,7 @@ def directory(generation=9):
             symbols=[f"S{i}" for i in range(UNIVERSE)],
             generation=generation,
             sender_port=PORT,
-            date="2025-04-01",
+            date="2026-06-01",
             start_ns=MIDNIGHT,
             end_ns=MIDNIGHT + 86400 * 10**9,
             events=100,

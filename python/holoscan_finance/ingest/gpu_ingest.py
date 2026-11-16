@@ -26,9 +26,9 @@ from ..telemetry.stats import IngestStats, SourceProbe
 from .accounting import ReceiveAccounting
 
 if TYPE_CHECKING:
+    from ..equity.manifest import FeedDirectory
     from ..marketdata.gpu_bars import GpuReplayBatch
     from ..marketdata.gpu_decoder import GpuSbeDecoder
-    from ..nyq.manifest import FeedDirectory
     from ..telemetry.capture import CaptureTap
     from .drains import DeviceRing, DrainLike
 

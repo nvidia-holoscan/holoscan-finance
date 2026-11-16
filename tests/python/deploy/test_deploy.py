@@ -391,7 +391,7 @@ sys.exit(0)
     )
 
 
-@pytest.mark.parametrize("owner", ["nyq-equities", "another-application"])
+@pytest.mark.parametrize("owner", ["holoscan-finance", "another-application"])
 def test_teardown_uses_recorded_nic_settings_and_refuses_unrelated_containers(tmp_path, owner):
     log = tmp_path / "calls.jsonl"
     labels = {
@@ -440,7 +440,7 @@ sys.exit(0)
         text=True,
     )
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    if owner != "nyq-equities":
+    if owner != "holoscan-finance":
         assert result.returncode != 0
         assert not any(c[0] in ("run", "rm", "stop") for c in calls)
         return

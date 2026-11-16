@@ -14,7 +14,7 @@ APP_NAME="${APP_NAME:-fin-equities-receiver}"
 FEED_NAME="${FEED_NAME:-fin-equities-feed}"
 OWNER_LABEL="com.nvidia.holoscan-finance.demo"
 # Keep this identifier so teardown can restore settings from previously launched containers.
-OWNER_VALUE="${OWNER_VALUE:-nyq-equities}"
+OWNER_VALUE="${OWNER_VALUE:-holoscan-finance}"
 NIC_PCIE="${NIC_PCIE:-0004:03:00.0}"
 NIC_NAME="${NIC_NAME:-enP4p3s0f0np0}"
 NIC_MASTER_CORE="${NIC_MASTER_CORE:-3}"

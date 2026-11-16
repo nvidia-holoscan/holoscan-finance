@@ -24,11 +24,11 @@ import pytest
 from holoscan.testing import OperatorTestHarness, TestRunOptions
 
 from holoscan_finance.app.drained import DrainedCondition
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.marketdata.framing import udp_frame, write_pcap
 from holoscan_finance.marketdata.sbe_codec import packet_count
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import synthetic_stream
 from holoscan_finance.operators import GpuSbeReplaySourceOp, QuoteBarsOp
 from holoscan_finance.operators.edges import lossless
 from holoscan_finance.ref import Knob, Ref
@@ -36,13 +36,13 @@ from holoscan_finance.telemetry.stats import BarsStats, IngestStats
 
 pytestmark = [pytest.mark.sdk, pytest.mark.gpu]
 
-DATE, PORT, UNIVERSE = "2025-04-01", 40000, 100
+DATE, PORT, UNIVERSE = "2026-06-01", 40000, 100
 MIDNIGHT = day_start_ns(DATE)
 
 
 def manifest(generation: int, port: int) -> dict:
     return dict(
-        format="nyq-equity-replay-v1",
+        format="equity-replay-v1",
         wire_protocol=PROTOCOL,
         market_timezone=TIMEZONE,
         sender_port=port,

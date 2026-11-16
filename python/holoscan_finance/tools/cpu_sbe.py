@@ -3,7 +3,7 @@
 """Compiled CPU SBE decode (numba), the CPU counterpart of ``marketdata.gpu_sbe``.
 
 Same algorithm and output as the CUDA decoder -- and therefore as the Python reference
-``nyq.mapping.decode_packet`` -- but compiled to machine code and run over a whole batch of
+``equity.mapping.decode_packet`` -- but compiled to machine code and run over a whole batch of
 packets at once: pass 1 frames and validates every packet, pass 2 writes the observations
 of accepted packets into structure-of-arrays columns. Both passes are ``prange`` loops over
 packets, so the thread count is set with ``numba.set_num_threads``. It exists to separate

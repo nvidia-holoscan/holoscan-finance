@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from holoscan.testing import OperatorTestHarness
 
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import synthetic_stream
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.operators import SbeDecodeOp
 from holoscan_finance.payloads import PacketBatch
 from holoscan_finance.ref import Knob, Ref
@@ -20,7 +20,7 @@ from holoscan_finance.telemetry.stats import IngestStats
 
 pytestmark = pytest.mark.sdk
 
-DATE, PORT, UNIVERSE = "2025-04-01", 40000, 20
+DATE, PORT, UNIVERSE = "2026-06-01", 40000, 20
 MIDNIGHT = day_start_ns(DATE)
 
 
@@ -28,7 +28,7 @@ def directory(generation: int = 1, port: int = PORT) -> Knob:
     return Knob(
         validate_manifest(
             dict(
-                format="nyq-equity-replay-v1",
+                format="equity-replay-v1",
                 wire_protocol=PROTOCOL,
                 market_timezone=TIMEZONE,
                 sender_port=port,

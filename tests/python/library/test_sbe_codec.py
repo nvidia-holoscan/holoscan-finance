@@ -10,14 +10,14 @@ import struct
 import numpy as np
 import pytest
 
+from holoscan_finance.equity import mapping as replay
 from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.records import CONDITION, EVENT_DTYPE, HALTED, QUOTE, TRADE
-from holoscan_finance.nyq import mapping as replay
 
 # Transcribed by hand from the SBE 1.0 specification (message header, root block, group
 # dimensions, little-endian fields in schema order) and sbe_schema.xml: a message of sequence
-# 7 with one Quote entry for SecurityID 0 at 2025-04-01 09:30:00.000123000 New York
-# (1,743,514,200,000,123,000 ns since the epoch): bid 1.0000 x 3, offer 2.0000 x 4, no last
+# 7 with one Quote entry for SecurityID 0 at 2026-06-01 09:30:00.000123000 New York
+# (1,780,320,600,000,123,000 ns since the epoch): bid 1.0000 x 3, offer 2.0000 x 4, no last
 # price or quantity, no trading status.
 GOLDEN = bytes.fromhex(
     "0c 00"  # messageHeader.blockLength 12 (SeqNum and 4 octets of padding)
@@ -28,7 +28,7 @@ GOLDEN = bytes.fromhex(
     "00 00 00 00"  # root block padding
     "30 00"  # groupSizeEncoding.blockLength 48
     "01 00"  # numInGroup 1
-    "78 50 db 67 ed 34 32 18"  # TransactTime
+    "78 50 51 35 27 f8 b4 18"  # TransactTime
     "10 27 00 00 00 00 00 00"  # BidPx mantissa 10000 (1.0000)
     "20 4e 00 00 00 00 00 00"  # OfferPx mantissa 20000 (2.0000)
     "00 00 00 00 00 00 00 80"  # LastPx null (int64 min)
@@ -39,7 +39,7 @@ GOLDEN = bytes.fromhex(
     "01"  # EntryType Quote
     "ff"  # SecurityTradingStatus null
 )
-MIDNIGHT = replay.day_start_ns("2025-04-01")
+MIDNIGHT = replay.day_start_ns("2026-06-01")
 OPEN = MIDNIGHT + 34200 * 10**9
 ENTRY_AT = 24  # the first entry's offset
 

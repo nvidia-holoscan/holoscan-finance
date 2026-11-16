@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE
-from holoscan_finance.nyq.tape import open_tape
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE
+from holoscan_finance.equity.tape import open_tape
 
 httpx = pytest.importorskip("httpx")
 
@@ -100,7 +100,7 @@ def test_dashboard_contract_while_replaying(tmp_path):
             assert s is not None, "the replay never registered a generation"
             payload = {
                 **open_tape(str(synth / "tape"))[0],
-                "format": "nyq-equity-replay-v1",
+                "format": "equity-replay-v1",
                 "wire_protocol": PROTOCOL,
                 "market_timezone": TIMEZONE,
                 "sender_port": 1,

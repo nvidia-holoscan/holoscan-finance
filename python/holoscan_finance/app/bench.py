@@ -37,7 +37,7 @@ from .drained import DrainedCondition
 from .runner import ExitCode, usage_error
 
 if TYPE_CHECKING:
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
     from ..telemetry.stalls import StallMonitor
 
 logger = logging.getLogger(__name__)

@@ -7,14 +7,14 @@ batch per accepted packet). Edges: ``lossless(16)`` from the source and ``lossle
 into ``QuoteBarsOp(backend="cpu")``, all in the ``ingest`` lane (no hop per packet). The
 directory is read once per batch, immediately before decoding, so a ``POST /manifest``
 reaches the next batch; packets from another sender port are stale. Processor:
-``nyq.host_decoder.HostSbeDecoder`` (the host reference path).
+``equity.host_decoder.HostSbeDecoder`` (the host reference path).
 """
 
 from __future__ import annotations
 
 import holoscan as hs
 
-from ..nyq.host_decoder import HostSbeDecoder
+from ..equity.host_decoder import HostSbeDecoder
 from ..ref import Ref
 from ..telemetry.stats import IngestStats
 from ._common import ref_obj

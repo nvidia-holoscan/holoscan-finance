@@ -9,16 +9,16 @@ import struct
 
 import numpy as np
 
+from holoscan_finance.equity.host_decoder import HostSbeDecoder
+from holoscan_finance.equity.manifest import MANIFEST_FORMAT, validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import fuzz, synthetic_stream
 from holoscan_finance.marketdata.gpu_decoder import DecodeCounts
 from holoscan_finance.marketdata.records import EVENT_DTYPE
 from holoscan_finance.marketdata.sbe_codec import packet_count
-from holoscan_finance.nyq.host_decoder import HostSbeDecoder
-from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
 from holoscan_finance.payloads import PacketBatch
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 UNIVERSE = 50
 PORT = 50001
 
@@ -32,7 +32,7 @@ def directory(generation=5, port=PORT):
             symbols=[f"S{i}" for i in range(UNIVERSE)],
             generation=generation,
             sender_port=port,
-            date="2025-04-01",
+            date="2026-06-01",
             start_ns=MIDNIGHT,
             end_ns=MIDNIGHT + 86400 * 10**9,
             events=100,

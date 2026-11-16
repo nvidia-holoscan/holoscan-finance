@@ -10,16 +10,16 @@ import dataclasses
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.manifest import MANIFEST_FORMAT, validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.marketdata.bar_builder import BarBuilder
 from holoscan_finance.marketdata.bars import QuoteBars
 from holoscan_finance.marketdata.sequence import SequenceTracker
-from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import synthetic_stream
 from holoscan_finance.payloads import BarCounters, BarWindow
 from holoscan_finance.settings import BarSettings
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 UNIVERSE = 50
 SETTINGS = BarSettings(bar_seconds=5, window_seconds=60, stale_seconds=30, min_bars=4)
 
@@ -33,7 +33,7 @@ def directory(generation=1, port=40000):
             symbols=[f"S{i}" for i in range(UNIVERSE)],
             generation=generation,
             sender_port=port,
-            date="2025-04-01",
+            date="2026-06-01",
             start_ns=MIDNIGHT,
             end_ns=MIDNIGHT + 86400 * 10**9,
             events=100,

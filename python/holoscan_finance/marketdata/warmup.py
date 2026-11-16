@@ -18,7 +18,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from ..nyq.mapping import pack_events
+from ..equity.mapping import pack_events
 from .framing import udp_frame
 from .gpu_bars import GpuQuoteBars, GpuReplayBatch, apply_sequence
 from .gpu_sbe import PACKET_HEADER, SLOT_BYTES, decode_packets, receive_frames

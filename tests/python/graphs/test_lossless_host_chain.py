@@ -13,10 +13,10 @@ import holoscan as hs
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE, TRADE
 from holoscan_finance.marketdata.sbe_codec import packet_count
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
 from holoscan_finance.operators import QuoteBarsOp, SbeDecodeOp
 from holoscan_finance.operators._common import PendingEmits
 from holoscan_finance.operators.edges import lossless
@@ -27,7 +27,7 @@ from holoscan_finance.telemetry.stats import BarsStats, IngestStats
 pytestmark = pytest.mark.sdk
 
 PACKETS, EVENTS, UNIVERSE, PORT = 50_000, 4, 200, 40000
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 
 
 def replay_units(count: int) -> list[bytes]:
@@ -53,13 +53,13 @@ def directory() -> Knob:
     return Knob(
         validate_manifest(
             dict(
-                format="nyq-equity-replay-v1",
+                format="equity-replay-v1",
                 wire_protocol=PROTOCOL,
                 market_timezone=TIMEZONE,
                 sender_port=PORT,
                 symbols=[f"S{i}" for i in range(UNIVERSE)],
                 generation=1,
-                date="2025-04-01",
+                date="2026-06-01",
                 start_ns=MIDNIGHT,
                 end_ns=MIDNIGHT + 86_400 * 10**9,
                 events=1,

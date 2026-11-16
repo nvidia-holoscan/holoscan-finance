@@ -10,6 +10,7 @@ import struct
 import numpy as np
 import pytest
 
+from holoscan_finance.equity import mapping as replay
 from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.bars import QuoteBars
 from holoscan_finance.marketdata.records import (
@@ -20,9 +21,8 @@ from holoscan_finance.marketdata.records import (
     TRADE,
     ReplayBatch,
 )
-from holoscan_finance.nyq import mapping as replay
 
-MIDNIGHT = replay.day_start_ns("2025-04-01")
+MIDNIGHT = replay.day_start_ns("2026-06-01")
 OPEN = MIDNIGHT + 34200 * 10**9
 MAX = replay.MAX_PACKET_EVENTS
 FIELDS = ("bid", "ask", "bid_size", "ask_size", "price", "volume")
@@ -42,7 +42,7 @@ def decode(data, universe=1):
 
 
 def test_day_start_is_new_york_midnight_across_dst():
-    assert replay.day_start_ns("2025-04-01") == 1743480000 * 10**9  # EDT, UTC-4
+    assert replay.day_start_ns("2026-06-01") == 1780286400 * 10**9  # EDT, UTC-4
     assert replay.day_start_ns("2025-01-02") == 1735794000 * 10**9  # EST, UTC-5
 
 

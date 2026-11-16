@@ -159,7 +159,7 @@ def _check_unit_size(max_events_per_packet: int) -> None:
 def synthetic_tape(
     out_dir: str | Path,
     *,
-    date: str = "2025-04-01",
+    date: str = "2026-06-01",
     symbols: int = 500,
     packets: int = 20000,
     seconds: int = 600,

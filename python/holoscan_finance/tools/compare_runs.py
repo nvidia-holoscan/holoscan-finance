@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         start, end = (
             int(datetime.fromisoformat(t).timestamp()) * 10**9
-            for t in (a.start or "2025-04-01T14:10:00+00:00", a.end or "2025-04-01T14:25:00+00:00")
+            for t in (a.start or "2026-06-01T14:10:00+00:00", a.end or "2026-06-01T14:25:00+00:00")
         )
     report = compare_runs(cpu, gpu, start, end)
     report["window_selection"] = (

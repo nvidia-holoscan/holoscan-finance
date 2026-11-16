@@ -11,7 +11,7 @@ Holoscan as `holoscan.finance`, and the module runs on the
 | The module provides | Where |
 | --- | --- |
 | Ten [operators](#operators): four receive sources (kernel UDP, DAQIRI into pinned host memory, DAQIRI GPUDirect into GPU memory, and a NIC-free GPU replay of a capture), SBE decode, event-time quote bars, rolling GPU risk, a CPU cross-check, a callback sink and a holomq risk summary | `holoscan_finance.operators`; a catalog entry per operator under [operators/](operators/README.md) |
-| The libraries the operators wrap: the FIX SBE schema and codec, CUDA encode/decode and quote-bar kernels, the covariance engine, receive accounting, the control plane, telemetry and validation, all tested without Holoscan | `holoscan_finance.marketdata`, `nyq`, `ingest`, `analytics`, `control`, `telemetry`, `validation` |
+| The libraries the operators wrap: the FIX SBE schema and codec, CUDA encode/decode and quote-bar kernels, the covariance engine, receive accounting, the control plane, telemetry and validation, all tested without Holoscan | `holoscan_finance.marketdata`, `equity`, `ingest`, `analytics`, `control`, `telemetry`, `validation` |
 | Application plumbing (flags, authored lanes and CPU placement, plan rules, runner, drained predicate) and a web dashboard | `holoscan_finance.app`, `holoscan_finance.dashboard` |
 | CPU-only [tools](#tools): synthetic tape and pcap generation, a paced replay sender, measurement and benchmarks | `holoscan_finance.tools` |
 | Two [example applications](#examples): a live dashboard and a headless, verified benchmark, both `holoscan run` targets | [examples/](examples/) |
@@ -275,7 +275,7 @@ the last bar. Use the generated summary for exact message and observation counts
 
 | Path | Contents |
 | --- | --- |
-| `python/holoscan_finance/` | The package: `operators/` (the ten operators and edge presets), the libraries they wrap (`marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`), the dashboard, the shared app plumbing (`app`) and the tools |
+| `python/holoscan_finance/` | The package: `operators/` (the ten operators and edge presets), the libraries they wrap (`marketdata`, `equity`, `ingest`, `analytics`, `telemetry`, `control`, `validation`), the dashboard, the shared app plumbing (`app`) and the tools |
 | `operators/<name>_op/` | Catalog entries: `metadata.json` and a README per operator ([index](operators/README.md)) |
 | `examples/<name>/` | The two example applications: the composition, `metadata.json` (the `holoscan run` modes) and a README |
 | `metadata.json`, `pyproject.toml`, `CMakeLists.txt`, `Dockerfile` | Module metadata for holoscan-cli (the examples are its `subprojects.applications`, the key the module schema uses), the wheel and the CLI search paths, the build-tree staging (nothing is compiled) and the dev image |

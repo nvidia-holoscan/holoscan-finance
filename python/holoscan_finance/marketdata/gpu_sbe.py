@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""GPU SBE (FIX Simple Binary Encoding) decode and encode, bit-compatible with ``nyq.mapping``.
+"""GPU SBE (FIX Simple Binary Encoding) decode and encode, bit-compatible with ``equity.mapping``.
 
 Decode. Packets arrive as a device-resident slot buffer (one UDP payload per 2 KiB row).
 ``sbe_decode`` runs one warp per packet and one lane per entry: the entries are fixed 48-octet
@@ -18,7 +18,7 @@ Status per packet: 0 = decoded, 1 = rejected by ``inspect_packet`` (the receiver
 check), 2 = rejected by ``parse_packet``/``decode_packet``. ``gpu_validate`` checks field-for-field
 equality with the host decoder over generated captures and mutated packets.
 
-Encode. ``sbe_encode`` is ``nyq.mapping.pack_units`` on the device: one thread per observation
+Encode. ``sbe_encode`` is ``equity.mapping.pack_units`` on the device: one thread per observation
 writes its entry as six aligned 8-octet stores, the first thread of a packet its 24-octet
 prefix; ``sbe_frame`` wraps the packets in pcap records and Ethernet/IPv4/UDP headers as
 ``marketdata.framing`` does. The encoder reports the first violated packing rule and the wrapper
@@ -286,7 +286,7 @@ extern "C" __global__ void gather_frame(
     }
 }
 
-// ---- encode: nyq.mapping.pack_units on the device --------------------------------------
+// ---- encode: equity.mapping.pack_units on the device --------------------------------------
 // Packing-rule violations, reported as bits so the wrapper raises the host packer's error.
 #define ERR_ORDER 1u
 #define ERR_KIND 2u
@@ -590,7 +590,7 @@ def columns_from_events(events):
 
 
 def encode_units(columns, sequence, midnight_ns, unit_events=sbe.MAX_ENTRIES):
-    """``nyq.mapping.pack_units`` on the device: ``columns`` (``FIELDS`` device arrays of
+    """``equity.mapping.pack_units`` on the device: ``columns`` (``FIELDS`` device arrays of
     ``n`` observations) packed into consecutive packets of ``unit_events`` entries, the first
     carrying ``sequence``. Returns ``(data, offsets, lengths, counts)`` with ``data`` a device
     uint8 array holding the packets byte for byte as the host packer writes them; the same

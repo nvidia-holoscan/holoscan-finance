@@ -28,8 +28,8 @@ from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.control.results import ResultsStore
 from holoscan_finance.control.status import RunStatus
 from holoscan_finance.dashboard.model import DashboardModel
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.marketdata.covariance import CovarianceEngine
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.payloads import BarWindow, RiskComparison, RiskUpdate
 from holoscan_finance.ref import Knob
 from holoscan_finance.settings import BarSettings
@@ -41,14 +41,14 @@ pytest.importorskip("scipy")
 
 WATCHDOG_S = 30.0
 MANIFESTS_PER_WRITER = 500
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 SYMBOLS = [f"S{i}" for i in range(16)]
 BASE = dict(
-    format="nyq-equity-replay-v1",
+    format="equity-replay-v1",
     wire_protocol=PROTOCOL,
     market_timezone=TIMEZONE,
     symbols=SYMBOLS,
-    date="2025-04-01",
+    date="2026-06-01",
     start_ns=MIDNIGHT + 34200 * 10**9,
     end_ns=MIDNIGHT + 57600 * 10**9,
     events=100,

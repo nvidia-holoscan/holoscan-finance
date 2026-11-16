@@ -12,7 +12,7 @@ plane, and the performance invariants the layout protects. The operator referenc
 | Example applications | `examples/<app>/<app>.py`: `compose()`, `rules()` and a short `main()` | `holoscan`, `holoscan_finance` |
 | Shared app plumbing | `holoscan_finance.app` (CLI, CPU sets and lanes, contexts, runner, plan rules), `holoscan_finance.dashboard` | `holoscan` only inside functions; FastAPI in the server |
 | Operators | `holoscan_finance.operators`: ten thin adapters (ports, `Param`s, contract, lifecycle) | `holoscan` |
-| Library | `marketdata`, `nyq`, `ingest`, `analytics`, `telemetry`, `control`, `validation`, `tools` | NumPy; CuPy, SciPy and the rest only inside functions |
+| Library | `marketdata`, `equity`, `ingest`, `analytics`, `telemetry`, `control`, `validation`, `tools` | NumPy; CuPy, SciPy and the rest only inside functions |
 
 Each operator wraps a library *processor* that holds the logic and is tested without
 Holoscan: `GpuIngest` (both GPU sources), `UdpReceiver`, `DaqiriHostReceiver`,

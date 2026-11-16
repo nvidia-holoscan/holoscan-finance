@@ -10,6 +10,7 @@ import struct
 import numpy as np
 import pytest
 
+from holoscan_finance.equity import mapping as replay
 from holoscan_finance.marketdata.framing import (
     PcapFrames,
     strip_udp_datagram,
@@ -17,9 +18,8 @@ from holoscan_finance.marketdata.framing import (
     write_pcap,
 )
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
-from holoscan_finance.nyq import mapping as replay
 
-MIDNIGHT = replay.day_start_ns("2025-04-01")
+MIDNIGHT = replay.day_start_ns("2026-06-01")
 PEER = ("192.168.100.1", 55555)
 
 

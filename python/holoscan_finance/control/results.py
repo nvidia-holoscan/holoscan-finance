@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
     from ..payloads import RiskComparison, RiskUpdate
     from ..settings import BarSettings
     from ..telemetry.capture import CaptureTap

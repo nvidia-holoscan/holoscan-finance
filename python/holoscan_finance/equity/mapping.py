@@ -24,7 +24,7 @@ import numpy as np
 from ..marketdata import sbe_codec as sbe
 from ..marketdata.records import CONDITION, EVENT_DTYPE, HALTED, QUOTE, TRADE, ReplayBatch
 
-PROTOCOL = "fix-sbe-1.0-nyq-replay-v1"
+PROTOCOL = "fix-sbe-1.0-equity-replay-v1"
 TIMEZONE = "America/New_York"
 MAX_PACKET_EVENTS = sbe.MAX_ENTRIES  # 30 entries: 24 + 30 x 48 = 1464 <= 1472
 _ORDERED_ERROR = "SBE observations must be ordered within the configured market day"

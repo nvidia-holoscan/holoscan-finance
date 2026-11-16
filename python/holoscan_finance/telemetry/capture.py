@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from ..equity.manifest import FeedDirectory
     from ..marketdata.gpu_bars import GpuReplayBatch
     from ..marketdata.records import ReplayBatch
-    from ..nyq.manifest import FeedDirectory
 
 
 def percentiles(values):

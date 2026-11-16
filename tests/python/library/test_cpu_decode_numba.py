@@ -15,15 +15,15 @@ import numpy as np
 import pytest
 from library.test_sbe_codec import GOLDEN, extended
 
+from holoscan_finance.equity.mapping import day_start_ns
+from holoscan_finance.equity.synthetic import fuzz, synthetic_stream
 from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.gpu_sbe import SLOT_BYTES
-from holoscan_finance.nyq.mapping import day_start_ns
-from holoscan_finance.nyq.synthetic import fuzz, synthetic_stream
 from holoscan_finance.validation.compare import compare_decoded, host_decode
 
 cpu_sbe = pytest.importorskip("holoscan_finance.tools.cpu_sbe")  # needs numba>=0.68
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 UNIVERSE = 50
 
 

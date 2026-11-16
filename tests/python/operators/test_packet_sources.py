@@ -23,19 +23,19 @@ import pytest
 from fakes.fake_daqiri import make_fake_daqiri
 from holoscan.testing import OperatorTestHarness, TestRunOptions
 
+from holoscan_finance.equity.host_decoder import HostSbeDecoder
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
 from holoscan_finance.ingest.affinity import process_mask
 from holoscan_finance.marketdata.framing import udp_frame
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
-from holoscan_finance.nyq.host_decoder import HostSbeDecoder
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
 from holoscan_finance.operators import DaqiriPacketSourceOp, UdpPacketSourceOp
 from holoscan_finance.ref import Ref
 from holoscan_finance.telemetry.stats import IngestStats
 
 pytestmark = pytest.mark.sdk
 
-DATE, UNIVERSE = "2025-04-01", 2886
+DATE, UNIVERSE = "2026-06-01", 2886
 MIDNIGHT = day_start_ns(DATE)
 PEER = ("192.168.100.1", 55555)
 
@@ -43,7 +43,7 @@ PEER = ("192.168.100.1", 55555)
 def directory(port: int):
     return validate_manifest(
         dict(
-            format="nyq-equity-replay-v1",
+            format="equity-replay-v1",
             wire_protocol=PROTOCOL,
             market_timezone=TIMEZONE,
             sender_port=port,

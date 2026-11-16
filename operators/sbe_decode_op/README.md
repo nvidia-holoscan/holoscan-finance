@@ -10,7 +10,7 @@ the [synthetic decode benchmark](../../docs/VALIDATION.md#offline-decode-and-bar
 packets (PacketBatch) → sender-port check → SBE message parse → equity observation mapping → events (list[ReplayBatch])
 ```
 
-Processor: `holoscan_finance.nyq.host_decoder.HostSbeDecoder`.
+Processor: `holoscan_finance.equity.host_decoder.HostSbeDecoder`.
 
 ## Ports
 
@@ -32,7 +32,7 @@ Contract: `OnEach(packets)`.
 ## Rules
 
 - No directory, or a sender port other than `directory.sender_port`: the packet is stale.
-- Otherwise `nyq.mapping.decode_packet` runs under the directory's generation, market
+- Otherwise `equity.mapping.decode_packet` runs under the directory's generation, market
   midnight and universe; `ValueError` or `struct.error` counts the packet as malformed.
 
 ## Edges and lane

@@ -20,13 +20,13 @@ import numpy as np
 import pytest
 from apphelpers import child_env
 
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
+from holoscan_finance.equity.synthetic import synthetic_capture, synthetic_tape
 from holoscan_finance.marketdata.framing import PcapFrames, udp_frame, write_pcap
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, pack_events
-from holoscan_finance.nyq.synthetic import synthetic_capture, synthetic_tape
 from holoscan_finance.tools import bench_replay, replay_sender, risk_bench
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 
 
 @contextmanager
@@ -234,9 +234,9 @@ def test_risk_bench_kinds_refuses_the_other_modes_options():
 def test_risk_bench_derives_the_days_returns_from_a_tape(tmp_path):
     """Every bar of the session from host QuoteBars, in order; the first has no previous
     mark. Batching by 30 bars gives the bars of one batch."""
+    from holoscan_finance.equity.tape import open_tape
     from holoscan_finance.marketdata.bars import QuoteBars
     from holoscan_finance.marketdata.records import ReplayBatch
-    from holoscan_finance.nyq.tape import open_tape
     from holoscan_finance.settings import BarSettings
 
     manifest = synthetic_tape(tmp_path / "tape", symbols=12, packets=400, seconds=600, seed=5)

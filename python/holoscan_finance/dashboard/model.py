@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from ..nyq.mapping import PROTOCOL
+from ..equity.mapping import PROTOCOL
 from ..settings import GPU_INGEST_MODES
 
 TRANSPORT = "FIX Simple Binary Encoding 1.0 / UDP · equity replay schema"

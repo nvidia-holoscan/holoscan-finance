@@ -10,12 +10,12 @@ import numpy as np
 import pytest
 from test_gpu_decode import MIDNIGHT, UNIVERSE, to_slots
 
+from holoscan_finance.equity import mapping as replay
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.marketdata.bars import QuoteBars
 from holoscan_finance.marketdata.gpu_bars import GpuQuoteBars, GpuReplayBatch, apply_sequence
 from holoscan_finance.marketdata.gpu_sbe import decode_packets
 from holoscan_finance.marketdata.sequence import SequenceTracker
-from holoscan_finance.nyq import mapping as replay
-from holoscan_finance.nyq.synthetic import synthetic_stream
 
 pytestmark = pytest.mark.gpu
 cp = pytest.importorskip("cupy")

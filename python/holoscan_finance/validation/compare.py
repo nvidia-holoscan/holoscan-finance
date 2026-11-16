@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Host decode oracle and bitwise comparisons for the GPU and numba SBE decoders.
 
-``host_decode`` decodes captured payloads with the reference ``nyq.mapping.decode_packet`` in
+``host_decode`` decodes captured payloads with the reference ``equity.mapping.decode_packet`` in
 a fork pool; ``compare_decoded`` requires another decoder's output to match it bit for bit:
 per-packet accept/reject stage, counts, sequences and every observation field, floats as raw
 bit patterns so NaN placement and signed zeros count; ``ulps`` measures float distances.
@@ -22,19 +22,19 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..equity.mapping import decode_packet
 from ..marketdata import sbe_codec as sbe
 from ..marketdata.bars import QuoteBars
 from ..marketdata.gpu_sbe import FIELDS
 from ..marketdata.records import EVENT_DTYPE, ReplayBatch
 from ..marketdata.sequence import SequenceTracker
-from ..nyq.mapping import decode_packet
 
 if TYPE_CHECKING:
     import cupy as cp
 
+    from ..equity.manifest import FeedDirectory
     from ..marketdata.framing import PcapFrames
     from ..marketdata.gpu_sbe import DecodedPackets
-    from ..nyq.manifest import FeedDirectory
     from ..settings import BarSettings
 
 # Packets HostReference decodes at once (as gpu_validate --chunk). Decoding holds about 4 KB

@@ -13,15 +13,15 @@ from __future__ import annotations
 import numpy as np
 from fakes.fake_drain import receive_header
 
+from holoscan_finance.equity.mapping import day_start_ns, pack_events
 from holoscan_finance.ingest.accounting import ReceiveAccounting, sbe_packet_header
 from holoscan_finance.ingest.gpu_ingest import GpuIngest
 from holoscan_finance.ingest.host_receivers import UdpReceiver
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE
 from holoscan_finance.marketdata.sbe_codec import pack_packet, packet_count
-from holoscan_finance.nyq.mapping import day_start_ns, pack_events
 from holoscan_finance.telemetry.stats import IngestStats
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 COUNTERS = (
     "packets",
     "received_messages",

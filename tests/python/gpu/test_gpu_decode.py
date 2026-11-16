@@ -17,9 +17,11 @@ import struct
 import numpy as np
 import pytest
 from fakes.fake_drain import receive_header
-from library.test_nyq_mapping import mixed_rows
+from library.test_equity_mapping import mixed_rows
 from library.test_sbe_codec import GOLDEN, extended
 
+from holoscan_finance.equity import mapping as replay
+from holoscan_finance.equity.synthetic import _FrameWriter, fuzz, synthetic_stream
 from holoscan_finance.marketdata import sbe_codec as sbe
 from holoscan_finance.marketdata.framing import strip_udp_datagram, udp_frame
 from holoscan_finance.marketdata.gpu_sbe import (
@@ -35,13 +37,11 @@ from holoscan_finance.marketdata.gpu_sbe import (
     receive_frames,
 )
 from holoscan_finance.marketdata.records import EVENT_DTYPE
-from holoscan_finance.nyq import mapping as replay
-from holoscan_finance.nyq.synthetic import _FrameWriter, fuzz, synthetic_stream
 
 pytestmark = pytest.mark.gpu
 cp = pytest.importorskip("cupy")
 
-MIDNIGHT = replay.day_start_ns("2025-04-01")
+MIDNIGHT = replay.day_start_ns("2026-06-01")
 UNIVERSE = 50
 
 

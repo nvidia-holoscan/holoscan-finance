@@ -11,11 +11,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, decode_packet
+from holoscan_finance.equity.synthetic import synthetic_capture, synthetic_tape
 from holoscan_finance.marketdata.bar_builder import BarBuilder
 from holoscan_finance.marketdata.framing import PcapFrames
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, decode_packet
-from holoscan_finance.nyq.synthetic import synthetic_capture, synthetic_tape
 from holoscan_finance.payloads import BarCounters, BarWindow, SymbolSnapshot
 from holoscan_finance.settings import BarSettings
 from holoscan_finance.telemetry.stats import BarsStats

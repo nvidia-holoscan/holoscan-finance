@@ -20,10 +20,10 @@ import numpy as np
 import pytest
 from holoscan.testing import OperatorTestHarness
 
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.marketdata.bar_builder import BarBuilder
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns, decode_packet
-from holoscan_finance.nyq.synthetic import synthetic_stream
 from holoscan_finance.operators import QuoteBarsOp
 from holoscan_finance.operators import quote_bars as quote_bars_module
 from holoscan_finance.payloads import BarCounters
@@ -34,7 +34,7 @@ from holoscan_finance.telemetry.stats import BarsStats
 pytestmark = pytest.mark.sdk
 
 SETTINGS = BarSettings(bar_seconds=5, window_seconds=60, stale_seconds=30, min_bars=4)
-DATE, UNIVERSE = "2025-04-01", 50
+DATE, UNIVERSE = "2026-06-01", 50
 MIDNIGHT = day_start_ns(DATE)
 PAYLOADS = synthetic_stream(np.random.default_rng(99), 900, UNIVERSE, MIDNIGHT, 34200)
 del PAYLOADS[400:403]  # a sequence gap
@@ -43,7 +43,7 @@ del PAYLOADS[400:403]  # a sequence gap
 def feed(generation: int):
     return validate_manifest(
         dict(
-            format="nyq-equity-replay-v1",
+            format="equity-replay-v1",
             wire_protocol=PROTOCOL,
             market_timezone=TIMEZONE,
             sender_port=40000 + generation,

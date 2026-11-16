@@ -20,7 +20,7 @@ def open_tape(path: str | Path) -> tuple[dict, np.memmap]:
     incomplete tape."""
     p = Path(path)
     m = json.loads((p / "manifest.json").read_text())
-    if m.get("format") != "nyq-equity-replay-v1" or m.get("record_bytes") != EVENT_DTYPE.itemsize:
+    if m.get("format") != "equity-replay-v1" or m.get("record_bytes") != EVENT_DTYPE.itemsize:
         raise ValueError("unsupported prepared tape format")
     if (p / "events.bin").stat().st_size != m["events"] * EVENT_DTYPE.itemsize:
         raise ValueError("incomplete prepared tape")

@@ -32,12 +32,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..equity.mapping import MAX_PACKET_EVENTS, day_start_ns, decode_packet, pack_units
+from ..equity.tape import open_tape
 from ..marketdata.bars import QuoteBars
 from ..marketdata.framing import PcapFrames
 from ..marketdata.records import EVENT_DTYPE, ReplayBatch, combine_batches
 from ..marketdata.sbe_codec import packet_count
-from ..nyq.mapping import MAX_PACKET_EVENTS, day_start_ns, decode_packet, pack_units
-from ..nyq.tape import open_tape
 from ..settings import BarSettings
 
 if TYPE_CHECKING:

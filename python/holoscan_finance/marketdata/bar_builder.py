@@ -26,7 +26,7 @@ from .records import EVENT_DTYPE, ReplayBatch
 from .sequence import SequenceTracker
 
 if TYPE_CHECKING:
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
 
 
 def host_batches_from_gpu(batch: GpuReplayBatch) -> list[ReplayBatch]:

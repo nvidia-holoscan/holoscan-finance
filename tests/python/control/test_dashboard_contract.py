@@ -29,8 +29,8 @@ from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.control.results import ResultsStore
 from holoscan_finance.control.status import RunStatus
 from holoscan_finance.dashboard.model import DashboardModel
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.marketdata.covariance import CovarianceEngine
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.payloads import (
     BarCounters,
     BarWindow,
@@ -47,7 +47,7 @@ from holoscan_finance.telemetry.stats import BarsStats, IngestStats, RiskStats, 
 pytest.importorskip("scipy")
 
 INDEX_HTML = Path(__file__).parents[3] / "python/holoscan_finance/dashboard/webui/index.html"
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 SYMBOLS = [f"SYM{i}" for i in range(40)]
 
 # ---- expected key sets -------------------------------------------------------------------
@@ -105,7 +105,7 @@ ENGINE = {
 
 # ---- pinned values -----------------------------------------------------------------------
 TRANSPORT = "FIX Simple Binary Encoding 1.0 / UDP · equity replay schema"
-WIRE_PROTOCOL = "fix-sbe-1.0-nyq-replay-v1"
+WIRE_PROTOCOL = "fix-sbe-1.0-equity-replay-v1"
 MESSAGE_COUNT_SCOPE = "SBE entries (one per observation); replay rate is source observations/s"
 PAYLOAD_PATH = {
     "gpudirect": "NIC -> GPU memory (GPUDirect) -> GPU gather -> GPU SBE decode",
@@ -143,13 +143,13 @@ PLAN = {
 
 def manifest(generation=1, port=50001):
     return dict(
-        format="nyq-equity-replay-v1",
+        format="equity-replay-v1",
         wire_protocol=PROTOCOL,
         market_timezone=TIMEZONE,
         symbols=SYMBOLS,
         generation=generation,
         sender_port=port,
-        date="2025-04-01",
+        date="2026-06-01",
         start_ns=MIDNIGHT + 34200 * 10**9,
         end_ns=MIDNIGHT + 57600 * 10**9,
         events=5000,

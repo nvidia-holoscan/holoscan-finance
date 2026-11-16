@@ -22,10 +22,10 @@ import time
 
 import numpy as np
 
+from ..equity.mapping import PROTOCOL, TIMEZONE
+from ..equity.tape import open_tape
 from ..marketdata import sbe_codec as sbe
 from ..marketdata.framing import PcapFrames, strip_udp_datagram
-from ..nyq.mapping import PROTOCOL, TIMEZONE
-from ..nyq.tape import open_tape
 from .replay_sender import request
 
 

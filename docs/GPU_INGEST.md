@@ -123,7 +123,7 @@ far below the analytics' own CPU/GPU agreement tolerance (relative 10⁻⁸).
 `market_data_bench --check` repeats the bars comparison inside the graph: the same decoded
 stream feeds `QuoteBarsOp` with the GPU and the CPU backend, and every closed bar is also
 compared with an independent host decode. Any change to `sbe_schema.xml`, `sbe_codec.py`,
-`nyq/mapping.py` or `bars.py` must be mirrored in `gpu_sbe.py` / `gpu_bars.py` (the CUDA
+`equity/mapping.py` or `bars.py` must be mirrored in `gpu_sbe.py` / `gpu_bars.py` (the CUDA
 source takes its offsets from the schema and refuses a layout its stores do not spell) and
 revalidated with `gpu_validate` on a generated synthetic capture.
 

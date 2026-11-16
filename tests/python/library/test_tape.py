@@ -9,16 +9,14 @@ import json
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.tape import open_tape
 from holoscan_finance.marketdata.records import EVENT_DTYPE
-from holoscan_finance.nyq.tape import open_tape
 
 
 def write_tape(path, rows, **changes):
     path.mkdir()
     rows.tofile(path / "events.bin")
-    manifest = dict(
-        format="nyq-equity-replay-v1", events=len(rows), record_bytes=EVENT_DTYPE.itemsize
-    )
+    manifest = dict(format="equity-replay-v1", events=len(rows), record_bytes=EVENT_DTYPE.itemsize)
     manifest.update(changes)
     (path / "manifest.json").write_text(json.dumps(manifest))
 
@@ -26,9 +24,9 @@ def write_tape(path, rows, **changes):
 def test_open_tape_maps_the_records_read_only(tmp_path):
     rows = np.zeros(3, EVENT_DTYPE)
     rows["timestamp_ns"] = [1, 2, 3]
-    write_tape(tmp_path / "t", rows, date="2025-04-01")
+    write_tape(tmp_path / "t", rows, date="2026-06-01")
     manifest, tape = open_tape(tmp_path / "t")
-    assert manifest["date"] == "2025-04-01"
+    assert manifest["date"] == "2026-06-01"
     assert isinstance(tape, np.memmap) and tape.dtype == EVENT_DTYPE
     assert tape["timestamp_ns"].tolist() == [1, 2, 3]
     with pytest.raises(ValueError):

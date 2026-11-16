@@ -18,10 +18,10 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..nyq.manifest import validate_manifest
+from ..equity.manifest import validate_manifest
 
 if TYPE_CHECKING:
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
     from ..ref import Knob
 
 # Ports a replay generation may take (no privileged ports).

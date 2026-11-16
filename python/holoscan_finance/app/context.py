@@ -24,11 +24,11 @@ from ..control.fullday import FullDayController
 from ..control.gate import CrossCheckGate
 from ..control.results import ResultsStore
 from ..control.status import RunStatus
+from ..equity.manifest import MANIFEST_FORMAT, FeedDirectory
+from ..equity.mapping import PROTOCOL, TIMEZONE
+from ..equity.tape import open_tape
 from ..ingest.affinity import CpuSets
 from ..marketdata.framing import PcapFrames
-from ..nyq.manifest import MANIFEST_FORMAT, FeedDirectory
-from ..nyq.mapping import PROTOCOL, TIMEZONE
-from ..nyq.tape import open_tape
 from ..ref import Knob
 from ..settings import BarSettings
 from ..telemetry.capture import CaptureTap, percentiles

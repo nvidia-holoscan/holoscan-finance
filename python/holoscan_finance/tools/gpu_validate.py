@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Field-for-field validation of the GPU SBE decoder against ``nyq.mapping.decode_packet``.
+"""Field-for-field validation of the GPU SBE decoder against ``equity.mapping.decode_packet``.
 
 Reads a pcap of the SBE replay (as captured on the wire), decodes every packet
 with the host decoder (multiprocessing) and with the GPU kernels, and requires
@@ -14,7 +14,7 @@ through host ``QuoteBars`` and ``GpuQuoteBars`` with identical batching instead;
     python -m holoscan_finance.tools.gpu_validate --pcap data/synth/day.pcap --tape data/synth/tape
 
 The oracle pieces are library code: ``validation.compare`` (host decode, comparison,
-ULPs), ``nyq.synthetic`` (``fuzz``) and ``marketdata.sequence`` (the host sequence rules).
+ULPs), ``equity.synthetic`` (``fuzz``) and ``marketdata.sequence`` (the host sequence rules).
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..equity.mapping import day_start_ns, decode_packet
+from ..equity.synthetic import fuzz
+from ..equity.tape import open_tape
 from ..marketdata.framing import PcapFrames
 from ..marketdata.gpu_sbe import SLOT_BYTES
 from ..marketdata.sbe_codec import packet_count
 from ..marketdata.sequence import SequenceTracker
-from ..nyq.mapping import day_start_ns, decode_packet
-from ..nyq.synthetic import fuzz
-from ..nyq.tape import open_tape
 from ..settings import BarSettings
 from ..validation.compare import compare_decoded, host_decode, to_host, ulps
 

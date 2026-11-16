@@ -20,7 +20,7 @@ import urllib.request
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
     from ..telemetry.stalls import StallMonitor
     from ..telemetry.stats import BarsStats, IngestStats
     from .feed import FeedControl

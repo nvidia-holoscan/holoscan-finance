@@ -15,9 +15,9 @@ import holoscan as hs
 import numpy as np
 import pytest
 
+from holoscan_finance.equity.manifest import validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.marketdata.records import EVENT_DTYPE, QUOTE, ReplayBatch
-from holoscan_finance.nyq.manifest import validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.operators import QuoteBarsOp
 from holoscan_finance.operators.edges import LATEST, lossless
 from holoscan_finance.ref import Knob, Ref
@@ -28,20 +28,20 @@ pytestmark = pytest.mark.sdk
 
 N, SYMBOLS = 40, 4
 SETTINGS = BarSettings(bar_seconds=1, window_seconds=10, stale_seconds=5, min_bars=2)
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 
 
 def directory() -> Knob:
     return Knob(
         validate_manifest(
             dict(
-                format="nyq-equity-replay-v1",
+                format="equity-replay-v1",
                 wire_protocol=PROTOCOL,
                 market_timezone=TIMEZONE,
                 sender_port=40000,
                 symbols=[f"S{i}" for i in range(SYMBOLS)],
                 generation=1,
-                date="2025-04-01",
+                date="2026-06-01",
                 start_ns=MIDNIGHT,
                 end_ns=MIDNIGHT + 86_400 * 10**9,
                 events=1,

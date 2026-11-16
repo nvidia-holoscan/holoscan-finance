@@ -23,7 +23,7 @@ from .gpu_sbe import decode_packets
 if TYPE_CHECKING:
     import cupy as cp
 
-    from ..nyq.manifest import FeedDirectory
+    from ..equity.manifest import FeedDirectory
 
 
 @dataclass(frozen=True)

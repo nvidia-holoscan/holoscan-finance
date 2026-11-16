@@ -21,8 +21,8 @@ import json
 import logging
 from pathlib import Path
 
-from ..nyq.mapping import MAX_PACKET_EVENTS
-from ..nyq.synthetic import ENCODERS, synthetic_capture, synthetic_tape
+from ..equity.mapping import MAX_PACKET_EVENTS
+from ..equity.synthetic import ENCODERS, synthetic_capture, synthetic_tape
 
 _FILES = ("tape/events.bin", "tape/manifest.json", "day.pcap")
 

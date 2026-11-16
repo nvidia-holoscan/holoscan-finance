@@ -10,10 +10,10 @@ import types
 
 import pytest
 
-from holoscan_finance.nyq.manifest import MANIFEST_FORMAT, FeedDirectory, validate_manifest
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
+from holoscan_finance.equity.manifest import MANIFEST_FORMAT, FeedDirectory, validate_manifest
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 
 
 def manifest(**changes):
@@ -24,7 +24,7 @@ def manifest(**changes):
         symbols=["LONG_RIC", "B.N"],
         generation=3,
         sender_port=50001,
-        date="2025-04-01",
+        date="2026-06-01",
         start_ns=MIDNIGHT + 34200 * 10**9,
         end_ns=MIDNIGHT + 57600 * 10**9,
         events=100,
@@ -44,7 +44,7 @@ def test_a_valid_manifest_becomes_a_feed_directory():
         ("LONG_RIC", "B.N"),
         2,
     )
-    assert (d.date, d.midnight_ns, d.events) == ("2025-04-01", MIDNIGHT, 100)
+    assert (d.date, d.midnight_ns, d.events) == ("2026-06-01", MIDNIGHT, 100)
     assert (d.start_ns, d.end_ns, d.profile) == (
         manifest()["start_ns"],
         manifest()["end_ns"],
@@ -70,8 +70,8 @@ def test_the_directory_owns_a_deep_copy():
 @pytest.mark.parametrize(
     "changes",
     [
-        dict(format="nyq-equity-replay-v0"),
-        dict(wire_protocol="itch-5.0-moldudp64-nyq-replay-v1"),
+        dict(format="equity-replay-v0"),
+        dict(wire_protocol="itch-5.0-moldudp64-equity-replay-v1"),
         dict(market_timezone="UTC"),
         dict(sender_port="50001"),
         dict(sender_port=True),
@@ -87,7 +87,7 @@ def test_the_directory_owns_a_deep_copy():
         dict(generation=0),
         dict(generation=1.0),
         dict(generation=False),
-        dict(date=20250401),
+        dict(date=20260601),
         dict(date="2025-13-01"),
         dict(start_ns=1.5),
         dict(end_ns=None),

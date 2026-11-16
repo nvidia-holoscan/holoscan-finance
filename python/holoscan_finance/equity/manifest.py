@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from .mapping import PROTOCOL, TIMEZONE, day_start_ns
 
-MANIFEST_FORMAT = "nyq-equity-replay-v1"
+MANIFEST_FORMAT = "equity-replay-v1"
 
 
 @dataclass(frozen=True)

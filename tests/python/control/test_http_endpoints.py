@@ -31,7 +31,7 @@ from holoscan_finance.control.gate import CrossCheckGate
 from holoscan_finance.control.results import ResultsStore
 from holoscan_finance.control.status import RunStatus
 from holoscan_finance.dashboard.model import DashboardModel
-from holoscan_finance.nyq.mapping import PROTOCOL, TIMEZONE, day_start_ns
+from holoscan_finance.equity.mapping import PROTOCOL, TIMEZONE, day_start_ns
 from holoscan_finance.ref import Knob
 from holoscan_finance.settings import BarSettings
 from holoscan_finance.telemetry.capture import CaptureTap, LatencyCapture
@@ -45,7 +45,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from holoscan_finance.dashboard.server import make_app  # noqa: E402
 
 REPO = Path(__file__).parents[3]
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 PLAN = {"lanes": [], "edges": [], "clocks": [], "automatic_partitions": [], "sdk": "5.0.0"}
 FINISH_COMPARE = {
     "start_ns", "end_ns", "finished_ns", "seconds", "generation", "valid", "observations",
@@ -60,13 +60,13 @@ FINISH_ADDED = {"ingest", "settings", "wire_protocol", "minimum_update_interval_
 
 def manifest(generation=1, port=50001):
     return dict(
-        format="nyq-equity-replay-v1",
+        format="equity-replay-v1",
         wire_protocol=PROTOCOL,
         market_timezone=TIMEZONE,
         symbols=["A", "B", "C"],
         generation=generation,
         sender_port=port,
-        date="2025-04-01",
+        date="2026-06-01",
         start_ns=MIDNIGHT + 34200 * 10**9,
         end_ns=MIDNIGHT + 57600 * 10**9,
         events=10,

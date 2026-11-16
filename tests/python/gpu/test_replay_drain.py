@@ -19,6 +19,8 @@ import numpy as np
 import pytest
 from fakes.fake_drain import receive_header
 
+from holoscan_finance.equity.mapping import day_start_ns
+from holoscan_finance.equity.synthetic import synthetic_stream
 from holoscan_finance.ingest.accounting import ReceiveAccounting
 from holoscan_finance.ingest.drains import (
     DRAIN_FIELDS,
@@ -29,13 +31,11 @@ from holoscan_finance.ingest.drains import (
 )
 from holoscan_finance.marketdata import gpu_sbe
 from holoscan_finance.marketdata.framing import PcapFrames, udp_frame, write_pcap
-from holoscan_finance.nyq.mapping import day_start_ns
-from holoscan_finance.nyq.synthetic import synthetic_stream
 from holoscan_finance.telemetry.stats import IngestStats
 
 pytestmark = pytest.mark.gpu
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 SRC_IP = "10.0.0.1"
 SRC_IP_INT = int.from_bytes(socket.inet_aton(SRC_IP), "big")
 

@@ -104,9 +104,9 @@ def tape_returns(path: str) -> tuple[np.ndarray, np.ndarray]:
     """``(returns, times)`` of every bar of a prepared tape's session, at the default bar
     settings: host ``QuoteBars`` over the tape in order, the bars to the session end
     closed. The first bar has no previous mark (NaN)."""
+    from ..equity.tape import open_tape
     from ..marketdata.bars import QuoteBars
     from ..marketdata.records import EVENT_DTYPE, ReplayBatch
-    from ..nyq.tape import open_tape
     from ..settings import BarSettings
 
     manifest, events = open_tape(path)

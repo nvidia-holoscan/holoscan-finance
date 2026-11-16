@@ -20,16 +20,16 @@ import numpy as np
 import pytest
 from fakes.fake_daqiri import make_fake_daqiri
 
+from holoscan_finance.equity.mapping import day_start_ns, decode_packet, pack_events
 from holoscan_finance.ingest import host_receivers
 from holoscan_finance.ingest.accounting import ReceiveAccounting, sbe_packet_header
 from holoscan_finance.ingest.affinity import process_mask
 from holoscan_finance.ingest.host_receivers import DaqiriHostReceiver, UdpReceiver
 from holoscan_finance.marketdata.framing import udp_frame
 from holoscan_finance.marketdata.records import CONDITION, EVENT_DTYPE, QUOTE, TRADE
-from holoscan_finance.nyq.mapping import day_start_ns, decode_packet, pack_events
 from holoscan_finance.telemetry.stats import IngestStats
 
-MIDNIGHT = day_start_ns("2025-04-01")
+MIDNIGHT = day_start_ns("2026-06-01")
 UNIVERSE = 2886
 SENDER = ("10.0.0.1", 55555)
 COUNTERS = ("packets", "received_messages", "dropped", "out_of_order_packets", "malformed_packets")

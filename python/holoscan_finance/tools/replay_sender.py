@@ -28,8 +28,7 @@ from urllib.request import Request, urlopen
 
 import numpy as np
 
-from ..marketdata.records import CONDITION, EVENT_DTYPE
-from ..nyq.mapping import (
+from ..equity.mapping import (
     MAX_PACKET_EVENTS,
     PROTOCOL,
     TIMEZONE,
@@ -37,7 +36,8 @@ from ..nyq.mapping import (
     pack_events,
     pack_units,
 )
-from ..nyq.tape import open_tape
+from ..equity.tape import open_tape
+from ..marketdata.records import CONDITION, EVENT_DTYPE
 
 _BLOCK_UNITS = 1024  # packets packed ahead per pack_units call (a few ms of work)
 
