@@ -269,5 +269,12 @@ def test_synth_cli_writes_a_data_set_and_reuses_it(tmp_path):
     (out / "day.pcap").write_bytes(b"")
     assert synth.main([*args, "--drop-every", "5", "--reuse"]) == 0
     assert (out / "day.pcap").stat().st_size == changed["files"]["day.pcap"]
+    # A data set made with another manifest format or wire protocol is not reused.
+    stale = {**changed, "formats": {**changed["formats"], "manifest": "nyq-equity-replay-v1"}}
+    (out / "synth.json").write_text(json.dumps(stale))
+    before = (out / "tape" / "events.bin").stat().st_mtime_ns
+    assert synth.main([*args, "--drop-every", "5", "--reuse"]) == 0
+    assert (out / "tape" / "events.bin").stat().st_mtime_ns != before
+    assert json.loads((out / "synth.json").read_text())["formats"] == synth._FORMATS
     bad = run_synth("--out", str(tmp_path / "bad"), "--symbols", "0")
     assert bad.returncode != 0 and "symbols" in bad.stderr

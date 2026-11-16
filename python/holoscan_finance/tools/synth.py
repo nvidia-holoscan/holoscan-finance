@@ -9,7 +9,8 @@
 ``DIR/tape/`` is in the ``open_tape`` format, ``DIR/day.pcap`` holds the replay
 sender's packetization (Ethernet II, IPv4, UDP to 26400) and ``DIR/synth.json`` the arguments, seed,
 counts and expected totals (``capture``: what a lossless receiver of the pcap counts).
-``--reuse`` keeps an existing directory made with identical arguments. The tape is generated
+``--reuse`` keeps an existing directory made with identical arguments by this version of the
+formats (an older tape or capture is regenerated, not reused). The tape is generated
 on the CPU; ``--encoder gpu`` packs and frames the capture on the GPU (CuPy), writing the
 same bytes as the NumPy packer. The outputs support tests and NIC-free validation.
 """
@@ -21,10 +22,12 @@ import json
 import logging
 from pathlib import Path
 
-from ..equity.mapping import MAX_PACKET_EVENTS
+from ..equity.manifest import MANIFEST_FORMAT
+from ..equity.mapping import MAX_PACKET_EVENTS, PROTOCOL
 from ..equity.synthetic import ENCODERS, synthetic_capture, synthetic_tape
 
 _FILES = ("tape/events.bin", "tape/manifest.json", "day.pcap")
+_FORMATS = {"manifest": MANIFEST_FORMAT, "wire_protocol": PROTOCOL}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -56,14 +59,17 @@ def _size(path: Path) -> int | None:
 
 
 def _reusable(out: Path, args: dict) -> bool:
-    """``out`` was completed by a run with ``args`` and its files are unchanged in size."""
+    """``out`` was completed by a run with ``args`` and the current formats, and its files are
+    unchanged in size."""
     try:
         previous = json.loads((out / "synth.json").read_text())
     except (OSError, ValueError):
         return False
     files = previous.get("files", {})
-    return previous.get("args") == args and all(
-        _size(out / name) == files.get(name) for name in _FILES
+    return (
+        previous.get("args") == args
+        and previous.get("formats") == _FORMATS
+        and all(_size(out / name) == files.get(name) for name in _FILES)
     )
 
 
@@ -105,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"synth: {exc}") from exc
     summary = {
         "args": args,
+        "formats": _FORMATS,
         "tape": {
             "date": tape["date"],
             "symbols": len(tape["symbols"]),
