@@ -1,0 +1,49 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "RollingRiskOp",
+    "description": "Rolling volatility, covariance and correlation of the newest bar window at a bounded rate (CUDA kernels or NumPy/SciPy BLAS, inline or in a spawned worker).",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "1.0.0",
+    "changelog": {
+      "1.0.0": "Holoscan SDK 5.0 operator with typed ports, Params and a temporal contract."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Risk Analytics",
+      "CUDA"
+    ],
+    "ranking": 2,
+    "requirements": {
+      "hardware": [
+        {
+          "name": "CUDA GPU",
+          "description": "Only for backend=\"gpu\"; backend=\"cpu\" runs on any host",
+          "required": false
+        }
+      ]
+    }
+  }
+}

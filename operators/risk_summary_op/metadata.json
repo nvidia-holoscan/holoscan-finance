@@ -1,0 +1,42 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "RiskSummaryOp",
+    "description": "Compact JSON risk summary (at most 512 B) for other processes over a holomq topic; dropped and counted, never blocking, when a reader stalls.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "1.0.0",
+    "changelog": {
+      "1.0.0": "Holoscan SDK 5.0 operator with typed ports, Params and a temporal contract."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Risk Analytics",
+      "holomq",
+      "Topics"
+    ],
+    "ranking": 2,
+    "requirements": {}
+  }
+}

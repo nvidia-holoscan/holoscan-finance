@@ -1,0 +1,84 @@
+{
+    "$schema": "urn:holoscan:module:v2",
+    "module": {
+        "name": "holoscan-finance",
+        "version": "1.0.0",
+        "support_level": "community",
+        "description": "Holoscan Module for Financial Services Industry: a self-contained Holoscan SDK 5 module for building streaming financial-services applications. Pure-Python operators for FIX SBE market-data ingest (kernel UDP, DAQIRI host memory, DAQIRI GPUDirect, NIC-free GPU replay), event-time quote bars and rolling GPU risk with a CPU cross-check, the libraries behind them, CPU-only tools, and the equity_analytics and market_data_bench example applications.",
+        "authors": [
+            {
+                "name": "Bruce Hashemian",
+                "affiliation": "NVIDIA"
+            },
+            {
+                "name": "Jake Goldberg",
+                "affiliation": "NVIDIA"
+            }
+        ],
+        "license": "Apache-2.0",
+        "language": [
+            "Python"
+        ],
+        "namespace": {
+            "python": "holoscan_finance"
+        },
+        "holoscan_sdk": {
+            "minimum_required_version": "5.0.0",
+            "tested_versions": [
+                "5.0.0"
+            ]
+        },
+        "platforms": [
+            "x86_64",
+            "aarch64"
+        ],
+        "tags": [
+            "Finance",
+            "Streaming",
+            "Market Data",
+            "Risk Analytics",
+            "GPUDirect",
+            "Python"
+        ],
+        "subprojects": {
+            "operators": [
+                "callback_sink_op",
+                "daqiri_packet_source_op",
+                "gpu_sbe_replay_source_op",
+                "gpu_sbe_source_op",
+                "sbe_decode_op",
+                "quote_bars_op",
+                "risk_cross_check_op",
+                "risk_summary_op",
+                "rolling_risk_op",
+                "udp_packet_source_op"
+            ],
+            "applications": [
+                "equity_analytics",
+                "market_data_bench"
+            ]
+        },
+        "operator_names": [
+            "CallbackSinkOp",
+            "DaqiriPacketSourceOp",
+            "GpuSbeReplaySourceOp",
+            "GpuSbeSourceOp",
+            "SbeDecodeOp",
+            "QuoteBarsOp",
+            "RiskCrossCheckOp",
+            "RiskSummaryOp",
+            "RollingRiskOp",
+            "UdpPacketSourceOp"
+        ],
+        "dockerfile": "Dockerfile",
+        "binary_packages": {
+            "wheel": "holoscan-finance"
+        },
+        "documentation": {
+            "readme": "README.md"
+        },
+        "testing": {
+            "python": "pytest"
+        }
+    }
+}

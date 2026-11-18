@@ -1,0 +1,63 @@
+{
+  "$schema": "urn:holoscan:operator:v1",
+  "operator": {
+    "name": "GpuSbeSourceOp",
+    "description": "FIX SBE market data over DAQIRI GPUDirect: frames land in GPU memory, a GIL-free native drain gathers the UDP payloads into a device ring, and the source decodes SBE on the GPU (one warp per packet, one lane per entry) into device-resident event batches.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": [
+      "Python"
+    ],
+    "version": "1.0.0",
+    "changelog": {
+      "1.0.0": "Holoscan SDK 5.0 operator with typed ports, Params and a temporal contract."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": [
+        "5.0.0"
+      ]
+    },
+    "platforms": [
+      "x86_64",
+      "aarch64"
+    ],
+    "tags": [
+      "Finance",
+      "Market Data",
+      "Networking",
+      "GPUDirect",
+      "DPDK",
+      "High Throughput",
+      "Source"
+    ],
+    "ranking": 2,
+    "requirements": {
+      "hardware": [
+        {
+          "name": "CUDA GPU",
+          "description": "GPUDirect RDMA target (dma-buf); the ring, gather and SBE decode run on it",
+          "required": true
+        },
+        {
+          "name": "NVIDIA ConnectX NIC",
+          "description": "Received through DAQIRI (Python bindings, DPDK engine) into GPU memory; needs hugepages",
+          "required": true
+        },
+        {
+          "name": "daqiri Python module",
+          "description": "The daqiri Python module with the DPDK engine (deploy/igx_thor builds it); its absence fails start() explicitly",
+          "required": true
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "urn:holoscan:application:v1",
+  "application": {
+    "name": "equity_analytics",
+    "description": "Example application of the holoscan-finance module: synthetic FIX SBE market-data feed -> event-time quote bars -> rolling GPU risk with a live CPU cross-check -> web dashboard.",
+    "authors": [
+      {
+        "name": "Bruce Hashemian",
+        "affiliation": "NVIDIA"
+      },
+      {
+        "name": "Jake Goldberg",
+        "affiliation": "NVIDIA"
+      }
+    ],
+    "language": ["Python"],
+    "version": "1.0.0",
+    "changelog": {
+      "1.0.0": "Holoscan SDK 5.0 example application composed from holoscan.finance operators."
+    },
+    "holoscan_sdk": {
+      "minimum_required_version": "5.0.0",
+      "tested_versions": ["5.0.0"]
+    },
+    "platforms": ["x86_64", "aarch64"],
+    "tags": ["Finance", "Market Data", "Risk Analytics", "GPU"],
+    "ranking": 2,
+    "requirements": {
+      "operators": [
+        "gpu_sbe_source_op",
+        "gpu_sbe_replay_source_op",
+        "udp_packet_source_op",
+        "daqiri_packet_source_op",
+        "sbe_decode_op",
+        "quote_bars_op",
+        "rolling_risk_op",
+        "risk_cross_check_op",
+        "callback_sink_op",
+        "risk_summary_op"
+      ]
+    },
+    "default_mode": "replay",
+    "modes": {
+      "replay": {
+        "description": "The full GPU chain on any GPU host, no NIC: a synthetic day replayed from GPU memory, looping, each pass a new generation; dashboard on port 8080",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth --symbols 1000 --packets 400000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth/day.pcap --tape <holohub_data_dir>/synth/tape --replay-pps 2000 --replay-loops 0 --analytics-backend compare\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "replay_pcap": {
+        "description": "A full synthetic day replayed from GPU memory at 200,000 packets/s",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-day --symbols 2886 --packets 1824000 --seconds 23400 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-day/day.pcap --tape <holohub_data_dir>/synth-day/tape --replay-pps 200000 --analytics-backend compare\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "udp": {
+        "description": "Kernel UDP ingest, GPU risk with a CPU cross-check; start python3 -m holoscan_finance.tools.replay_sender separately",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend compare",
+          "workdir": "holohub_bin"
+        }
+      },
+      "udp_cpu": {
+        "description": "Kernel UDP ingest with CPU analytics only (the CPU baseline)",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest udp --analytics-backend cpu",
+          "workdir": "holohub_bin"
+        }
+      },
+      "smoke": {
+        "description": "CI: a small synthetic day replayed unpaced, headless; fails if the run fails, no window is analyzed or a CPU/GPU comparison disagrees",
+        "run": {
+          "command": "bash -c \"python3 -m holoscan_finance.tools.synth --out <holohub_data_dir>/synth-smoke --symbols 200 --packets 20000 --seconds 900 --reuse && python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap <holohub_data_dir>/synth-smoke/day.pcap --tape <holohub_data_dir>/synth-smoke/tape --replay-pps 0 --port 0 --exit-when-drained --timeout-s 300 --analytics-backend compare --expect-windows 1 --report <holohub_bin>/equity_smoke.json\"",
+          "workdir": "holohub_bin"
+        }
+      },
+      "plan": {
+        "description": "Compile and check the plan rules only: print the lanes, edges and clocks, write plan.json; no GPU work, no I/O",
+        "run": {
+          "command": "python3 <holohub_app_source>/equity_analytics.py --ingest replay --pcap none --tape none --plan-only --plan-json <holohub_bin>/equity_analytics.plan.json",
+          "workdir": "holohub_bin"
+        }
+      }
+    }
+  }
+}

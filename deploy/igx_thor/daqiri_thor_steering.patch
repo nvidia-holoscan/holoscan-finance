@@ -1,0 +1,146 @@
+diff --git a/src/engines/dpdk/daqiri_dpdk_engine.cpp b/src/engines/dpdk/daqiri_dpdk_engine.cpp
+index e012c67..2fc4a3f 100644
+--- a/src/engines/dpdk/daqiri_dpdk_engine.cpp
++++ b/src/engines/dpdk/daqiri_dpdk_engine.cpp
+@@ -23,6 +23,7 @@
+ #include <chrono>
+ #include <iostream>
+ #include <cstdio>
++#include <cstdlib>
+ #include <limits>
+ #include <map>
+ #include <set>
+@@ -48,6 +49,10 @@ using namespace std::chrono;
+ 
+ namespace daqiri {
+ 
++// Defined with the flow-group constants below; declared here because the
++// static init path uses it first.
++static uint32_t standard_rx_flow_group();
++
+ namespace {
+ 
+ struct DpdkRxDestination {
+@@ -2252,10 +2257,24 @@ void DpdkEngine::initialize() {
+     return false;
+   };
+ 
++  // Escape hatch for hosts whose NIC firmware / OFED kernel modules lack mlx5
++  // HW steering support (port start fails with "Cannot create HWS action since
++  // HWS is not supported", e.g. IGX Thor + DOCA-OFED 25.10): force firmware
++  // steering with DAQIRI_DV_FLOW_EN=1. Same trade-off as the eCPRI switch
++  // below: async/template dynamic RX flows are unavailable under dv_flow_en=1.
++  int dv_flow_en_override = 0;
++  if (const char* env = std::getenv("DAQIRI_DV_FLOW_EN")) {
++    dv_flow_en_override = std::atoi(env);
++    if (dv_flow_en_override != 1 && dv_flow_en_override != 2) {
++      DAQIRI_LOG_WARN("Ignoring invalid DAQIRI_DV_FLOW_EN='{}' (must be 1 or 2)", env);
++      dv_flow_en_override = 0;
++    }
++  }
++
+   if (loopback_ != LoopbackType::LOOPBACK_TYPE_SW) {
+     for (const auto& name : ifs) {
+       strncpy(_argv[arg++], "-a", max_arg_size - 1);
+-      const int dv_flow_en = interface_has_ecpri(name) ? 1 : 2;
++      int dv_flow_en = interface_has_ecpri(name) ? 1 : 2;
+       if (dv_flow_en == 1) {
+         DAQIRI_LOG_WARN(
+             "Interface '{}' has eCPRI RX flows: switching mlx5 to firmware steering "
+@@ -2263,6 +2282,18 @@ void DpdkEngine::initialize() {
+             "this NIC; async/template dynamic RX flows are unavailable on this port.",
+             name);
+       }
++      if (dv_flow_en_override != 0 && dv_flow_en_override != dv_flow_en) {
++        if (dv_flow_en == 1 && dv_flow_en_override == 2) {
++          DAQIRI_LOG_WARN(
++              "DAQIRI_DV_FLOW_EN=2 ignored for interface '{}': eCPRI RX flows require "
++              "firmware steering (dv_flow_en=1)",
++              name);
++        } else {
++          DAQIRI_LOG_WARN("DAQIRI_DV_FLOW_EN={} overrides default mlx5 steering mode for '{}'",
++                          dv_flow_en_override, name);
++          dv_flow_en = dv_flow_en_override;
++        }
++      }
+       std::string devargs = name + ",txq_inline_max=0,dv_flow_en=" + std::to_string(dv_flow_en);
+       if (needs_send_sched) {
+         devargs += ",tx_pp=500";  // 500 ns scheduling granularity
+@@ -2790,7 +2821,10 @@ void DpdkEngine::initialize() {
+       }
+ 
+       if (intf.rx_.flow_isolation_) {
+-        if (has_standard_flows && !add_send_to_kernel_fallback(intf.port_id_, 3)) { return; }
++        if (has_standard_flows &&
++            !add_send_to_kernel_fallback(intf.port_id_, standard_rx_flow_group())) {
++          return;
++        }
+         if (has_flex_item_flows && !add_send_to_kernel_fallback(intf.port_id_, 1)) { return; }
+         if (has_ecpri_flows && !add_send_to_kernel_fallback(intf.port_id_, 2)) {
+           return;
+@@ -2971,9 +3005,27 @@ static constexpr uint32_t kStandardRxFlowGroup = 3;
+ static constexpr uint32_t kRxFlowPriority = 1;
+ static constexpr size_t kMaxIpv4UdpFlowTemplateFieldsForSingleTable = 7;
+ 
++// Escape hatch for hosts whose mlx5 firmware steering cannot create jump
++// actions / non-zero flow groups ("cannot create jump action (Operation not
++// permitted)" at init, seen on IGX Thor + DOCA-OFED 25.10 under dv_flow_en=1):
++// DAQIRI_RX_FLOW_GROUP=0 programs standard IPv4/UDP RX flows directly in
++// group 0 like testpmd does. Group 0 needs neither the ETH jump rule nor the
++// send-to-kernel fallback (flow isolation already delivers unmatched traffic
++// to the kernel), so both become no-ops for it.
++static uint32_t standard_rx_flow_group() {
++  static const uint32_t group = []() -> uint32_t {
++    if (const char* env = std::getenv("DAQIRI_RX_FLOW_GROUP")) {
++      const int value = std::atoi(env);
++      if (value >= 0) { return static_cast<uint32_t>(value); }
++    }
++    return kStandardRxFlowGroup;
++  }();
++  return group;
++}
++
+ static uint32_t dynamic_rx_flow_group(const FlowRuleConfig& flow) {
+   return flow.match_.type_ == FlowMatchType::FLEX_ITEM ? kFlexItemRxFlowGroup
+-                                                       : kStandardRxFlowGroup;
++                                                       : standard_rx_flow_group();
+ }
+ 
+ enum class Ipv4UdpFlowTemplateField {
+@@ -4269,6 +4321,7 @@ static uint64_t eth_jump_key(int port, uint32_t group) {
+ }
+ 
+ bool DpdkEngine::ensure_eth_jump_rule(int port, uint32_t group) {
++  if (group == 0) { return true; }  // rules already live in group 0; nothing to jump to
+   const uint64_t key = eth_jump_key(port, group);
+   if (eth_jump_installed_.count(key) != 0) { return true; }
+ 
+@@ -4924,7 +4977,7 @@ struct rte_flow* DpdkEngine::add_flow(int port,
+   struct rte_flow_item_ipv4 ip_spec {};
+   struct rte_flow_item_ipv4 ip_mask {};
+ 
+-  if (!ensure_eth_jump_rule(port, kStandardRxFlowGroup)) { return nullptr; }
++  if (!ensure_eth_jump_rule(port, standard_rx_flow_group())) { return nullptr; }
+ 
+   auto resource = std::make_shared<DpdkFlowResource>();
+   resource->port = port;
+@@ -4982,7 +5035,7 @@ struct rte_flow* DpdkEngine::add_flow(int port,
+ 
+   attr.ingress = 1;
+   attr.priority = has_outer_transform ? 0 : 1;
+-  attr.group = kStandardRxFlowGroup;
++  attr.group = standard_rx_flow_group();
+ 
+   int res = rte_flow_validate(port, &attr, pattern, action, &error);
+   if (res != 0) {
+@@ -5169,6 +5222,10 @@ struct rte_flow* DpdkEngine::add_ecpri_flow(int port, const FlowConfig& cfg, boo
+ }
+ 
+ bool DpdkEngine::add_send_to_kernel_fallback(int port, uint32_t group) {
++  // In group 0 flow isolation already delivers unmatched traffic to the
++  // kernel; an explicit fallback rule is unnecessary (and jump-free hosts
++  // forced to group 0 via DAQIRI_RX_FLOW_GROUP may not support creating it).
++  if (group == 0) { return true; }
+   const uint64_t key = eth_jump_key(port, group);
+   if (send_to_kernel_fallback_installed_.count(key) != 0) { return true; }
+ 

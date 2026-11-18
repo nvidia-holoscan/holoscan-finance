@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.venv/
+dist/
+*.egg-info/
+
+# Local agent workspaces
+.claude/
+.nv/
+
+# Container caches (pip --user, CuPy kernels) and run outputs
+.cache/
+.local/
+.cupy/
+out/
+
+# CMake build trees: holoscan build/run (build/<project>) and holoscan test (build-<project>)
+build*/
+
+# Generated data and captures stay off Git.
+data/
+*.parquet
+*.pcap
+*.pcapng
+events.bin
+*.log

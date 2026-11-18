@@ -1,0 +1,4 @@
+# holoscan-cli 5.0.0 for host environments, CI and the dev image (the SDK image does not ship it).
+# The [create] extra adds jsonschema/cookiecutter, which metadata validation needs.
+#   python3 -m pip install -r requirements-cli.txt
+holoscan-cli[create]==5.0.0

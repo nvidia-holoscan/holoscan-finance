@@ -1,0 +1,19 @@
+# Test, benchmark and tooling dependencies on top of the Holoscan SDK 5.0 image, which already
+# ships NumPy, CuPy, pytest and cuda-python. The SDK itself is never a pip dependency (Holoscan
+# SDK 5.0 is not published on PyPI), and neither is pybind11: the native drain must share
+# DAQIRI's pybind11 2.x ABI.
+# Pinned exactly (the versions validated in the receiver image); CI uses this file as constraints.
+scipy==1.18.1
+threadpoolctl==3.7.0
+fastapi==0.156.4
+uvicorn==0.54.0
+anyio==4.15.1
+httpx==0.28.1
+pytest-timeout==2.4.0
+ruff==0.15.17
+pre-commit==4.7.0
+# The image's numba 0.64 refuses NumPy 2.5; 0.68 works with it (benchmark decoder only).
+numba==0.68.0
+# SPDX license strings in pyproject.toml need setuptools >= 77 (the image has 68).
+setuptools==84.2.1
+build==1.6.1
