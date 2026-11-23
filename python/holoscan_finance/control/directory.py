@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 # Ports a replay generation may take (no privileged ports).
 _PORT_LO, _PORT_HI = 1024, 65535
+# Every sender names a generation by the wall clock in nanoseconds (``time.time_ns()``). One
+# further ahead than this is refused: it would turn every later manifest into a no-op ("not
+# newer") until restart.
+MAX_GENERATION_AHEAD_NS = 24 * 3600 * 10**9
 
 
 class ReplayDirectory:
@@ -58,8 +62,11 @@ class ReplayDirectory:
 
     def set_manifest(self, payload: dict) -> dict:
         """Accept a newer generation. An older or equal one is a no-op that returns the
-        current generation; a sender port seen before raises ValueError."""
+        current generation; a sender port seen before, or a generation more than
+        ``MAX_GENERATION_AHEAD_NS`` ahead of the clock, raises ValueError."""
         d = validate_manifest(payload)
+        if d.generation > time.time_ns() + MAX_GENERATION_AHEAD_NS:
+            raise ValueError("generation too far ahead of the clock")
         with self.lock:
             current = self.knob.get()
             if current is not None and d.generation <= current.generation:

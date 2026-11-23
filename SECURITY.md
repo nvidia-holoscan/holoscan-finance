@@ -117,16 +117,19 @@ Key boundaries and interfaces:
     per session.
 - **Unauthenticated control plane.** The dashboard checks the shape and range of what it acts on:
   - manifests: 1-10,000 unique symbols of at most 128 characters, a sender port in 1-65535 not
-    used before, and a positive integer generation newer than the current one (with no upper
-    bound);
+    used before, and a positive integer generation newer than the current one and at most 24
+    hours ahead of the wall clock (every sender names generations with `time.time_ns()`);
   - feed control: a speed of 0-100, a rate of 1-200,000 and a seek below 86,400 seconds;
   - captures: 1-600 seconds;
   - full-day replays: a rate of 1-250,000 packets/s, checked before the paced sender is paused;
   - `/feedstatus`: only the sender's numeric report fields for the current generation are kept
     and shown in `/snapshot`.
 
-  Request bodies are not size-limited, there is no rate limiting, and callers are not
-  authenticated or authorized. There is no Host-header allowlist.
+  Request bodies are limited to 64 KiB (2 MiB for `/manifest`, whose largest valid body is about
+  1.3 MB); a larger one, declared or streamed in chunks, is answered with 413 before it is
+  parsed. There is no rate limiting, and callers are not authenticated or authorized. There is no
+  Host-header allowlist. Deployments that expose the port beyond a trusted segment must add
+  authentication in front of it (a reverse proxy or a network policy).
 - **Files.** Prepared tapes (`manifest.json` and `events.bin`) are checked for format, record
   size and file size and are then memory-mapped. Packet captures are read whole into host memory,
   and the replay source uploads them whole into GPU memory. `holoscan_finance.tools.synth`
@@ -188,8 +191,9 @@ auxiliary build, deployment and tooling paths:
 
 3. **Unauthenticated control of a running pipeline.** Anyone who can reach the dashboard port can:
    - announce a manifest, which starts a new generation and resets the bars. A wrong sender port
-     makes every later packet stale, a very large generation number blocks every later manifest
-     until restart, and repeated manifests can use up the sender ports that replay loops need;
+     makes every later packet stale, a generation up to 24 hours ahead of the clock makes every
+     later manifest from a sender that names generations by the clock a no-op until then (a
+     larger one is refused), and repeated manifests can use up the sender ports that replay loops need;
    - change the feed controls that the external sender follows;
    - start or finish latency captures;
    - trigger a full-day `tcpreplay` burst through the privileged replay controller.

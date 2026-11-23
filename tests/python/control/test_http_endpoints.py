@@ -42,7 +42,11 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from holoscan_finance.dashboard.server import make_app  # noqa: E402
+from holoscan_finance.dashboard.server import (  # noqa: E402
+    MAX_BODY_BYTES,
+    MAX_MANIFEST_BODY_BYTES,
+    make_app,
+)
 
 REPO = Path(__file__).parents[3]
 MIDNIGHT = day_start_ns("2026-06-01")
@@ -242,6 +246,70 @@ def test_manifest_idempotence_and_422s():
     assert r.status_code == 422 and r.json()["detail"] == "invalid replay directory or generation"
     assert client.post("/manifest", json=[1, 2]).status_code == 422  # not an object
     assert client.get("/snapshot").json()["generation"] == 5
+
+
+def test_a_manifest_generation_far_ahead_of_the_clock_is_a_422_that_blocks_nothing():
+    client = client_for(make_ctx())
+    r = client.post("/manifest", json=manifest(2**62))
+    assert r.status_code == 422 and "too far ahead" in r.json()["detail"]
+    assert client.post("/manifest", json=manifest(time.time_ns())).status_code == 200
+
+
+def test_the_largest_valid_manifest_fits_the_body_limit():
+    # 10,000 unique symbols of 128 characters is what validate_manifest accepts at most.
+    symbols = [f"{i:05d}".ljust(128, "X") for i in range(10_000)]
+    body = json.dumps({**manifest(5), "symbols": symbols})
+    assert MAX_MANIFEST_BODY_BYTES // 2 < len(body) < MAX_MANIFEST_BODY_BYTES
+    r = client_for(make_ctx()).post(
+        "/manifest", content=body, headers={"content-type": "application/json"}
+    )
+    assert (r.status_code, r.json()) == (200, {"generation": 5})
+
+
+def test_an_oversized_body_is_refused_before_it_is_parsed():
+    ctx = make_ctx()
+    client = client_for(ctx)
+    for path, limit in (
+        ("/manifest", MAX_MANIFEST_BODY_BYTES),
+        ("/feedrate", MAX_BODY_BYTES),
+        ("/feedstatus", MAX_BODY_BYTES),
+        ("/capture", MAX_BODY_BYTES),
+        ("/replay/fullday", MAX_BODY_BYTES),
+    ):
+        body = json.dumps({"pad": "x" * limit})  # always a few bytes over the limit
+        r = client.post(path, content=body, headers={"content-type": "application/json"})
+        assert (r.status_code, r.json()) == (413, {"detail": "request body too large"}), path
+    assert ctx.directory.generation == 0  # nothing reached a handler
+    assert client.get("/feedrate").json()["seek_seq"] == 1
+
+
+def test_a_body_at_the_limit_still_reaches_the_handler():
+    client = client_for(make_ctx())
+    pad = "x" * (MAX_BODY_BYTES - len(json.dumps({"pad": ""})))
+    body = json.dumps({"pad": pad})
+    assert len(body) == MAX_BODY_BYTES
+    r = client.post("/feedrate", content=body, headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()["detail"]) == (422, "unsupported replay control")
+
+
+def test_a_body_without_content_length_is_limited_as_it_streams():
+    # Chunked uploads declare no length: the limit counts the bytes as they arrive.
+    ctx = make_ctx()
+    client = client_for(ctx)
+
+    def chunks():
+        for _ in range(MAX_MANIFEST_BODY_BYTES // 4096 + 2):
+            yield b" " * 4096  # JSON whitespace: never completes a document
+
+    r = client.post("/manifest", content=chunks(), headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()) == (413, {"detail": "request body too large"})
+    assert ctx.directory.generation == 0
+
+
+def test_get_requests_and_small_bodies_are_unaffected_by_the_limit():
+    client = client_for(make_ctx())
+    assert client.get("/healthz").status_code in (200, 503)
+    assert client.post("/manifest", json=manifest(2)).json() == {"generation": 2}
 
 
 def test_feedrate_rules():

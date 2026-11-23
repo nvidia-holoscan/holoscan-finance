@@ -3,7 +3,8 @@
 """HTTP for the dashboard and the replay tools, and the uvicorn run loop.
 
 ``make_app`` serves the dashboard endpoints, bodies and 422 mapping (``ValueError``,
-``TypeError``, ``KeyError``, ``OverflowError``), including ``GET /plan`` and
+``TypeError``, ``KeyError``, ``OverflowError``) and request body limits (413 over 64 KiB, or
+2 MiB for ``/manifest``), including ``GET /plan`` and
 ``GET /healthz`` (200 once the ingest front end receives, else 503: a sender waits for
 it). Handlers are ``async def`` (no thread-pool hop per request: measured
 sub-ms tails under load); only the blocking full-day start and the GIL fault injection go
@@ -41,6 +42,65 @@ logger = logging.getLogger(__name__)
 INDEX_HTML = Path(__file__).parent / "webui" / "index.html"
 # Shutdown warns if the graph has not stopped after this long, then keeps waiting.
 STOP_WARNING_S = 10.0
+# Request body limits (bytes). Every control body is a small JSON object; only a manifest
+# carries a list: at most 10,000 symbols of 128 characters is about 1.3 MB of JSON.
+MAX_BODY_BYTES = 64 * 1024
+MAX_MANIFEST_BODY_BYTES = 2 * 1024 * 1024
+
+
+class _BodyLimit:
+    """ASGI middleware: answer 413 to a request body over its limit, before any handler
+    or JSON parser sees it. A declared ``Content-Length`` is refused up front; a chunked
+    body (no declared length) is counted as it arrives and cut off at the limit."""
+
+    def __init__(self, app: Any, *, default: int, per_path: dict[str, int]) -> None:
+        self.app = app
+        self.default = default
+        self.per_path = per_path
+
+    @staticmethod
+    async def _too_large(send: Any) -> None:
+        body = b'{"detail":"request body too large"}'
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+            (b"connection", b"close"),
+        ]
+        await send({"type": "http.response.start", "status": 413, "headers": headers})
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = self.per_path.get(scope["path"], self.default)
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                if value.isdigit() and int(value) > limit:
+                    await self._too_large(send)
+                    return
+                break
+        received = 0
+        refused = False
+
+        async def bounded_receive() -> Any:
+            nonlocal received, refused
+            message = await receive()
+            if message["type"] == "http.request" and not refused:
+                received += len(message.get("body", b""))
+                if received > limit:
+                    refused = True
+                    await self._too_large(send)
+                    # The handler sees a client that went away; whatever it then sends is
+                    # dropped, the 413 is already the response.
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message: Any) -> None:
+            if not refused:
+                await send(message)
+
+        await self.app(scope, bounded_receive, guarded_send)
 
 
 def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:
@@ -54,6 +114,9 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
     """The dashboard's FastAPI app over ``model`` and the control objects of ``ctx``.
     ``lifespan`` (used by ``serve``) owns the graph session."""
     app = FastAPI(title="Equity price, volatility and correlation", lifespan=lifespan)
+    app.add_middleware(
+        _BodyLimit, default=MAX_BODY_BYTES, per_path={"/manifest": MAX_MANIFEST_BODY_BYTES}
+    )
     # Handlers carry no return annotation: one would make FastAPI validate every snapshot
     # against a response model instead of plain JSON encoding.
 
