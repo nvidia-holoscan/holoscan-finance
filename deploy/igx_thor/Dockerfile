@@ -16,15 +16,25 @@ ARG HOLOSCAN_IMAGE=nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13
 # DOCA apt repo for rdma-core: 3.3.0 gives 2601.0.7, the userspace validated on Thor;
 # 3.2.1 gives 2510.0.11 (Thor's DOCA-OFED 25.10). The base image ships 59.1.
 ARG DOCA_VERSION=3.3.0
+# Fingerprint of the key that signs the DOCA apt repository (Mellanox Signing Key v3, the same
+# file for x86_64 and arm64-sbsa). The build fails if the downloaded key does not carry it.
+ARG DOCA_GPG_FINGERPRINT=CAE649B3B3929F8470D4D33BA024F6F0E6D6A281
 
 # ---------------------------------------------------------------------------------------------
 FROM ${HOLOSCAN_IMAGE} AS doca-repo
 SHELL ["/bin/bash", "-eou", "pipefail", "-c"]
 ARG DOCA_VERSION
+ARG DOCA_GPG_FINGERPRINT
 RUN DISTRO=$(. /etc/os-release && echo "${ID}${VERSION_ID}") \
     && ARCH=$([ "$(uname -m)" = aarch64 ] && echo arm64-sbsa || echo x86_64) \
     && URL="https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/${DISTRO}/${ARCH}" \
-    && curl -fsSL "${URL}/GPG-KEY-Mellanox.pub" | gpg --batch --dearmor > /usr/share/keyrings/mellanox-archive-keyring.gpg \
+    && curl -fsSLo /tmp/mellanox.pub "${URL}/GPG-KEY-Mellanox.pub" \
+    && { gpg --batch --show-keys --with-colons /tmp/mellanox.pub \
+         | awk -F: '$1 == "pub" {want = 1} $1 == "fpr" && want {print $10; want = 0}' \
+         | grep -x "${DOCA_GPG_FINGERPRINT}" > /dev/null \
+         || { echo "DOCA signing key does not carry fingerprint ${DOCA_GPG_FINGERPRINT}" >&2; exit 1; }; } \
+    && gpg --batch --dearmor < /tmp/mellanox.pub > /usr/share/keyrings/mellanox-archive-keyring.gpg \
+    && rm /tmp/mellanox.pub \
     && echo "deb [signed-by=/usr/share/keyrings/mellanox-archive-keyring.gpg] ${URL} ./" > /etc/apt/sources.list.d/mellanox.list
 
 # ---------------------------------------------------------------------------------------------
@@ -35,6 +45,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG DAQIRI_REPO=https://github.com/NVIDIA/daqiri.git
 ARG DAQIRI_REF=7c21e331179bb679d1ef3a6efb72b24e9f75143d
 ARG DPDK_VERSION=25.11
+# SHA-256 of dpdk-${DPDK_VERSION}.tar.xz. Changing DPDK_VERSION means passing the new
+# tarball's hash as well (DPDK publishes none next to it: compute it from a download you trust).
+ARG DPDK_SHA256=52e90d2a531ef3ded0283bd91abc94980698f1f6471fa09658a0217cf6609526
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git libibverbs-dev librdmacm-dev ibverbs-providers libnuma-dev \
         meson ninja-build pkgconf python3-pyelftools pybind11-dev \
@@ -43,7 +56,9 @@ RUN git clone "${DAQIRI_REPO}" /src/daqiri && git -C /src/daqiri checkout --deta
 COPY deploy/igx_thor/daqiri_thor_steering.patch /tmp/
 RUN git -C /src/daqiri apply /tmp/daqiri_thor_steering.patch
 # Upstream DPDK with DAQIRI's dma-buf/NVIDIA patches and the options of DAQIRI's own Dockerfile.
-RUN curl -fsSL "https://fast.dpdk.org/rel/dpdk-${DPDK_VERSION}.tar.xz" | tar xJ -C /tmp \
+RUN curl -fsSLo /tmp/dpdk.tar.xz "https://fast.dpdk.org/rel/dpdk-${DPDK_VERSION}.tar.xz" \
+    && echo "${DPDK_SHA256}  /tmp/dpdk.tar.xz" | sha256sum --check --strict - \
+    && tar xJf /tmp/dpdk.tar.xz -C /tmp && rm /tmp/dpdk.tar.xz \
     && cd "/tmp/dpdk-${DPDK_VERSION}" \
     && for p in /src/daqiri/dpdk_patches/*.patch; do \
          if [[ "$(basename "$p")" == dmabuf.patch ]]; then \

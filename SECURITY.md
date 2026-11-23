@@ -246,9 +246,14 @@ auxiliary build, deployment and tooling paths:
 7. **Supply-chain compromise of the images and tooling.**
    - `deploy/igx_thor/Dockerfile` builds DAQIRI from GitHub at a pinned commit (`DAQIRI_REPO` and
      `DAQIRI_REF` are overridable build arguments) and DPDK from the release tarball on
-     fast.dpdk.org, authenticated by TLS only, with no checksum. It installs rdma-core from the
-     DOCA apt repository, whose signing key is fetched over HTTPS without a fingerprint check;
-     apt packages are not version-pinned.
+     fast.dpdk.org, which the build checks against a pinned SHA-256 (`DPDK_SHA256`; a different
+     `DPDK_VERSION` needs its own hash). DPDK publishes no checksum next to the tarball, so the
+     pinned value was computed from a download over TLS and protects against a later
+     substitution, not against a tarball that was already malicious when it was pinned. It
+     installs rdma-core from the DOCA apt repository: the build fails unless the downloaded
+     signing key carries the pinned fingerprint (`DOCA_GPG_FINGERPRINT`, the Mellanox Signing Key
+     v3). apt packages are not version-pinned: the DOCA repository is pinned by version, the
+     Ubuntu packages (compilers, meson, libraries) come from the base image's current archive.
    - Both Dockerfiles, `scripts/dev5.sh`, `scripts/dev5cpu.sh`, the CI `unit-sdk` job and
      `[tool.holoscan.base-images]` name the Holoscan SDK image by tag (`v5.0.0-cuda13`), and a tag
      can be re-pointed. For reproducible builds pass a digest through
@@ -377,5 +382,6 @@ in `requirements-cli.txt` (`holoscan-cli`) and `requirements-dev.txt`; their tra
 dependencies are not pinned. The CI `unit-pure` job also installs NumPy and pytest unpinned, and
 isolated wheel builds resolve their build backend (`setuptools>=77`) from PyPI. GitHub Actions
 are referenced by major-version tag and pre-commit hooks by release tag, both mutable references
-rather than commit SHAs. The receiver image pins DAQIRI by commit, DPDK by release and the DOCA
-repository by version (see threat 7 for what is not verified).
+rather than commit SHAs. The receiver image pins DAQIRI by commit, DPDK by release and checksum,
+and the DOCA repository by version and signing-key fingerprint (see threat 7 for what is not
+verified).
