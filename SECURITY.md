@@ -254,9 +254,11 @@ auxiliary build, deployment and tooling paths:
      signing key carries the pinned fingerprint (`DOCA_GPG_FINGERPRINT`, the Mellanox Signing Key
      v3). apt packages are not version-pinned: the DOCA repository is pinned by version, the
      Ubuntu packages (compilers, meson, libraries) come from the base image's current archive.
-   - Both Dockerfiles, `scripts/dev5.sh`, `scripts/dev5cpu.sh`, the CI `unit-sdk` job and
-     `[tool.holoscan.base-images]` name the Holoscan SDK image by tag (`v5.0.0-cuda13`), and a tag
-     can be re-pointed. For reproducible builds pass a digest through
+   - The CI workflow names the Holoscan SDK image by digest (`HOLOSCAN_IMAGE` in
+     `.github/workflows/ci.yml`, which the `unit-sdk` job runs on pull requests). Both
+     Dockerfiles, `scripts/dev5.sh`, `scripts/dev5cpu.sh`, the CI `gpu` job (it builds the root
+     Dockerfile) and `[tool.holoscan.base-images]` still name it by tag (`v5.0.0-cuda13`), and a
+     tag can be re-pointed. For reproducible builds pass a digest through
      `--build-arg BASE_IMAGE=...@sha256:...` (dev image) or
      `--build-arg HOLOSCAN_IMAGE=...@sha256:...` (receiver image).
    - `scripts/dev5.sh` and `dev5cpu.sh` install the pinned test tooling into the

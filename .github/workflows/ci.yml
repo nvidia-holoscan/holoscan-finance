@@ -21,7 +21,10 @@ permissions:
   contents: read
 
 env:
-  HOLOSCAN_IMAGE: nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13
+  # Pinned by digest (the multi-architecture index of the v5.0.0-cuda13 tag): a re-tagged image
+  # cannot change what the pull_request jobs execute. The tag stays for readability; docker
+  # resolves the digest. To move to a new image, look up its index digest and replace both.
+  HOLOSCAN_IMAGE: nvcr.io/nvidia/clara-holoscan/holoscan:v5.0.0-cuda13@sha256:faa23a3a2479697fd64babcb27d28cf97f21d5da54d65c92225f8a9b0d99264a
 
 jobs:
   lint:

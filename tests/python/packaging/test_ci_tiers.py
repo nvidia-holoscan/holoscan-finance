@@ -72,3 +72,18 @@ def test_gpu_job_pytest_step_adds_only_what_ctest_leaves_out():
         assert not (in_ctest and in_step), f"{sorted(markers)}: CTest {in_ctest} and pytest"
         runs = bool(in_ctest) or in_step
         assert runs == ("timing" not in markers), f"{sorted(markers)}: runs={runs}"
+
+
+def test_ci_runs_the_holoscan_image_by_digest_and_only_through_the_variable():
+    # unit-sdk runs pull_request code inside this image: a re-pointed tag must not change what
+    # executes. The digest is set once; the jobs take the image from the variable.
+    ci = (REPO / ".github/workflows/ci.yml").read_text()
+    pinned = re.findall(
+        r"^  HOLOSCAN_IMAGE: nvcr\.io/nvidia/clara-holoscan/holoscan:\S+@sha256:[0-9a-f]{64}$",
+        ci,
+        re.M,
+    )
+    assert len(pinned) == 1
+    mentions = [ln for ln in ci.splitlines() if "nvcr.io/nvidia/clara-holoscan" in ln]
+    assert mentions == pinned
+    assert '"$HOLOSCAN_IMAGE"' in ci  # unit-sdk
