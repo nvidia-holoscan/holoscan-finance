@@ -30,9 +30,11 @@ RUN DISTRO=$(. /etc/os-release && echo "${ID}${VERSION_ID}") \
     && URL="https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/${DISTRO}/${ARCH}" \
     && curl -fsSLo /tmp/mellanox.pub "${URL}/GPG-KEY-Mellanox.pub" \
     && gpg --batch --show-keys --with-colons /tmp/mellanox.pub > /tmp/mellanox.colons \
+    && { echo "${DOCA_GPG_FINGERPRINT}" | grep -Eq '^[0-9A-F]{40}$' \
+         || { echo "DOCA_GPG_FINGERPRINT must be a 40-character hex fingerprint" >&2; exit 1; }; } \
     && { [ "$(awk -F: '$1 == "pub"' /tmp/mellanox.colons | wc -l)" = 1 ] \
          && awk -F: '$1 == "pub" {want = 1} $1 == "fpr" && want {print $10; want = 0}' /tmp/mellanox.colons \
-            | grep -x "${DOCA_GPG_FINGERPRINT}" > /dev/null; } \
+            | grep -Fx -- "${DOCA_GPG_FINGERPRINT}" > /dev/null; } \
          || { echo "DOCA signing key file must hold exactly one primary key, ${DOCA_GPG_FINGERPRINT}" >&2; exit 1; } \
     && rm /tmp/mellanox.colons \
     && gpg --batch --dearmor < /tmp/mellanox.pub > /usr/share/keyrings/mellanox-archive-keyring.gpg \

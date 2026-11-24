@@ -483,4 +483,7 @@ def test_receiver_dockerfile_verifies_what_it_downloads():
     # Exactly one primary key may be in the file: a bundle with an extra key is refused, because
     # --dearmor would keep every key and apt trusts the whole keyring.
     assert text.index("--show-keys") < text.index('wc -l)" = 1') < text.index("--dearmor")
+    # The pin is a literal 40-character fingerprint, compared as a fixed string over a whole
+    # line: a pattern such as ".*" must not pass.
+    assert "grep -Fx --" in text and "^[0-9A-F]{40}$" in text
     assert not re.search(r"curl[^\n]*\|\s*(tar|gpg)\b", text)

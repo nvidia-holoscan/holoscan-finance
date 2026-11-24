@@ -827,3 +827,26 @@ def test_serve_startup_failures_exit_run_failed(case, tmp_path):
     assert (r["rc"], r["stop_reason"], r["report"]) == (1, None, None)
     assert r["run_async_calls"] == (0 if case == "port_busy" else 1)
     assert r["status"]["graph_status"] == "starting" and r["sigterm_restored"]
+
+
+def test_many_tiny_chunks_reach_the_app_as_one_bounded_body():
+    # 4,000 one-byte messages stay far below the limit, and the app gets them joined in one
+    # http.request message, so the middleware keeps no per-message state.
+    seen = []
+
+    async def app(scope, receive, send):
+        messages = []
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                break
+        seen.append(messages)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    chunks = [b"x"] * 4000
+    sent = asyncio.run(_drive(_BodyLimit(app, default=8192, per_path={}), chunks))
+    assert sent[0]["status"] == 200
+    assert [m["body"] for m in seen[0]] == [b"x" * 4000]
+    assert seen[0][0]["more_body"] is False

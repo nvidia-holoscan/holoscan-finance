@@ -127,9 +127,10 @@ Key boundaries and interfaces:
 
   Request bodies are limited to 64 KiB (16 MiB for `/manifest`). A larger body, declared or
   streamed in chunks, is answered with 413 before any route runs, and a body not complete within
-  30 s with 408; each request buffers at most its limit. The limit counts bytes. The validator does
-  not bound a manifest's `profile` list or reject extra fields, so a manifest with a very large
-  profile is refused with 413 even when its symbols are valid. There is no rate limiting, and
+  30 s with 408. While its body is joined, a request holds at most about twice its limit. The
+  limit counts bytes. The validator does not bound a manifest's `profile` list or reject extra
+  fields, so a manifest with a very large profile is refused with 413 even when its symbols are
+  valid. There is no rate limiting, and
   callers are not authenticated or authorized. There is no Host-header allowlist.
   Deployments that expose the port beyond a trusted segment must add authentication in front of
   it (a reverse proxy or a network policy).

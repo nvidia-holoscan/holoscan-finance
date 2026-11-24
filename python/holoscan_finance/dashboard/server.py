@@ -59,8 +59,8 @@ class _BodyLimit:
     whose body is not complete within ``BODY_READ_TIMEOUT_S``, both before any route runs.
     The whole body is read up to the limit first, whether or not the route reads it, so a
     chunked body over the limit never reaches a handler. A declared Content-Length over the
-    limit is refused without reading. A body within the limit is replayed to the app unchanged.
-    Memory per request is bounded by the limit."""
+    limit is refused without reading. A body within the limit reaches the app as one message.
+    While it is joined, a request holds at most about twice its limit."""
 
     def __init__(self, app: Any, *, default: int, per_path: dict[str, int]) -> None:
         self.app = app
@@ -80,19 +80,19 @@ class _BodyLimit:
 
     @staticmethod
     async def _read(receive: Any, limit: int) -> list[Any] | None:
-        """Every message of the body, or None when the body is over ``limit``."""
-        messages: list[Any] = []
-        total = 0
+        """The body as one message, or None when it is over ``limit``. Chunks are joined as
+        they arrive, so memory follows the bytes, not the number of ASGI messages. A client
+        that leaves mid-body yields its disconnect message alone."""
+        body = bytearray()
         while True:
             message = await receive()
-            messages.append(message)
             if message["type"] != "http.request":
-                return messages  # http.disconnect: replayed, so the app sees the client leave
-            total += len(message.get("body", b""))
-            if total > limit:
+                return [message]  # http.disconnect: the app sees the client leave
+            body += message.get("body", b"")
+            if len(body) > limit:
                 return None
             if not message.get("more_body", False):
-                return messages
+                return [{"type": "http.request", "body": bytes(body), "more_body": False}]
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
