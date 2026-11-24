@@ -3,7 +3,8 @@
 """HTTP for the dashboard and the replay tools, and the uvicorn run loop.
 
 ``make_app`` serves the dashboard endpoints, bodies and 422 mapping (``ValueError``,
-``TypeError``, ``KeyError``, ``OverflowError``), including ``GET /plan`` and
+``TypeError``, ``KeyError``, ``OverflowError``) and request body limits (413 over 64 KiB, or
+16 MiB for ``/manifest``), including ``GET /plan`` and
 ``GET /healthz`` (200 once the ingest front end receives, else 503: a sender waits for
 it). Handlers are ``async def`` (no thread-pool hop per request: measured
 sub-ms tails under load); only the blocking full-day start and the GIL fault injection go
@@ -19,8 +20,10 @@ inside ``serve``.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import ctypes
+import json
 import logging
 import os
 import signal
@@ -41,6 +44,87 @@ logger = logging.getLogger(__name__)
 INDEX_HTML = Path(__file__).parent / "webui" / "index.html"
 # Shutdown warns if the graph has not stopped after this long, then keeps waiting.
 STOP_WARNING_S = 10.0
+# Request body limits (bytes). Every control body is a small JSON object. A manifest is the
+# largest: 10,000 symbols of 128 characters, each escaped as a 12-byte surrogate pair by
+# json.dumps (ensure_ascii), is 15.4 MB, so the limit leaves room for the rest of the body.
+MAX_BODY_BYTES = 64 * 1024
+MAX_MANIFEST_BODY_BYTES = 16 * 1024 * 1024
+# A request body must be complete within this long, or the request gets 408: a client that
+# stalls mid-body would otherwise hold graceful shutdown (uvicorn waits for it).
+BODY_READ_TIMEOUT_S = 30.0
+
+
+class _BodyLimit:
+    """ASGI middleware: answer 413 to a request whose body is over its limit, and 408 to one
+    whose body is not complete within ``BODY_READ_TIMEOUT_S``, both before any route runs.
+    The whole body is read up to the limit first, whether or not the route reads it, so a
+    chunked body over the limit never reaches a handler. A declared Content-Length over the
+    limit is refused without reading. A body within the limit reaches the app as one message.
+    While it is joined, a request holds at most about twice its limit."""
+
+    def __init__(self, app: Any, *, default: int, per_path: dict[str, int]) -> None:
+        self.app = app
+        self.default = default
+        self.per_path = per_path
+
+    @staticmethod
+    async def _respond(send: Any, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode()
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+            (b"connection", b"close"),
+        ]
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": body})
+
+    @staticmethod
+    async def _read(receive: Any, limit: int) -> list[Any] | None:
+        """The body as one message, or None when it is over ``limit``. Chunks are joined as
+        they arrive, so memory follows the bytes, not the number of ASGI messages. A client
+        that leaves mid-body yields its disconnect message alone."""
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return [message]  # http.disconnect: the app sees the client leave
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                return None  # checked before the copy: a rejected chunk is never appended
+            body += chunk
+            if not message.get("more_body", False):
+                return [{"type": "http.request", "body": bytes(body), "more_body": False}]
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        # The router answers a path with trailing slashes by redirecting to its route (307,
+        # body resent), so such a path takes that route's limit, as the router strips them.
+        limit = self.per_path.get(scope["path"].rstrip("/"), self.default)
+        for name, value in scope["headers"]:
+            if name == b"content-length" and value.isdigit() and int(value) > limit:
+                await self._respond(send, 413, "request body too large")
+                return
+
+        try:
+            with anyio.fail_after(BODY_READ_TIMEOUT_S):
+                messages = await self._read(receive, limit)
+        except TimeoutError:
+            await self._respond(send, 408, "request body not received in time")
+            return
+        if messages is None:
+            await self._respond(send, 413, "request body too large")
+            return
+
+        queued = collections.deque(messages)
+
+        async def replay() -> Any:
+            if queued:
+                return queued.popleft()
+            return await receive()
+
+        await self.app(scope, replay, send)
 
 
 def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:
@@ -54,6 +138,9 @@ def make_app(model: DashboardModel, ctx: Any, *, lifespan: Any = None) -> FastAP
     """The dashboard's FastAPI app over ``model`` and the control objects of ``ctx``.
     ``lifespan`` (used by ``serve``) owns the graph session."""
     app = FastAPI(title="Equity price, volatility and correlation", lifespan=lifespan)
+    app.add_middleware(
+        _BodyLimit, default=MAX_BODY_BYTES, per_path={"/manifest": MAX_MANIFEST_BODY_BYTES}
+    )
     # Handlers carry no return annotation: one would make FastAPI validate every snapshot
     # against a response model instead of plain JSON encoding.
 

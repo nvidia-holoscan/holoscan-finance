@@ -45,6 +45,29 @@ def test_generations_are_monotonic_and_idempotent():
     assert knob.version == 1 and d.used_sender_ports == {50001}
 
 
+def test_a_generation_far_ahead_of_the_clock_is_refused():
+    # Generations are wall-clock nanoseconds in every sender. One far in the future would make
+    # every later manifest a no-op ("not newer") until restart, so it is refused instead.
+    d = ReplayDirectory(Knob())
+    now = time.time_ns()
+    day = 24 * 3600 * 10**9
+    assert d.set_manifest(manifest(now + 3600 * 10**9)) == {"generation": now + 3600 * 10**9}
+    for far in (now + 2 * day, 2**63, 2**200):
+        with pytest.raises(ValueError, match="too far ahead"):
+            d.set_manifest(manifest(far, port=50002))
+    assert d.generation == now + 3600 * 10**9 and d.used_sender_ports == {50001}
+    # The refusal keeps later manifests working: the next real generation still lands.
+    later = max(d.generation + 1, time.time_ns())
+    assert d.set_manifest(manifest(later, port=50003)) == {"generation": later}
+
+
+def test_a_far_generation_is_refused_even_when_the_directory_is_empty():
+    d = ReplayDirectory(Knob())
+    with pytest.raises(ValueError, match="too far ahead"):
+        d.set_manifest(manifest(time.time_ns() + 7 * 24 * 3600 * 10**9))
+    assert d.current is None and d.used_sender_ports == set()
+
+
 def test_seek_takes_a_new_port_and_rejects_the_old_one():
     # A seek registers a new generation from a new sender port; packets still queued from
     # the old port are stale because the directory names the new one.
@@ -180,7 +203,7 @@ def test_replay_generations_wrap_within_unprivileged_ports():
 def test_replay_generations_stay_above_a_manual_generation():
     d = ReplayDirectory(Knob())
     base = {k: v for k, v in manifest().items() if k not in ("sender_port", "generation")}
-    huge = 2**62
+    huge = time.time_ns() + 3600 * 10**9  # an hour ahead: the furthest a sender gets to jump
     d.set_manifest({**base, "sender_port": 30000, "generation": huge})
     port = ReplayGenerations(d, base, first_port=30000)(1)
     assert port == 30001 and d.generation == huge + 1 and d.current.sender_port == port

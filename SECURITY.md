@@ -117,16 +117,23 @@ Key boundaries and interfaces:
     per session.
 - **Unauthenticated control plane.** The dashboard checks the shape and range of what it acts on:
   - manifests: 1-10,000 unique symbols of at most 128 characters, a sender port in 1-65535 not
-    used before, and a positive integer generation newer than the current one (with no upper
-    bound);
+    used before, and a positive integer generation newer than the current one and at most 24
+    hours ahead of the wall clock (every sender names generations with `time.time_ns()`);
   - feed control: a speed of 0-100, a rate of 1-200,000 and a seek below 86,400 seconds;
   - captures: 1-600 seconds;
   - full-day replays: a rate of 1-250,000 packets/s, checked before the paced sender is paused;
   - `/feedstatus`: only the sender's numeric report fields for the current generation are kept
     and shown in `/snapshot`.
 
-  Request bodies are not size-limited, there is no rate limiting, and callers are not
-  authenticated or authorized. There is no Host-header allowlist.
+  Request bodies are limited to 64 KiB (16 MiB for `/manifest`). A larger body, declared or
+  streamed in chunks, is answered with 413 before any route runs, and a body not complete within
+  30 s with 408. While its body is joined, a request holds at most about twice its limit. The
+  limit counts bytes. The validator does not bound a manifest's `profile` list or reject extra
+  fields, so a manifest with a very large profile is refused with 413 even when its symbols are
+  valid. There is no rate limiting, and
+  callers are not authenticated or authorized. There is no Host-header allowlist.
+  Deployments that expose the port beyond a trusted segment must add authentication in front of
+  it (a reverse proxy or a network policy).
 - **Files.** Prepared tapes (`manifest.json` and `events.bin`) are checked for format, record
   size and file size and are then memory-mapped. Packet captures are read whole into host memory,
   and the replay source uploads them whole into GPU memory. `holoscan_finance.tools.synth`
@@ -188,8 +195,9 @@ auxiliary build, deployment and tooling paths:
 
 3. **Unauthenticated control of a running pipeline.** Anyone who can reach the dashboard port can:
    - announce a manifest, which starts a new generation and resets the bars. A wrong sender port
-     makes every later packet stale, a very large generation number blocks every later manifest
-     until restart, and repeated manifests can use up the sender ports that replay loops need;
+     makes every later packet stale, a generation up to 24 hours ahead of the clock makes every
+     later manifest from a sender that names generations by the clock a no-op until then (a
+     larger one is refused), and repeated manifests can use up the sender ports that replay loops need;
    - change the feed controls that the external sender follows;
    - start or finish latency captures;
    - trigger a full-day `tcpreplay` burst through the privileged replay controller.
@@ -242,12 +250,19 @@ auxiliary build, deployment and tooling paths:
 7. **Supply-chain compromise of the images and tooling.**
    - `deploy/igx_thor/Dockerfile` builds DAQIRI from GitHub at a pinned commit (`DAQIRI_REPO` and
      `DAQIRI_REF` are overridable build arguments) and DPDK from the release tarball on
-     fast.dpdk.org, authenticated by TLS only, with no checksum. It installs rdma-core from the
-     DOCA apt repository, whose signing key is fetched over HTTPS without a fingerprint check;
-     apt packages are not version-pinned.
-   - Both Dockerfiles, `scripts/dev5.sh`, `scripts/dev5cpu.sh`, the CI `unit-sdk` job and
-     `[tool.holoscan.base-images]` name the Holoscan SDK image by tag (`v5.0.0-cuda13`), and a tag
-     can be re-pointed. For reproducible builds pass a digest through
+     fast.dpdk.org, which the build checks against a pinned SHA-256 (`DPDK_SHA256`; a different
+     `DPDK_VERSION` needs its own hash). DPDK publishes no checksum next to the tarball, so the
+     pinned value was computed from a download over TLS and protects against a later
+     substitution, not against a tarball that was already malicious when it was pinned. It
+     installs rdma-core from the DOCA apt repository: the build fails unless the downloaded
+     signing key carries the pinned fingerprint (`DOCA_GPG_FINGERPRINT`, the Mellanox Signing Key
+     v3). apt packages are not version-pinned: the DOCA repository is pinned by version, the
+     Ubuntu packages (compilers, meson, libraries) come from the base image's current archive.
+   - The CI workflow names the Holoscan SDK image by digest (`HOLOSCAN_IMAGE` in
+     `.github/workflows/ci.yml`, which the `unit-sdk` job runs on pull requests). Both
+     Dockerfiles, `scripts/dev5.sh`, `scripts/dev5cpu.sh`, the CI `gpu` job (it builds the root
+     Dockerfile) and `[tool.holoscan.base-images]` still name it by tag (`v5.0.0-cuda13`), and a
+     tag can be re-pointed. For reproducible builds pass a digest through
      `--build-arg BASE_IMAGE=...@sha256:...` (dev image) or
      `--build-arg HOLOSCAN_IMAGE=...@sha256:...` (receiver image).
    - `scripts/dev5.sh` and `dev5cpu.sh` install the pinned test tooling into the
@@ -373,5 +388,6 @@ in `requirements-cli.txt` (`holoscan-cli`) and `requirements-dev.txt`; their tra
 dependencies are not pinned. The CI `unit-pure` job also installs NumPy and pytest unpinned, and
 isolated wheel builds resolve their build backend (`setuptools>=77`) from PyPI. GitHub Actions
 are referenced by major-version tag and pre-commit hooks by release tag, both mutable references
-rather than commit SHAs. The receiver image pins DAQIRI by commit, DPDK by release and the DOCA
-repository by version (see threat 7 for what is not verified).
+rather than commit SHAs. The receiver image pins DAQIRI by commit, DPDK by release and checksum,
+and the DOCA repository by version and signing-key fingerprint (see threat 7 for what is not
+verified).

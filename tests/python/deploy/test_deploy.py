@@ -470,3 +470,20 @@ sys.exit(0)
     assert "--privileged" in fwupd and "saved-app:image" in fwupd
     assert fwupd[-3:] == ["systemctl", "start", "fwupd-refresh.timer"]
     assert mutations[7] == ["rm", "saved-app"]
+
+
+def test_receiver_dockerfile_verifies_what_it_downloads():
+    # The DPDK tarball is hashed before it is unpacked and the DOCA signing key is checked
+    # against its fingerprint before it becomes the apt keyring: neither is piped straight into
+    # tar or gpg (a TLS-only download let a compromised mirror inject code into the receiver).
+    text = (DEPLOY / "Dockerfile").read_text()
+    assert re.search(r"^ARG DPDK_SHA256=[0-9a-f]{64}$", text, re.M)
+    assert re.search(r"^ARG DOCA_GPG_FINGERPRINT=[0-9A-F]{40}$", text, re.M)
+    assert text.index("sha256sum --check --strict") < text.index("tar xJf")
+    # Exactly one primary key may be in the file: a bundle with an extra key is refused, because
+    # --dearmor would keep every key and apt trusts the whole keyring.
+    assert text.index("--show-keys") < text.index('wc -l)" = 1') < text.index("--dearmor")
+    # The pin is a literal 40-character fingerprint, compared as a fixed string over a whole
+    # line: a pattern such as ".*" must not pass.
+    assert "grep -Fx --" in text and "^[0-9A-F]{40}$" in text
+    assert not re.search(r"curl[^\n]*\|\s*(tar|gpg)\b", text)
