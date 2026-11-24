@@ -88,9 +88,10 @@ class _BodyLimit:
             message = await receive()
             if message["type"] != "http.request":
                 return [message]  # http.disconnect: the app sees the client leave
-            body += message.get("body", b"")
-            if len(body) > limit:
-                return None
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                return None  # checked before the copy: a rejected chunk is never appended
+            body += chunk
             if not message.get("more_body", False):
                 return [{"type": "http.request", "body": bytes(body), "more_body": False}]
 

@@ -343,12 +343,14 @@ class _Recorder:
     def __init__(self, *, reads_body: bool) -> None:
         self.reads_body = reads_body
         self.bodies: list[bytes] = []
+        self.types: list[str] = []  # every message type the app was given
 
     async def __call__(self, scope, receive, send):
         body = b""
         if self.reads_body:
             while True:
                 message = await receive()
+                self.types.append(message["type"])
                 if message["type"] != "http.request":
                     break
                 body += message.get("body", b"")
@@ -452,7 +454,8 @@ def test_a_partial_body_then_disconnect_gives_the_app_the_disconnect():
 
     sent = asyncio.run(run())
     assert sent[0]["status"] == 200
-    assert inner.bodies == [b""]  # the partial body is not handed over as if it were complete
+    # The app is given the disconnect and nothing else: the partial body is never handed over.
+    assert inner.types == ["http.disconnect"] and inner.bodies == [b""]
 
 
 def test_a_disconnect_during_the_body_is_passed_to_the_app():
@@ -473,7 +476,8 @@ def test_a_disconnect_during_the_body_is_passed_to_the_app():
         return sent
 
     sent = asyncio.run(run())
-    assert inner.bodies == [b""] and sent[0]["status"] == 200
+    assert inner.types == ["http.disconnect"] and inner.bodies == [b""]
+    assert sent[0]["status"] == 200
 
 
 def test_get_requests_and_small_bodies_are_unaffected_by_the_limit():
@@ -854,6 +858,13 @@ def test_serve_startup_failures_exit_run_failed(case, tmp_path):
     assert (r["rc"], r["stop_reason"], r["report"]) == (1, None, None)
     assert r["run_async_calls"] == (0 if case == "port_busy" else 1)
     assert r["status"]["graph_status"] == "starting" and r["sigterm_restored"]
+
+
+def test_one_chunk_over_the_limit_is_refused_without_reaching_the_app():
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+    sent = asyncio.run(_drive(app, [b"x" * 8193]))
+    assert sent[0]["status"] == 413 and inner.bodies == []
 
 
 def test_many_tiny_chunks_reach_the_app_as_one_bounded_body():
