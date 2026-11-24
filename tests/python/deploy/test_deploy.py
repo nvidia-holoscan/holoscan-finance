@@ -480,5 +480,7 @@ def test_receiver_dockerfile_verifies_what_it_downloads():
     assert re.search(r"^ARG DPDK_SHA256=[0-9a-f]{64}$", text, re.M)
     assert re.search(r"^ARG DOCA_GPG_FINGERPRINT=[0-9A-F]{40}$", text, re.M)
     assert text.index("sha256sum --check --strict") < text.index("tar xJf")
-    assert text.index("--show-keys") < text.index("--dearmor")
+    # Exactly one primary key may be in the file: a bundle with an extra key is refused, because
+    # --dearmor would keep every key and apt trusts the whole keyring.
+    assert text.index("--show-keys") < text.index('wc -l)" = 1') < text.index("--dearmor")
     assert not re.search(r"curl[^\n]*\|\s*(tar|gpg)\b", text)
