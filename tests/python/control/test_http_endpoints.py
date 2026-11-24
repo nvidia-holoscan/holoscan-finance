@@ -43,7 +43,6 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
-import holoscan_finance.dashboard.server as server_module  # noqa: E402
 from holoscan_finance.dashboard.server import (  # noqa: E402
     MAX_BODY_BYTES,
     MAX_MANIFEST_BODY_BYTES,
@@ -403,7 +402,7 @@ def test_a_body_within_the_limit_arrives_whole_in_several_messages():
 
 
 def test_a_body_that_stalls_is_answered_408_and_never_reaches_the_app(monkeypatch):
-    monkeypatch.setattr(server_module, "BODY_READ_TIMEOUT_S", 0.2)
+    monkeypatch.setattr("holoscan_finance.dashboard.server.BODY_READ_TIMEOUT_S", 0.2)
     inner = _Recorder(reads_body=True)
     app = _BodyLimit(inner, default=8192, per_path={})
 
@@ -417,6 +416,7 @@ def test_a_body_that_stalls_is_answered_408_and_never_reaches_the_app(monkeypatc
             if len(calls) == 1:
                 return pending
             await asyncio.Event().wait()  # the client never sends the rest
+            return None  # not reached: the wait above does not finish
 
         async def send(message):
             sent.append(message)
@@ -426,6 +426,33 @@ def test_a_body_that_stalls_is_answered_408_and_never_reaches_the_app(monkeypatc
 
     sent = asyncio.run(run())
     assert sent[0]["status"] == 408 and inner.bodies == []
+
+
+def test_a_partial_body_then_disconnect_gives_the_app_the_disconnect():
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+
+    async def run():
+        queued = collections.deque(
+            [
+                {"type": "http.request", "body": b"abc", "more_body": True},
+                {"type": "http.disconnect"},
+            ]
+        )
+        sent = []
+
+        async def receive():
+            return queued.popleft()
+
+        async def send(message):
+            sent.append(message)
+
+        await app({"type": "http", "method": "POST", "path": "/p", "headers": []}, receive, send)
+        return sent
+
+    sent = asyncio.run(run())
+    assert sent[0]["status"] == 200
+    assert inner.bodies == [b""]  # the partial body is not handed over as if it were complete
 
 
 def test_a_disconnect_during_the_body_is_passed_to_the_app():
