@@ -99,7 +99,9 @@ class _BodyLimit:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        limit = self.per_path.get(scope["path"], self.default)
+        # The router answers a path with trailing slashes by redirecting to its route (307,
+        # body resent), so such a path takes that route's limit, as the router strips them.
+        limit = self.per_path.get(scope["path"].rstrip("/"), self.default)
         for name, value in scope["headers"]:
             if name == b"content-length" and value.isdigit() and int(value) > limit:
                 await self._respond(send, 413, "request body too large")

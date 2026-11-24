@@ -269,6 +269,27 @@ def test_the_largest_valid_manifest_fits_the_body_limit():
     assert (r.status_code, r.json()) == (200, {"generation": 5})
 
 
+def test_a_trailing_slash_keeps_the_route_body_limit():
+    # The router redirects /manifest/ to /manifest (307, the client resends the body). A
+    # manifest over the default limit must get that redirect, not 413; the slash neither
+    # raises the manifest limit nor lends it to another route.
+    body = json.dumps({**manifest(5), "symbols": [f"S{i:06d}" for i in range(8_000)]})
+    assert MAX_BODY_BYTES < len(body) < MAX_MANIFEST_BODY_BYTES
+    headers = {"content-type": "application/json"}
+    ctx = make_ctx()
+    client = client_for(ctx)
+    for path in ("/manifest/", "/manifest//"):
+        r = client.post(path, content=body, headers=headers, follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"].endswith("/manifest"), path
+    assert ctx.directory.generation == 0  # a redirect reaches no handler
+    r = client.post("/manifest/", content=body, headers=headers)
+    assert (r.status_code, r.json()) == (200, {"generation": 5})
+    for path, limit in (("/manifest/", MAX_MANIFEST_BODY_BYTES), ("/feedrate/", MAX_BODY_BYTES)):
+        over = json.dumps({"pad": "x" * limit})
+        r = client.post(path, content=over, headers=headers, follow_redirects=False)
+        assert (r.status_code, r.json()) == (413, {"detail": "request body too large"}), path
+
+
 def test_a_chunked_oversized_body_never_reaches_a_route_that_ignores_it(monkeypatch):
     # /capture/finish declares no body, so no route reads it: the limit must still hold.
     calls = []
