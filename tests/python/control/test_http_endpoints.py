@@ -417,8 +417,8 @@ def test_a_body_that_stalls_is_answered_408_and_never_reaches_the_app(monkeypatc
             calls.append(1)
             if len(calls) == 1:
                 return pending
-            await asyncio.Event().wait()  # the client never sends the rest
-            return None  # not reached: the wait above does not finish
+            # The client never sends the rest; this future never completes.
+            return await asyncio.get_running_loop().create_future()
 
         async def send(message):
             sent.append(message)
