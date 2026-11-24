@@ -4,7 +4,7 @@
 
 ``make_app`` serves the dashboard endpoints, bodies and 422 mapping (``ValueError``,
 ``TypeError``, ``KeyError``, ``OverflowError``) and request body limits (413 over 64 KiB, or
-2 MiB for ``/manifest``), including ``GET /plan`` and
+16 MiB for ``/manifest``), including ``GET /plan`` and
 ``GET /healthz`` (200 once the ingest front end receives, else 503: a sender waits for
 it). Handlers are ``async def`` (no thread-pool hop per request: measured
 sub-ms tails under load); only the blocking full-day start and the GIL fault injection go
@@ -20,6 +20,7 @@ inside ``serve``.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import ctypes
 import logging
@@ -42,16 +43,19 @@ logger = logging.getLogger(__name__)
 INDEX_HTML = Path(__file__).parent / "webui" / "index.html"
 # Shutdown warns if the graph has not stopped after this long, then keeps waiting.
 STOP_WARNING_S = 10.0
-# Request body limits (bytes). Every control body is a small JSON object; only a manifest
-# carries a list: at most 10,000 symbols of 128 characters is about 1.3 MB of JSON.
+# Request body limits (bytes). Every control body is a small JSON object. A manifest is the
+# largest: 10,000 symbols of 128 characters, each escaped as a 12-byte surrogate pair by
+# json.dumps (ensure_ascii), is 15.4 MB, so the limit leaves room for the rest of the body.
 MAX_BODY_BYTES = 64 * 1024
-MAX_MANIFEST_BODY_BYTES = 2 * 1024 * 1024
+MAX_MANIFEST_BODY_BYTES = 16 * 1024 * 1024
 
 
 class _BodyLimit:
-    """ASGI middleware: answer 413 to a request body over its limit, before any handler
-    or JSON parser sees it. A declared ``Content-Length`` is refused up front; a chunked
-    body (no declared length) is counted as it arrives and cut off at the limit."""
+    """ASGI middleware: answer 413 to a request whose body is over its limit, before any
+    route runs. The whole body is read up to the limit first, whether or not the route reads
+    it, so a chunked body over the limit never reaches a handler. A declared Content-Length
+    over the limit is refused without reading. A body within the limit is replayed to the
+    app unchanged. Memory per request is bounded by the limit."""
 
     def __init__(self, app: Any, *, default: int, per_path: dict[str, int]) -> None:
         self.app = app
@@ -75,32 +79,32 @@ class _BodyLimit:
             return
         limit = self.per_path.get(scope["path"], self.default)
         for name, value in scope["headers"]:
-            if name == b"content-length":
-                if value.isdigit() and int(value) > limit:
-                    await self._too_large(send)
-                    return
-                break
-        received = 0
-        refused = False
+            if name == b"content-length" and value.isdigit() and int(value) > limit:
+                await self._too_large(send)
+                return
 
-        async def bounded_receive() -> Any:
-            nonlocal received, refused
+        messages: list[Any] = []
+        total = 0
+        while True:
             message = await receive()
-            if message["type"] == "http.request" and not refused:
-                received += len(message.get("body", b""))
-                if received > limit:
-                    refused = True
-                    await self._too_large(send)
-                    # The handler sees a client that went away; whatever it then sends is
-                    # dropped, the 413 is already the response.
-                    return {"type": "http.disconnect"}
-            return message
+            messages.append(message)
+            if message["type"] != "http.request":
+                break  # http.disconnect: replayed, so the app sees the client leave
+            total += len(message.get("body", b""))
+            if total > limit:
+                await self._too_large(send)
+                return
+            if not message.get("more_body", False):
+                break
 
-        async def guarded_send(message: Any) -> None:
-            if not refused:
-                await send(message)
+        queued = collections.deque(messages)
 
-        await self.app(scope, bounded_receive, guarded_send)
+        async def replay() -> Any:
+            if queued:
+                return queued.popleft()
+            return await receive()
+
+        await self.app(scope, replay, send)
 
 
 def _mutate(fn: Callable[[Any], Any], payload: Any) -> Any:

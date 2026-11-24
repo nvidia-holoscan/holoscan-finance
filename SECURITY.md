@@ -125,11 +125,12 @@ Key boundaries and interfaces:
   - `/feedstatus`: only the sender's numeric report fields for the current generation are kept
     and shown in `/snapshot`.
 
-  Request bodies are limited to 64 KiB (2 MiB for `/manifest`, whose largest valid body is about
-  1.3 MB); a larger one, declared or streamed in chunks, is answered with 413 before it is
-  parsed. There is no rate limiting, and callers are not authenticated or authorized. There is no
-  Host-header allowlist. Deployments that expose the port beyond a trusted segment must add
-  authentication in front of it (a reverse proxy or a network policy).
+  Request bodies are limited to 64 KiB (16 MiB for `/manifest`, whose largest valid body is about
+  15.4 MB with non-ASCII symbols). A larger body, declared or streamed in chunks, is answered with
+  413 before any route runs; each request buffers at most its limit. There is no rate limiting,
+  and callers are not authenticated or authorized. There is no Host-header allowlist.
+  Deployments that expose the port beyond a trusted segment must add authentication in front of
+  it (a reverse proxy or a network policy).
 - **Files.** Prepared tapes (`manifest.json` and `events.bin`) are checked for format, record
   size and file size and are then memory-mapped. Packet captures are read whole into host memory,
   and the replay source uploads them whole into GPU memory. `holoscan_finance.tools.synth`

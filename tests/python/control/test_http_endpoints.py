@@ -9,6 +9,7 @@ The context is the ``EquityContext`` attribute set over the real control objects
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import os
 import subprocess
@@ -45,6 +46,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from holoscan_finance.dashboard.server import (  # noqa: E402
     MAX_BODY_BYTES,
     MAX_MANIFEST_BODY_BYTES,
+    _BodyLimit,
     make_app,
 )
 
@@ -256,14 +258,43 @@ def test_a_manifest_generation_far_ahead_of_the_clock_is_a_422_that_blocks_nothi
 
 
 def test_the_largest_valid_manifest_fits_the_body_limit():
-    # 10,000 unique symbols of 128 characters is what validate_manifest accepts at most.
-    symbols = [f"{i:05d}".ljust(128, "X") for i in range(10_000)]
+    # validate_manifest accepts 10,000 unique symbols of 128 characters (code points). The
+    # worst case is non-ASCII: json.dumps escapes each astral character as a 12-byte pair.
+    symbols = [f"{i:05d}".ljust(128, "\U0001f600") for i in range(10_000)]
     body = json.dumps({**manifest(5), "symbols": symbols})
-    assert MAX_MANIFEST_BODY_BYTES // 2 < len(body) < MAX_MANIFEST_BODY_BYTES
+    assert len(body) > 14 * 1024 * 1024 and len(body) < MAX_MANIFEST_BODY_BYTES
     r = client_for(make_ctx()).post(
         "/manifest", content=body, headers={"content-type": "application/json"}
     )
     assert (r.status_code, r.json()) == (200, {"generation": 5})
+
+
+def test_a_chunked_oversized_body_never_reaches_a_route_that_ignores_it(monkeypatch):
+    # /capture/finish declares no body, so no route reads it: the limit must still hold.
+    calls = []
+    monkeypatch.setattr(DashboardModel, "finish_capture", lambda self: calls.append(1) or {})
+    client = client_for(make_ctx())
+
+    def chunks():
+        for _ in range(MAX_BODY_BYTES // 4096 + 2):
+            yield b" " * 4096
+
+    r = client.post("/capture/finish", content=chunks())
+    assert (r.status_code, r.json()) == (413, {"detail": "request body too large"})
+    assert calls == []
+
+
+def test_a_chunked_body_within_the_limit_still_reaches_its_route(monkeypatch):
+    calls = []
+    monkeypatch.setattr(DashboardModel, "finish_capture", lambda self: calls.append(1) or {})
+    client = client_for(make_ctx())
+
+    def chunks():
+        for _ in range(3):
+            yield b" " * 1000
+
+    r = client.post("/capture/finish", content=chunks())
+    assert r.status_code != 413 and calls == [1]
 
 
 def test_an_oversized_body_is_refused_before_it_is_parsed():
@@ -304,6 +335,91 @@ def test_a_body_without_content_length_is_limited_as_it_streams():
     r = client.post("/manifest", content=chunks(), headers={"content-type": "application/json"})
     assert (r.status_code, r.json()) == (413, {"detail": "request body too large"})
     assert ctx.directory.generation == 0
+
+
+class _Recorder:
+    """A stand-in route: reads its whole body (if it reads one) and records what it got."""
+
+    def __init__(self, *, reads_body: bool) -> None:
+        self.reads_body = reads_body
+        self.bodies: list[bytes] = []
+
+    async def __call__(self, scope, receive, send):
+        body = b""
+        if self.reads_body:
+            while True:
+                message = await receive()
+                if message["type"] != "http.request":
+                    break
+                body += message.get("body", b"")
+                if not message.get("more_body", False):
+                    break
+        self.bodies.append(body)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+
+async def _drive(app, chunks, *, path="/probe"):
+    """Send ``chunks`` as separate http.request messages through ``app``; return what it sent."""
+    queued = collections.deque(
+        {"type": "http.request", "body": c, "more_body": i < len(chunks) - 1}
+        for i, c in enumerate(chunks)
+    )
+    sent = []
+
+    async def receive():
+        return queued.popleft() if queued else {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": path, "headers": []}
+    await app(scope, receive, send)
+    return sent
+
+
+def test_the_limit_counts_every_body_message_not_each_one():
+    # Three 3 KB messages: each is under the 8 KB limit, together they are 9 KB.
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+    sent = asyncio.run(_drive(app, [b"a" * 3000, b"b" * 3000, b"c" * 3000]))
+    assert sent[0]["status"] == 413 and inner.bodies == []
+
+
+@pytest.mark.parametrize("reads_body", [True, False])
+def test_a_body_over_the_limit_never_reaches_the_app(reads_body):
+    inner = _Recorder(reads_body=reads_body)
+    app = _BodyLimit(inner, default=8192, per_path={})
+    sent = asyncio.run(_drive(app, [b"a" * 5000, b"b" * 5000]))
+    assert sent[0]["status"] == 413 and inner.bodies == []
+
+
+def test_a_body_within_the_limit_arrives_whole_in_several_messages():
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+    sent = asyncio.run(_drive(app, [b"x" * 1000, b"y" * 1000, b"z" * 1000]))
+    assert sent[0]["status"] == 200 and inner.bodies == [b"x" * 1000 + b"y" * 1000 + b"z" * 1000]
+
+
+def test_a_disconnect_during_the_body_is_passed_to_the_app():
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+
+    async def run():
+        queued = collections.deque([{"type": "http.disconnect"}])
+        sent = []
+
+        async def receive():
+            return queued.popleft()
+
+        async def send(message):
+            sent.append(message)
+
+        await app({"type": "http", "method": "POST", "path": "/p", "headers": []}, receive, send)
+        return sent
+
+    sent = asyncio.run(run())
+    assert inner.bodies == [b""] and sent[0]["status"] == 200
 
 
 def test_get_requests_and_small_bodies_are_unaffected_by_the_limit():
