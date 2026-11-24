@@ -125,10 +125,12 @@ Key boundaries and interfaces:
   - `/feedstatus`: only the sender's numeric report fields for the current generation are kept
     and shown in `/snapshot`.
 
-  Request bodies are limited to 64 KiB (16 MiB for `/manifest`, whose largest valid body is about
-  15.4 MB with non-ASCII symbols). A larger body, declared or streamed in chunks, is answered with
-  413 before any route runs; each request buffers at most its limit. There is no rate limiting,
-  and callers are not authenticated or authorized. There is no Host-header allowlist.
+  Request bodies are limited to 64 KiB (16 MiB for `/manifest`). A larger body, declared or
+  streamed in chunks, is answered with 413 before any route runs, and a body not complete within
+  30 s with 408; each request buffers at most its limit. The limit counts bytes. The validator does
+  not bound a manifest's `profile` list or reject extra fields, so a manifest with a very large
+  profile is refused with 413 even when its symbols are valid. There is no rate limiting, and
+  callers are not authenticated or authorized. There is no Host-header allowlist.
   Deployments that expose the port beyond a trusted segment must add authentication in front of
   it (a reverse proxy or a network policy).
 - **Files.** Prepared tapes (`manifest.json` and `events.bin`) are checked for format, record

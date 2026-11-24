@@ -43,6 +43,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
+import holoscan_finance.dashboard.server as server_module  # noqa: E402
 from holoscan_finance.dashboard.server import (  # noqa: E402
     MAX_BODY_BYTES,
     MAX_MANIFEST_BODY_BYTES,
@@ -399,6 +400,32 @@ def test_a_body_within_the_limit_arrives_whole_in_several_messages():
     app = _BodyLimit(inner, default=8192, per_path={})
     sent = asyncio.run(_drive(app, [b"x" * 1000, b"y" * 1000, b"z" * 1000]))
     assert sent[0]["status"] == 200 and inner.bodies == [b"x" * 1000 + b"y" * 1000 + b"z" * 1000]
+
+
+def test_a_body_that_stalls_is_answered_408_and_never_reaches_the_app(monkeypatch):
+    monkeypatch.setattr(server_module, "BODY_READ_TIMEOUT_S", 0.2)
+    inner = _Recorder(reads_body=True)
+    app = _BodyLimit(inner, default=8192, per_path={})
+
+    async def run():
+        pending = {"type": "http.request", "body": b"x" * 10, "more_body": True}
+        calls = []
+        sent = []
+
+        async def receive():
+            calls.append(1)
+            if len(calls) == 1:
+                return pending
+            await asyncio.Event().wait()  # the client never sends the rest
+
+        async def send(message):
+            sent.append(message)
+
+        await app({"type": "http", "method": "POST", "path": "/p", "headers": []}, receive, send)
+        return sent
+
+    sent = asyncio.run(run())
+    assert sent[0]["status"] == 408 and inner.bodies == []
 
 
 def test_a_disconnect_during_the_body_is_passed_to_the_app():

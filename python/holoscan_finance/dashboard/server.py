@@ -23,6 +23,7 @@ import asyncio
 import collections
 import contextlib
 import ctypes
+import json
 import logging
 import os
 import signal
@@ -48,14 +49,18 @@ STOP_WARNING_S = 10.0
 # json.dumps (ensure_ascii), is 15.4 MB, so the limit leaves room for the rest of the body.
 MAX_BODY_BYTES = 64 * 1024
 MAX_MANIFEST_BODY_BYTES = 16 * 1024 * 1024
+# A request body must be complete within this long, or the request gets 408: a client that
+# stalls mid-body would otherwise hold graceful shutdown (uvicorn waits for it).
+BODY_READ_TIMEOUT_S = 30.0
 
 
 class _BodyLimit:
-    """ASGI middleware: answer 413 to a request whose body is over its limit, before any
-    route runs. The whole body is read up to the limit first, whether or not the route reads
-    it, so a chunked body over the limit never reaches a handler. A declared Content-Length
-    over the limit is refused without reading. A body within the limit is replayed to the
-    app unchanged. Memory per request is bounded by the limit."""
+    """ASGI middleware: answer 413 to a request whose body is over its limit, and 408 to one
+    whose body is not complete within ``BODY_READ_TIMEOUT_S``, both before any route runs.
+    The whole body is read up to the limit first, whether or not the route reads it, so a
+    chunked body over the limit never reaches a handler. A declared Content-Length over the
+    limit is refused without reading. A body within the limit is replayed to the app unchanged.
+    Memory per request is bounded by the limit."""
 
     def __init__(self, app: Any, *, default: int, per_path: dict[str, int]) -> None:
         self.app = app
@@ -63,15 +68,31 @@ class _BodyLimit:
         self.per_path = per_path
 
     @staticmethod
-    async def _too_large(send: Any) -> None:
-        body = b'{"detail":"request body too large"}'
+    async def _respond(send: Any, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode()
         headers = [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode()),
             (b"connection", b"close"),
         ]
-        await send({"type": "http.response.start", "status": 413, "headers": headers})
+        await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body})
+
+    @staticmethod
+    async def _read(receive: Any, limit: int) -> list[Any] | None:
+        """Every message of the body, or None when the body is over ``limit``."""
+        messages: list[Any] = []
+        total = 0
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] != "http.request":
+                return messages  # http.disconnect: replayed, so the app sees the client leave
+            total += len(message.get("body", b""))
+            if total > limit:
+                return None
+            if not message.get("more_body", False):
+                return messages
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -80,22 +101,18 @@ class _BodyLimit:
         limit = self.per_path.get(scope["path"], self.default)
         for name, value in scope["headers"]:
             if name == b"content-length" and value.isdigit() and int(value) > limit:
-                await self._too_large(send)
+                await self._respond(send, 413, "request body too large")
                 return
 
-        messages: list[Any] = []
-        total = 0
-        while True:
-            message = await receive()
-            messages.append(message)
-            if message["type"] != "http.request":
-                break  # http.disconnect: replayed, so the app sees the client leave
-            total += len(message.get("body", b""))
-            if total > limit:
-                await self._too_large(send)
-                return
-            if not message.get("more_body", False):
-                break
+        try:
+            with anyio.fail_after(BODY_READ_TIMEOUT_S):
+                messages = await self._read(receive, limit)
+        except TimeoutError:
+            await self._respond(send, 408, "request body not received in time")
+            return
+        if messages is None:
+            await self._respond(send, 413, "request body too large")
+            return
 
         queued = collections.deque(messages)
 
